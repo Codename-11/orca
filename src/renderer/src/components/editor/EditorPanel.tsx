@@ -26,6 +26,7 @@ import type { MarkdownViewMode, OpenFile } from '@/store/slices/editor'
 import EditorViewToggle, { CSV_VIEW_MODE_METADATA } from './EditorViewToggle'
 import { EditorContent } from './EditorContent'
 import { scrollTopCache, cursorPositionCache, diffViewStateCache } from '@/lib/scroll-cache'
+import { findLeakedDiffModelUris } from './editor-model-leak'
 import type { GitDiffResult } from '../../../../shared/types'
 import {
   getOpenFilesForExternalFileChange,
@@ -252,11 +253,35 @@ function EditorPanelInner({
         // explicit switch makes that ownership boundary visible so future mode
         // additions do not silently fall through without considering cleanup.
         switch (prevFile.mode) {
-          case 'edit':
+          case 'edit': {
             // Why: the edit model URI is constructed via monaco.Uri.parse(filePath)
             // to match what @monaco-editor/react creates internally when the `path`
             // prop is provided. This convention is version-dependent.
             monaco.editor.getModel(monaco.Uri.parse(prevFile.filePath))?.dispose()
+            // Why: edit-mode tabs that ever entered Changes view mode mounted a
+            // DiffViewer with `keepCurrent*Model`, which leaves both diff models
+            // in `monaco.editor.getModels()` after this tab closes. Disposing
+            // the plain edit model above does not touch them. Iterate the model
+            // registry and dispose any that match this tab's id (covers both
+            // single-pane and split-pane URI shapes plus the rotated-original
+            // hash). `closeFile` clears `editorViewMode[fileId]` synchronously
+            // so we cannot gate on it; doing the prefix scan unconditionally
+            // is a no-op for tabs that never entered Changes mode.
+            const allModels = monaco.editor.getModels()
+            const leakedUris = new Set(
+              findLeakedDiffModelUris(
+                allModels.map((m) => m.uri.toString()),
+                prevId,
+                'changes'
+              )
+            )
+            for (const model of allModels) {
+              if (leakedUris.has(model.uri.toString())) {
+                model.dispose()
+              }
+            }
+            diffViewStateCache.delete(prevId)
+            deleteCacheEntriesByPrefix(diffViewStateCache, `${prevId}::`)
             scrollTopCache.delete(prevFile.filePath)
             deleteCacheEntriesByPrefix(scrollTopCache, `${prevFile.filePath}::`)
             // Why: markdown edit tabs keep separate source/rich scroll caches,
@@ -272,6 +297,7 @@ function EditorPanelInner({
             cursorPositionCache.delete(prevFile.filePath)
             deleteCacheEntriesByPrefix(cursorPositionCache, `${prevFile.filePath}::`)
             break
+          }
           case 'markdown-preview':
             // Why: preview tabs have no retained Monaco models, but they do
             // own pane-scoped preview scroll cache entries that should be
@@ -279,11 +305,25 @@ function EditorPanelInner({
             scrollTopCache.delete(`${prevFile.id}:preview`)
             deleteCacheEntriesByPrefix(scrollTopCache, `${prevFile.id}::`)
             break
-          case 'diff':
+          case 'diff': {
             // Why: kept diff models are keyed by tab id, not file path, because the
             // same file can appear in multiple diff tabs with different contents.
-            monaco.editor.getModel(monaco.Uri.parse(`diff:original:${prevId}`))?.dispose()
-            monaco.editor.getModel(monaco.Uri.parse(`diff:modified:${prevId}`))?.dispose()
+            // Split-pane layouts append `::${viewStateScopeId}` to the URI, so a
+            // prefix scan over the model registry catches the secondary-pane
+            // models that an exact-URI lookup would miss.
+            const allModels = monaco.editor.getModels()
+            const leakedUris = new Set(
+              findLeakedDiffModelUris(
+                allModels.map((m) => m.uri.toString()),
+                prevId,
+                'diff'
+              )
+            )
+            for (const model of allModels) {
+              if (leakedUris.has(model.uri.toString())) {
+                model.dispose()
+              }
+            }
             diffViewStateCache.delete(prevId)
             deleteCacheEntriesByPrefix(diffViewStateCache, `${prevId}::`)
             // Why: single-file markdown diffs now have a rendered preview mode
@@ -293,6 +333,7 @@ function EditorPanelInner({
             scrollTopCache.delete(`${prevId}:preview`)
             deleteCacheEntriesByPrefix(scrollTopCache, `${prevId}::`)
             break
+          }
           case 'conflict-review':
             break
         }
@@ -395,11 +436,12 @@ function EditorPanelInner({
           : null
       const connectionId = getConnectionId(file.worktreeId) ?? undefined
       // Why: Changes view mode runs on top of an edit-mode tab and asks git
-      // for an unstaged diff against HEAD for that file. Use the 'unstaged'
-      // diff-source key so multiple Changes tabs across split panes share one
-      // IPC round-trip with any open unstaged diff-tab for the same path.
-      // Compute this once and reuse it for both the dedup key and the IPC
-      // branch selection so the two can never drift apart.
+      // for an unstaged diff against HEAD. Two split-pane Changes panels for
+      // the same file share a single IPC round-trip; cross-mode sharing with
+      // a separate unstaged diff-tab is intentionally not done because the
+      // 'head' vs 'default' compare-against-head segment of the key differs.
+      // Compute the source/compare values once and reuse them for both the
+      // dedup key and the IPC branch selection so the two can never drift apart.
       const effectiveDiffSource: typeof file.diffSource =
         file.mode === 'edit' ? 'unstaged' : file.diffSource
       const compareAgainstHead = file.mode === 'edit'
