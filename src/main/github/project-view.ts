@@ -842,7 +842,7 @@ async function fetchAllItems(args: {
     })
     probePromise = (async () => {
       try {
-        return await fetchItemsPageWithRaw({
+        const result = await fetchItemsPageWithRaw({
           owner: args.owner,
           ownerType: args.ownerType,
           projectNumber: args.projectNumber,
@@ -851,6 +851,17 @@ async function fetchAllItems(args: {
           after: null,
           includeParent: true
         })
+        // Why: flip parentFieldRetried BEFORE resolving the probe so siblings
+        // awaiting parentFieldProbeInFlight observe the updated flag. Doing
+        // this in the outer block (after `await probePromise`) leaves a gap
+        // between resolveProbe()/clearing parentFieldProbeInFlight and the
+        // flag flip — sibling callers wake up in that gap, see
+        // parentFieldRetried=false and parentFieldProbeInFlight=null, and
+        // issue their own duplicate with-parent probe.
+        if (!result.ok && errorsIndicateParentField(result.rawErrors, result.stderr)) {
+          parentFieldRetried = true
+        }
+        return result
       } finally {
         resolveProbe()
         parentFieldProbeInFlight = null
