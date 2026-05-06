@@ -69,6 +69,9 @@ const COMMAND_TO_FEATURE_GROUP: Record<string, CliFeatureGroup> = {
   screenshot: 'browser_observation',
   'full-screenshot': 'browser_observation',
   eval: 'browser_observation',
+  exec: 'browser_observation',
+  console: 'browser_observation',
+  network: 'browser_observation',
   wait: 'browser_observation',
   pdf: 'browser_observation',
   get: 'browser_observation',
@@ -101,6 +104,8 @@ const COMMAND_TO_FEATURE_GROUP: Record<string, CliFeatureGroup> = {
   'mouse wheel': 'browser_interaction',
 
   // browser_config: viewport/device/cookies/storage/intercept/capture
+  viewport: 'browser_config',
+  geolocation: 'browser_config',
   'set device': 'browser_config',
   'set offline': 'browser_config',
   'set headers': 'browser_config',

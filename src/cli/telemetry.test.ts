@@ -17,6 +17,19 @@ import {
   recordCliFeatureUsed,
   resolveFeatureGroup
 } from './telemetry'
+import { CORE_HANDLERS } from './handlers/core'
+import { REPO_HANDLERS } from './handlers/repo'
+import { WORKTREE_HANDLERS } from './handlers/worktree'
+import { TERMINAL_HANDLERS } from './handlers/terminal'
+import { BROWSER_NAV_HANDLERS } from './handlers/browser-nav'
+import { BROWSER_INTERACT_HANDLERS } from './handlers/browser-interact'
+import { BROWSER_TAB_HANDLERS } from './handlers/browser-tab'
+import { BROWSER_PROFILE_HANDLERS } from './handlers/browser-profile'
+import { BROWSER_COOKIE_HANDLERS } from './handlers/browser-cookie'
+import { BROWSER_CAPTURE_HANDLERS } from './handlers/browser-capture'
+import { BROWSER_ENV_HANDLERS } from './handlers/browser-env'
+import { BROWSER_STORAGE_HANDLERS } from './handlers/browser-storage'
+import { ORCHESTRATION_HANDLERS } from './handlers/orchestration'
 import type { RuntimeMetadata } from '../shared/runtime-bootstrap'
 import type * as MetadataModule from './runtime/metadata'
 
@@ -135,7 +148,11 @@ describe('recordCliFeatureUsed', () => {
       const params = c.body.params as { props: { feature_group: string } }
       return params.props.feature_group
     })
-    expect(groups.sort()).toEqual(['browser_interaction', 'browser_navigation', 'browser_observation'])
+    expect(groups.sort()).toEqual([
+      'browser_interaction',
+      'browser_navigation',
+      'browser_observation'
+    ])
   })
 
   it('records exit_status: failure when the first call fails', async () => {
@@ -177,5 +194,38 @@ describe('recordCliFeatureUsed', () => {
   it('returns synchronously without awaiting the send', () => {
     const result = recordCliFeatureUsed(['snapshot'], 'success')
     expect(result).toBeUndefined()
+  })
+})
+
+// Guards the hand-maintained COMMAND_TO_FEATURE_GROUP map against drift
+// from dispatch.ts's handler registration — a new CLI command added to
+// any handler group without a corresponding entry would silently emit no
+// telemetry, starving the adoption signal.
+describe('COMMAND_TO_FEATURE_GROUP completeness', () => {
+  it('every dispatch handler key resolves to a feature group', () => {
+    const groups = [
+      CORE_HANDLERS,
+      REPO_HANDLERS,
+      WORKTREE_HANDLERS,
+      TERMINAL_HANDLERS,
+      BROWSER_NAV_HANDLERS,
+      BROWSER_INTERACT_HANDLERS,
+      BROWSER_TAB_HANDLERS,
+      BROWSER_PROFILE_HANDLERS,
+      BROWSER_COOKIE_HANDLERS,
+      BROWSER_CAPTURE_HANDLERS,
+      BROWSER_ENV_HANDLERS,
+      BROWSER_STORAGE_HANDLERS,
+      ORCHESTRATION_HANDLERS
+    ]
+    const unmapped: string[] = []
+    for (const group of groups) {
+      for (const key of Object.keys(group)) {
+        if (resolveFeatureGroup(key.split(' ')) === null) {
+          unmapped.push(key)
+        }
+      }
+    }
+    expect(unmapped).toEqual([])
   })
 })

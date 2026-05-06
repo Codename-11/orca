@@ -18,24 +18,16 @@ import { z } from 'zod'
 import { defineMethod, type RpcMethod } from '../core'
 import { track } from '../../../telemetry/client'
 import {
-  cliFeatureGroupSchema,
+  cliFeatureUsedSchema,
   isCliEventName,
   type CliEventName,
   type EventProps
 } from '../../../../shared/telemetry-events'
 
-// Per-CLI-event property schemas. Kept here (not in `telemetry-events.ts`)
-// because they describe what the RPC method accepts on the wire — the
-// authoritative event-shape validator inside `track()` re-checks these
-// against `eventSchemas[name]`. This is the boundary type-narrow; that is
-// the wire-contract enforcement.
-const CliFeatureUsedProps = z
-  .object({
-    feature_group: cliFeatureGroupSchema,
-    exit_status: z.enum(['success', 'failure'])
-  })
-  .strict()
-
+// Per-CLI-event property narrowing happens via the shared `eventSchemas`
+// entries (re-exported here as `cliFeatureUsedSchema`). One shape
+// definition; no drift between this boundary check and the central
+// validator inside `track()`.
 const CaptureCliEventParams = z.object({
   name: z
     .unknown()
@@ -65,7 +57,7 @@ export const TELEMETRY_METHODS: RpcMethod[] = [
       // because `name` is the discriminated `CliEventName` union.
       switch (name) {
         case 'cli_feature_used': {
-          const parsed = CliFeatureUsedProps.safeParse(params.props)
+          const parsed = cliFeatureUsedSchema.safeParse(params.props)
           if (!parsed.success) {
             return {}
           }
@@ -75,6 +67,12 @@ export const TELEMETRY_METHODS: RpcMethod[] = [
           // shape, hand it to the central validator."
           track(name, parsed.data satisfies EventProps<'cli_feature_used'>)
           return {}
+        }
+        default: {
+          // Force a `tsc` error if a new `CliEventName` lands without a
+          // matching `case`. Without this, the switch would silently fall
+          // through and drop the new event.
+          return name satisfies never
         }
       }
     }

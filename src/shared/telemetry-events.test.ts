@@ -268,6 +268,17 @@ describe('isCliEventName', () => {
     expect(isCliEventName('made_up_event')).toBe(false)
     expect(isCliEventName('')).toBe(false)
   })
+
+  // Pin the hand-maintained CLI_EVENT_NAMES list to the `cli_*` prefix
+  // convention. A future `cli_*` event added to `eventSchemas` but missing
+  // here would silently fail the runtime RPC narrow.
+  it('CLI_EVENT_NAMES matches cli_* prefixed keys in eventSchemas', () => {
+    const expected = Object.keys(eventSchemas)
+      .filter((name) => name.startsWith('cli_'))
+      .sort()
+    const actual = [...CLI_EVENT_NAMES].sort()
+    expect(actual).toEqual(expected)
+  })
 })
 
 describe('exported enum schemas', () => {

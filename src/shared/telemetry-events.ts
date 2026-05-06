@@ -211,7 +211,7 @@ const telemetryOptedOutSchema = z.object({ via: optInViaSchema }).strict()
 // First-write-wins per `(feature_group, CLI process)`: emitted on the first
 // call to a group, carrying that call's `exit_status`; subsequent calls in
 // the same process never re-emit. See docs/cli-telemetry-design.md §Events.
-const cliFeatureUsedSchema = z
+export const cliFeatureUsedSchema = z
   .object({
     feature_group: cliFeatureGroupSchema,
     exit_status: z.enum(['success', 'failure'])
