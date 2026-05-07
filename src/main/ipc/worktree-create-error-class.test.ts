@@ -1,7 +1,8 @@
-// Pin the classifier's substring set: widening it later requires explicit
-// review per the schema-evolution doctrine in telemetry-events.ts. These
-// cases fixture the actual throw sites in worktree-remote.ts so a refactor
-// that renames the user-facing error strings shows up here as a regression.
+// Spot-check the classifier against the load-bearing throws in
+// worktree-remote.ts. Not exhaustive — substring widening still requires
+// explicit review per the schema-evolution doctrine in
+// telemetry-events.ts. Add fixtures here when adding new buckets or when
+// a renamed throw site needs regression coverage.
 
 import { describe, expect, it } from 'vitest'
 import { classifyWorkspaceCreateError } from './worktree-create-error-class'
@@ -24,6 +25,25 @@ describe('classifyWorkspaceCreateError', () => {
       'Could not find an available worktree name for "feature". Pick a different worktree name.'
     )
     expect(classifyWorkspaceCreateError(err)).toBe('path_collision')
+  })
+
+  it('buckets a branch-already-exists-locally throw as path_collision', () => {
+    const err = new Error(
+      'Branch "feature/foo" already exists locally. Pick a different worktree name.'
+    )
+    expect(classifyWorkspaceCreateError(err)).toBe('path_collision')
+  })
+
+  it('buckets an existing-PR collision throw as path_collision', () => {
+    const err = new Error(
+      'Branch "feature/foo" already has PR #42. Pick a different worktree name.'
+    )
+    expect(classifyWorkspaceCreateError(err)).toBe('path_collision')
+  })
+
+  it('buckets the post-create listing-miss throw as git_failed', () => {
+    const err = new Error('Worktree created but not found in listing')
+    expect(classifyWorkspaceCreateError(err)).toBe('git_failed')
   })
 
   it('buckets EACCES errors as permission_denied', () => {

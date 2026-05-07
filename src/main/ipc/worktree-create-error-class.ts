@@ -17,27 +17,34 @@ import type { WorkspaceCreateErrorClass } from '../../shared/telemetry-events'
 export function classifyWorkspaceCreateError(error: unknown): WorkspaceCreateErrorClass {
   const message = error instanceof Error ? error.message : ''
   const stderr = error instanceof Error ? (error as { stderr?: unknown }).stderr : ''
-  const text = `${message} ${typeof stderr === 'string' ? stderr : ''}`
+  // Why: throw sites mix capitalization ('Worktree created...' vs lowercased
+  // git stderr); normalize once so all anchors below can be lowercase literals.
+  const text = `${message} ${typeof stderr === 'string' ? stderr : ''}`.toLowerCase()
 
-  if (text.includes('Could not resolve a default base ref')) {
+  if (text.includes('could not resolve a default base ref')) {
     return 'base_ref_missing'
   }
   if (
     text.includes('already exists') ||
-    text.includes('already has PR') ||
-    text.includes('Could not find an available worktree name')
+    text.includes('already has pr') ||
+    text.includes('could not find an available worktree name')
   ) {
     return 'path_collision'
   }
-  if (
-    text.includes('EACCES') ||
-    text.includes('EPERM') ||
-    text.includes('permission denied') ||
-    text.includes('Permission denied')
-  ) {
+  if (text.includes('eacces') || text.includes('eperm') || text.includes('permission denied')) {
     return 'permission_denied'
   }
-  if (text.includes('fatal:') || text.includes('git ') || text.includes('worktree')) {
+  // Why: anchors are intentionally specific to true git failures from
+  // worktree-remote.ts. Bare 'git ' / 'worktree' would mis-bucket SSH-relay
+  // and sparse-checkout validation errors (which the design doc routes to
+  // 'unknown'); 'created but not found in listing' covers the formerly
+  // miscased 'Worktree created but not found in listing' throw.
+  if (
+    text.includes('fatal:') ||
+    text.includes('git worktree') ||
+    text.includes('created but not found in listing') ||
+    text.includes('no git provider')
+  ) {
     return 'git_failed'
   }
   return 'unknown'
