@@ -58,15 +58,22 @@ type TerminalCreateResult = {
 
 type MobileDisplayMode = 'auto' | 'phone' | 'desktop'
 
-type AccessoryKey = { label: string; bytes: string; accessibilityLabel?: string }
+type AccessoryKey = {
+  label: string
+  bytes: string
+  accessibilityLabel?: string
+  repeatable?: boolean
+}
 
 const ACCESSORY_KEYS: AccessoryKey[] = [
   { label: 'Esc', bytes: '\x1b' },
   { label: 'Tab', bytes: '\t' },
-  { label: '↑', bytes: '\x1b[A' },
-  { label: '↓', bytes: '\x1b[B' },
-  { label: '←', bytes: '\x1b[D' },
-  { label: '→', bytes: '\x1b[C' },
+  { label: '⌫', bytes: '\x7f', accessibilityLabel: 'Backspace', repeatable: true },
+  { label: 'Del', bytes: '\x1b[3~', accessibilityLabel: 'Forward delete', repeatable: true },
+  { label: '↑', bytes: '\x1b[A', repeatable: true },
+  { label: '↓', bytes: '\x1b[B', repeatable: true },
+  { label: '←', bytes: '\x1b[D', repeatable: true },
+  { label: '→', bytes: '\x1b[C', repeatable: true },
   { label: 'Ctrl+C', bytes: '\x03', accessibilityLabel: 'Interrupt terminal' },
   { label: 'Ctrl+D', bytes: '\x04', accessibilityLabel: 'Send EOF' },
   { label: 'Ctrl+L', bytes: '\x0c', accessibilityLabel: 'Clear screen' },
@@ -877,6 +884,38 @@ export default function SessionScreen() {
     }
   }
 
+  // Why: press-and-hold key repeat for keys flagged repeatable (arrows,
+  // backspace, forward-delete). Matches iOS keyboard cadence: instant first
+  // fire, then ~400ms before the second, then ~45ms between subsequent
+  // repeats. Non-repeatable keys (Tab, Esc, Ctrl-*) intentionally fire once
+  // because holding them is destructive or meaningless.
+  const repeatTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const repeatIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const stopAccessoryRepeat = useCallback(() => {
+    if (repeatTimeoutRef.current) {
+      clearTimeout(repeatTimeoutRef.current)
+      repeatTimeoutRef.current = null
+    }
+    if (repeatIntervalRef.current) {
+      clearInterval(repeatIntervalRef.current)
+      repeatIntervalRef.current = null
+    }
+  }, [])
+  const startAccessoryRepeat = useCallback(
+    (bytes: string) => {
+      stopAccessoryRepeat()
+      repeatTimeoutRef.current = setTimeout(() => {
+        repeatIntervalRef.current = setInterval(() => {
+          void handleAccessoryKey(bytes)
+        }, 45)
+      }, 400)
+    },
+    [stopAccessoryRepeat]
+  )
+  useEffect(() => {
+    return () => stopAccessoryRepeat()
+  }, [stopAccessoryRepeat])
+
   const showToast = useCallback((message: string, durationMs = 1200) => {
     setToastMessage(message)
     Animated.timing(toastOpacityRef.current, {
@@ -1323,7 +1362,18 @@ export default function SessionScreen() {
                     !canSend && styles.accessoryKeyDisabled
                   ]}
                   disabled={!canSend}
-                  onPress={() => void handleAccessoryKey(key.bytes)}
+                  onPressIn={() => {
+                    if (!key.repeatable) return
+                    void handleAccessoryKey(key.bytes)
+                    startAccessoryRepeat(key.bytes)
+                  }}
+                  onPressOut={() => {
+                    if (key.repeatable) stopAccessoryRepeat()
+                  }}
+                  onPress={() => {
+                    if (key.repeatable) return
+                    void handleAccessoryKey(key.bytes)
+                  }}
                   accessibilityLabel={key.accessibilityLabel ?? `Send ${key.label}`}
                 >
                   <Text
