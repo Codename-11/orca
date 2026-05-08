@@ -78,7 +78,8 @@ export function MacPermissionsHint({
         label: 'Open Settings',
         onClick: () => {
           openDeveloperPermissionsSettings()
-          dismiss()
+          // Why: closing fires onDismiss below, which persists the flag —
+          // calling dismiss() here too would double-fire the IPC.
           toast.dismiss(TOAST_ID)
         }
       },
