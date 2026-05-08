@@ -165,10 +165,16 @@ export class CodexHookService {
       // group index is the LAST match. Picking the first match would
       // misreport stale duplicates as trust-missing.
       let foundGroupIndex = -1
+      let foundHandlerIndex = -1
       definitions.forEach((definition, idx) => {
         const hooks = definition.hooks ?? []
-        if (hooks.some((hook) => hook.command === command)) {
+        // Why: mirror the LAST-match-wins rule at the group level — if a user
+        // merged hook arrays and ended up with our command at multiple indices
+        // in one group, the surviving runtime entry is the last one.
+        const handlerIdx = hooks.findLastIndex((hook) => hook.command === command)
+        if (handlerIdx !== -1) {
           foundGroupIndex = idx
+          foundHandlerIndex = handlerIdx
         }
       })
       if (foundGroupIndex === -1) {
@@ -178,11 +184,14 @@ export class CodexHookService {
       presentCount += 1
       // Why: a stale hash blocks firing the same as a missing entry, so
       // compare against the canonical hash we would write.
+      // Why: capture the actual handler index — Codex's hook_key uses the
+      // positional handlerIndex, and a user-merged hook array can put our
+      // command at a non-zero slot, so hardcoding 0 would misreport trust.
       const trustInput: CodexTrustEntry = {
         sourcePath: configPath,
         eventLabel: CODEX_EVENT_LABEL[eventName],
         groupIndex: foundGroupIndex,
-        handlerIndex: 0,
+        handlerIndex: foundHandlerIndex,
         command
       }
       const expectedHash = computeTrustedHash(trustInput)
@@ -198,7 +207,9 @@ export class CodexHookService {
     let detail: string | null
     if (presentCount === 0) {
       state = 'not_installed'
-      detail = null
+      // Why: surface the trust read error even when not_installed so the user
+      // has actionable info if config.toml is broken.
+      detail = trustReadError !== null ? `Trust entries unverifiable: ${trustReadError}` : null
     } else if (
       missing.length === 0 &&
       trustMissing.length === 0 &&
@@ -395,9 +406,10 @@ export class CodexHookService {
       if (ourKeys.length > 0) {
         removeHookTrustEntries(tomlPath, ourKeys)
       }
-    } catch {
+    } catch (error) {
       // Best effort — stale trust entries are harmless once hooks.json no
-      // longer references the hook.
+      // longer references the hook. Log so a programmer error doesn't disappear silently.
+      console.warn('[codex-hook-service] failed to clean trust entries', error)
     }
 
     return this.getStatus()

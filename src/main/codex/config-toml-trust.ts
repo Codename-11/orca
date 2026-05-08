@@ -40,7 +40,8 @@ export type CodexTrustEntry = {
   handlerIndex: number
   /** The exact `command` string written to hooks.json. */
   command: string
-  /** Effective timeout in seconds. Codex normalizes absent/<1 to 600. */
+  /** Effective timeout in seconds. When undefined, defaults to 600.
+   *  Explicit values are clamped to a minimum of 1. */
   timeoutSec?: number
   /** Whether the handler is async. Defaults to false. */
   async?: boolean
@@ -165,17 +166,30 @@ function isCodexEventLabel(value: string): value is CodexEventLabel {
   )
 }
 
+// Why: TOML 1.0 forbids BOMs but real-world editors (especially on Windows) sometimes
+// write them. A leading ﻿ would break header regexes anchored at `^[ \t]*\[`, so
+// strip it once at the file boundary and let the rest of the parser stay simple.
+function readTomlFile(configPath: string): string {
+  const raw = readFileSync(configPath, 'utf-8')
+  return raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw
+}
+
 // Why: regex-edit ~/.codex/config.toml rather than parse + reserialize. The
 // file is hand-edited by users (and other tools) and a round-trip through
 // any TOML library would lose comments, key ordering, and inline-table
 // style. We only ever (a) replace an existing [hooks.state."<key>"] block
 // keyed by *our* known hook keys, or (b) append a new block at EOF. Other
 // content is byte-preserved.
+// Why: this is a read-modify-write with no inter-process lock. Codex CLI's
+// /hooks flow also writes [hooks.state.*] blocks in this file, so two
+// concurrent writers can lose each other's edits. writeConfigAtomically
+// prevents partial writes but not lost updates. install() is idempotent
+// (deterministic hashes), so the next install() repairs drift.
 export function upsertHookTrustEntries(
   configPath: string,
   entries: readonly CodexTrustEntry[]
 ): void {
-  const existing = existsSync(configPath) ? readFileSync(configPath, 'utf-8') : ''
+  const existing = existsSync(configPath) ? readTomlFile(configPath) : ''
   let updated = existing
   for (const entry of entries) {
     updated = upsertTrustBlock(updated, computeTrustKey(entry), computeTrustedHash(entry))
@@ -434,7 +448,7 @@ export function removeHookTrustEntries(configPath: string, keys: readonly string
   if (!existsSync(configPath)) {
     return
   }
-  const existing = readFileSync(configPath, 'utf-8')
+  const existing = readTomlFile(configPath)
   let updated = existing
   for (const key of keys) {
     updated = removeTrustBlock(updated, key)
@@ -466,7 +480,7 @@ export function readHookTrustEntries(configPath: string): Map<string, CodexHookT
   if (!existsSync(configPath)) {
     return result
   }
-  const content = readFileSync(configPath, 'utf-8')
+  const content = readTomlFile(configPath)
   // Why: walk line-by-line so `[hooks.state."..."]` inside a `"""..."""` or
   // `'''...'''` multi-line string isn't mistaken for a real header.
   // Why: accept an optional `# inline comment` after `]` — TOML permits it,
