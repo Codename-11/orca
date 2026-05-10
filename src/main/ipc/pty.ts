@@ -209,11 +209,10 @@ export function buildPtyHostEnv(
   // every daemon reconnect.
   Object.assign(baseEnv, piTitlebarExtensionService.buildPtyEnv(id, preexistingPiAgentDir))
 
-  // Why: Codex account switching now materializes auth into one shared
-  // runtime home (~/.codex), and Codex launched inside Orca terminals must
-  // use that same prepared home as quota fetches and other entry points.
-  // Keep the override PTY-scoped so Orca does not mutate the app process
-  // environment or the user's unrelated external shells.
+  // Why: managed Codex accounts use account-owned homes so live Codex PTYs on
+  // different accounts cannot race on one shared auth.json during OAuth
+  // refresh. Keep the override PTY-scoped so Orca does not mutate the app
+  // process environment or the user's unrelated external shells.
   if (opts.selectedCodexHomePath) {
     baseEnv.CODEX_HOME = opts.selectedCodexHomePath
   }
