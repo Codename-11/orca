@@ -56,6 +56,7 @@ function makeMockConnection(): SshConnection {
     }),
     sftp: vi.fn().mockResolvedValue({
       mkdir: vi.fn((_p: string, cb: (err: Error | null) => void) => cb(null)),
+      on: vi.fn(),
       createWriteStream: vi.fn().mockReturnValue({
         on: vi.fn((_event: string, cb: () => void) => {
           if (_event === 'close') {
@@ -97,6 +98,7 @@ describe('cross-version isolation', () => {
       '', // chmod +x node
       '', // npm install
       '', // chmod prebuilds
+      'OK', // node-pty probe (post-install verify)
       '', // touch .install-complete (finalizeInstall)
       '', // rm -rf .install-lock
       'DEAD', // launch socket probe

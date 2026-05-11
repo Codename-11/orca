@@ -28,7 +28,16 @@ describe('validateGitExecArgs', () => {
       [['config', '--get-all', 'remote.origin.url']],
       [['config', '--list']],
       [['config', '-l']],
-      [['config', '--get-regexp', 'user']]
+      [['config', '--get-regexp', 'user']],
+      [['for-each-ref', '--format=%(refname)', 'refs/remotes']],
+      [
+        [
+          'for-each-ref',
+          '--format=%(refname)%00%(refname:short)',
+          '--sort=-committerdate',
+          'refs/heads/*foo*'
+        ]
+      ]
     ])('allows %j', (args) => {
       expectAllowed(args)
     })
