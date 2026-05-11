@@ -29,8 +29,8 @@ const stepCopy = {
     subtitle: 'Get a desktop notification when your agent finishes or asks a question.'
   },
   repo: {
-    title: 'Point Orca at some code',
-    subtitle: 'Open a folder, clone a repo, or skip and add one later.'
+    title: 'Add your first project',
+    subtitle: 'Orca needs a folder or repo before it can create a workspace and start an agent.'
   }
 } as const
 
@@ -176,16 +176,14 @@ export default function OnboardingFlow({
             <span>{currentStep.id === 'repo' ? 'open folder' : 'continue'}</span>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              className={
-                currentStep.id === 'repo'
-                  ? 'rounded-md border border-foreground/20 bg-muted px-3 py-2 text-sm font-medium text-foreground hover:bg-muted-foreground/10'
-                  : 'rounded-md px-3 py-2 text-sm text-muted-foreground hover:text-foreground'
-              }
-              onClick={() => void flow.skip()}
-            >
-              {currentStep.id === 'repo' ? "I'll add one later" : 'Skip'}
-            </button>
+            {currentStep.id !== 'repo' && (
+              <button
+                className="rounded-md px-3 py-2 text-sm text-muted-foreground hover:text-foreground"
+                onClick={() => void flow.skip()}
+              >
+                Skip
+              </button>
+            )}
             {stepIndex > 0 && (
               <button
                 className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/60 px-3 py-2 text-sm text-foreground hover:bg-muted disabled:opacity-60"

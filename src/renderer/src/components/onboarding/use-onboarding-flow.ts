@@ -267,13 +267,13 @@ export function useOnboardingFlow(
         value_kind: 'repo',
         duration_ms: consumeStepDurationMs()
       })
-      if (isGit) {
-        openModal('new-workspace-composer', {
-          initialRepoId: repoId,
-          prefilledName: 'onboarding',
-          telemetrySource: 'onboarding'
-        })
-      }
+      // Why: plain folders are valid first projects too; suppressing the
+      // composer for them strands users after onboarding with no workspace.
+      openModal('new-workspace-composer', {
+        initialRepoId: repoId,
+        prefilledName: 'onboarding',
+        telemetrySource: 'onboarding'
+      })
     },
     [closeWith, consumeStepDurationMs, fetchRepos, fetchWorktrees, openModal]
   )
@@ -390,6 +390,12 @@ export function useOnboardingFlow(
     if (busyLabel) {
       return
     }
+    if (currentStep.id === 'repo') {
+      // Why: first project is the activation object. Keep this controller
+      // guard even though the normal Repo-step skip button is not rendered.
+      setError('Add a project to continue.')
+      return
+    }
     // Why: skip has no keyboard path today, so `advanced_via` is always
     // `'button'`. Including the field keeps the shape uniform with the
     // completed/dismissed events and lets a future keyboard-skip arrive
@@ -406,13 +412,6 @@ export function useOnboardingFlow(
       setTheme(settings.theme)
       applyDocumentTheme(settings.theme)
     }
-    if (currentStep.id === 'repo') {
-      await closeWith('dismissed', {}, currentStep.stepNumber, undefined, {
-        advancedVia: 'button',
-        durationMs
-      })
-      return
-    }
     // Why: persistence-only path — does NOT trigger requestPermission, so
     // skipping step 3 never fires the OS permission prompt.
     try {
@@ -424,7 +423,6 @@ export function useOnboardingFlow(
     setStepIndex((idx) => Math.min(idx + 1, STEPS.length - 1))
   }, [
     busyLabel,
-    closeWith,
     consumeStepDurationMs,
     currentStep.id,
     currentStep.stepNumber,
