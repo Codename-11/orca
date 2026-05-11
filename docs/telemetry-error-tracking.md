@@ -1,6 +1,6 @@
 # Error Tracking — Companion Lane to Product Telemetry
 
-Companion to [`telemetry-plan.md`](./telemetry-plan.md) and [`telemetry-implementation.md`](./telemetry-implementation.md). Those docs specify *product* telemetry — an enum-only, funnel-shaped PostHog schema that deliberately does not carry raw errors. This doc answers the adjacent question:
+Companion to Orca's product-telemetry design — an enum-only, funnel-shaped PostHog schema that deliberately does not carry raw errors. This doc answers the adjacent question:
 
 **Source of truth:** yes. This doc defines the current diagnostics-lane design that complements product telemetry.
 
@@ -49,7 +49,7 @@ Every peer that handles both signals *well* separates them either architecturall
 | Concern | Product-telemetry lane (existing) | Error-tracking lane (this doc) |
 |---|---|---|
 | Vendor | PostHog Cloud US | None by default. Local file on disk. Optional OTLP to a user-run endpoint. |
-| Always on? | Yes (subject to consent — see `telemetry-plan.md`) | Yes for local capture. No for network export. |
+| Always on? | Yes (subject to consent) | Yes for local capture. No for network export. |
 | Leaves the machine by default? | Yes (PostHog) | **No.** Only via explicit user action (bundle share) or explicit user config (OTLP env var). |
 | UGC-tolerant? | No — schema is enum/bool/bucket only, typed event map + runtime sanitizer | Yes — local file can contain paths, cwd, stack traces, error messages |
 | Retention | 12 months (PostHog config) | Rotated locally: ~10 files × 10 MB, FIFO |
@@ -82,7 +82,7 @@ Scope is the same as T3 Code's: completed spans from the main process, with thei
 The file is local by default, but it exists on a device the user may hand to a colleague, upload to GitHub, or sync to iCloud. Secrets redaction is non-negotiable even locally.
 
 **What is *never* captured in any lane:**
-- Anything the plan's ["What we never send"](./telemetry-plan.md#what-we-never-send) section forbids from the PostHog lane, with the narrow carve-outs above. The forbid-list is additive across lanes, not per-lane.
+- Anything the product-telemetry plan's "What we never send" list forbids from the PostHog lane, with the narrow carve-outs above. The forbid-list is additive across lanes, not per-lane.
 
 ## The three modes
 
@@ -160,7 +160,7 @@ The fix is structural: bundles carry a fresh `bundle_submission_id` (128-bit ran
 
 ### Where it lives in the main process
 
-Mirrors the product-telemetry layout in `telemetry-plan.md` §Architecture so the two lanes are symmetric in structure and distinct in wire destination.
+Mirrors the product-telemetry main-process layout so the two lanes are symmetric in structure and distinct in wire destination.
 
 ```
 src/main/telemetry/
@@ -247,7 +247,7 @@ Settings → Privacy → Diagnostics, below the existing telemetry toggle:
 - **"Open trace folder"** — reveals `main.trace.ndjson` in Finder/Explorer/file manager. Precedent: Aider's sample-log publication; this is the equivalent for a live running app.
 - **"Clear local traces"** — deletes all rotated trace files. Useful before handing a laptop to someone else.
 - **"Share a diagnostic bundle with Orca support"** — the Mode 3 button.
-- **"OTLP export"** — display-only status. Reads the env var at launch; shows "Disabled" or "Enabled — exporting to `<url>`". Not a UI toggle; users flip it by setting the env var and restarting. Matches how the existing Privacy pane surfaces env-var state ([`telemetry-plan.md` §Privacy pane — blocked states](./telemetry-plan.md#privacy-pane--blocked-states)).
+- **"OTLP export"** — display-only status. Reads the env var at launch; shows "Disabled" or "Enabled — exporting to `<url>`". Not a UI toggle; users flip it by setting the env var and restarting. Matches how the existing Privacy pane surfaces env-var state for blocked-by-environment toggles.
 
 ### Consent boundaries
 
@@ -264,12 +264,12 @@ The Privacy pane toggle does *not* gate this lane. The lane's only outbound path
 
 `agent_error` in the PostHog lane is enum-only. This doc is additive.
 
-**Final v1 shape** (matched by [`telemetry-plan.md`](./telemetry-plan.md) §Decision 8):
+**Final v1 shape:**
 
-- `error_class` — closed enum, currently `'binary_not_found' | 'unknown'`. The narrower v1 enum reflects Orca's PTY-shell-typed-command launch architecture: agent-side errors (auth, rate-limit, provider failures) live inside the agent CLI subprocess and are not observable to Orca. The earlier 10-value enum (`network_timeout`, `auth_expired`, `rate_limited`, `provider_unavailable`, `provider_error_generic`, `binary_not_found`, `binary_version_mismatch`, `workspace_gone`, `user_cancelled`, `unknown`) was deferred — see `telemetry-rationale-archive.md` §"Why the `error_class` enum was trimmed late." Expand only when a real call site lands.
+- `error_class` — closed enum, currently `'binary_not_found' | 'unknown'`. The narrower v1 enum reflects Orca's PTY-shell-typed-command launch architecture: agent-side errors (auth, rate-limit, provider failures) live inside the agent CLI subprocess and are not observable to Orca. The earlier 10-value enum (`network_timeout`, `auth_expired`, `rate_limited`, `provider_unavailable`, `provider_error_generic`, `binary_not_found`, `binary_version_mismatch`, `workspace_gone`, `user_cancelled`, `unknown`) was deferred. Expand only when a real call site lands.
 - `agent_kind` — the same enum used by `agent_started` (`claude-code` / `codex` / `gemini` / `other`).
 
-The `error_name` property and its closed `AGENT_ERROR_NAME_WHITELIST` were also part of the earlier draft. Both were deferred when the enum trim collapsed `error_name`'s utility (with two enum values, the per-name whitelist carries no additional signal). The rationale for choosing a closed whitelist over a regex when this property is re-introduced is preserved in `telemetry-security-review.md` §5 — short version: a shape-only regex passes identifier-shaped leaks like `PaymentFailedForUserAlice` or `AuthExpiredForAcmeCorp`; a closed whitelist closes that class of bug by construction. Same pattern as `SETTINGS_CHANGED_WHITELIST`.
+The `error_name` property and its closed `AGENT_ERROR_NAME_WHITELIST` were also part of the earlier draft. Both were deferred when the enum trim collapsed `error_name`'s utility (with two enum values, the per-name whitelist carries no additional signal). When this property is re-introduced, prefer a closed whitelist over a shape-only regex — a regex passes identifier-shaped leaks like `PaymentFailedForUserAlice` or `AuthExpiredForAcmeCorp`; a closed whitelist closes that class of bug by construction. Same pattern as `SETTINGS_CHANGED_WHITELIST`.
 
 The relationship between the two lanes when an agent fails:
 
@@ -398,14 +398,6 @@ Three peers, three variants of the same mistake: the lane is singular, the signa
 3. **Warp's `contains_ugc()` flag is the cleanest answer to the "what if an event sometimes carries UGC" question our two-lane split can't gracefully handle.** Not blocking for v1 — our events don't blur — but the trait is a pattern to reach for if we ever grow one that does.
 4. **VS Code's cascade (`enableCrashReporter=false ⇒ all telemetry off`) is a philosophical inversion of ours.** Their model: the less-invasive signal should not outlive the more-invasive one. Ours: the two lanes are independent and the user can kill either. Worth documenting *why* we chose independence — the Mode 1 local file doesn't leave the machine, so turning it off to disable product telemetry would be a UX trap.
 5. **The drift problem (open-vibe-island) is not just about code discipline — it's about build pipeline discipline.** Whatever redactor we ship needs a CI check that fails if a span attribute key matches the blocklist at build time. Without that, "we don't send PII" is a claim that decays the moment someone adds a new attribute and forgets. Add to open questions.
-
-## Alignment with the existing plan
-
-- `telemetry-plan.md` §Non-goals currently says "Crash reporting (Sentry is a separate, complementary concern — out of scope here)." This doc fills that gap without adding Sentry. Update non-goals to reference this doc as the separate-concern landing spot.
-- `telemetry-plan.md` §What we never send applies unchanged to the PostHog lane. The error-tracking lane has its own stricter local-file subset documented in [What the error-tracking lane captures](#what-the-error-tracking-lane-captures).
-- The ship-it event list in `telemetry-plan.md` §Decision 8 is the final **7-event v1 schema** (`app_opened`, `repo_added`, `workspace_created`, `agent_started`, `agent_error`, `settings_changed`, `telemetry_opted_in/out`). This doc adds no PostHog events. The only error-shaped event in that 7 is `agent_error` with the `{ error_class, agent_kind }` shape above (`error_class: 'binary_not_found' | 'unknown'`).
-- Events that earlier drafts considered and cut — `app_closed { was_crash }` (heartbeat-style crash detection) and `agent_stopped { exit_reason }` (session-level failure tracking) — are **deferred to v2** in [`telemetry-plan.md`](./telemetry-plan.md#deferred-events-v2-candidates). Their deferral is the architectural precondition for this doc existing: with crash/failure signal off the product-telemetry lane, this doc is where that signal has to live. Revive triggers for each are recorded there.
-- The Privacy pane in `telemetry-plan.md` §Settings toggle gets a new subsection ("Diagnostics") with the Mode 1/2/3 controls above. Copy lives with the rest of the Privacy pane spec, not here.
 
 ## Sources
 
