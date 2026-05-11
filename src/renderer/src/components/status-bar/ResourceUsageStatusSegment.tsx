@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
+import { activateTabAndFocusPane } from '@/lib/activate-tab-and-focus-pane'
 import { useAppStore } from '../../store'
 import { useWorktreeMap } from '../../store/selectors'
 import { runWorktreeDelete } from '../sidebar/delete-worktree-flow'
@@ -306,13 +307,13 @@ function SessionRow({
 }: {
   session: UnifiedSessionRow
   worktreeId: string
-  onNavigate: (tabId: string) => void
+  onNavigate: (tabId: string, paneKey: string | null) => void
   onKill: (session: UnifiedSessionRow) => void
 }): React.JSX.Element {
   const clickable = session.tabId !== null && session.bound
   const handleClick = (): void => {
     if (clickable && session.tabId) {
-      onNavigate(session.tabId)
+      onNavigate(session.tabId, session.paneKey)
     }
   }
 
@@ -394,7 +395,7 @@ function WorktreeRow({
   onSleep: () => void
   onDelete: () => void
   onKillSession: (session: UnifiedSessionRow) => void
-  navigateToTab: (tabId: string) => void
+  navigateToTab: (tabId: string, paneKey: string | null) => void
 }): React.JSX.Element {
   const hasSessions = worktree.sessions.length > 0
   // Why: synthetic buckets (orphan/unattributed) have no sidebar target to
@@ -441,7 +442,11 @@ function WorktreeRow({
           disabled={!isNavigable}
         >
           <span className="text-xs font-medium truncate">{rowLabel}</span>
-          {!worktree.hasLocalSamples && (
+          {/* Why: chip is gated on the repo's SSH connectionId, not on
+              missing data. Warm-reattached local PTYs used to land here
+              with hasLocalSamples=false even though they're plainly
+              local. */}
+          {worktree.isRemote && (
             <span className="shrink-0 text-[9px] uppercase tracking-wide text-muted-foreground/70">
               · remote
             </span>
@@ -549,7 +554,7 @@ function ResourceTree({
   collapsedWorktrees: Set<string>
   toggleWorktree: (worktreeId: string) => void
   navigateToWorktree: (worktreeId: string) => void
-  navigateToTab: (tabId: string) => void
+  navigateToTab: (tabId: string, paneKey: string | null) => void
   onSleep: (worktreeId: string) => void
   onDelete: (worktreeId: string) => void
   onKillSession: (session: UnifiedSessionRow) => void
@@ -648,7 +653,6 @@ export function ResourceUsageStatusSegment({
   const ptyIdsByTabId = useAppStore((s) => s.ptyIdsByTabId)
   const tabsByWorktree = useAppStore((s) => s.tabsByWorktree)
   const runtimePaneTitlesByTabId = useAppStore((s) => s.runtimePaneTitlesByTabId)
-  const setActiveTab = useAppStore((s) => s.setActiveTab)
   const setActiveView = useAppStore((s) => s.setActiveView)
   const repos = useAppStore((s) => s.repos)
 
@@ -726,6 +730,19 @@ export function ResourceUsageStatusSegment({
     return map
   }, [repos])
 
+  // Why: drives the `· remote` chip predicate. A repo with a non-null
+  // connectionId is SSH-backed and its PTYs run on a remote host; that's
+  // the only honest signal for "remote." Building the map from the
+  // canonical store list avoids re-deriving remoteness from a missing
+  // memory sample.
+  const repoConnectionIdById = useMemo(() => {
+    const map = new Map<string, string | null>()
+    for (const repo of repos) {
+      map.set(repo.id, repo.connectionId ?? null)
+    }
+    return map
+  }, [repos])
+
   // Why: skip the merge entirely when the popover is closed. The merged
   // tree is only ever displayed inside <PopoverContent>; computing it on
   // every store mutation (e.g. runtimePaneTitlesByTabId, which changes on
@@ -739,7 +756,8 @@ export function ResourceUsageStatusSegment({
             ptyIdsByTabId,
             runtimePaneTitlesByTabId,
             workspaceSessionReady,
-            repoDisplayNameById
+            repoDisplayNameById,
+            repoConnectionIdById
           })
         : [],
     [
@@ -750,7 +768,8 @@ export function ResourceUsageStatusSegment({
       ptyIdsByTabId,
       runtimePaneTitlesByTabId,
       workspaceSessionReady,
-      repoDisplayNameById
+      repoDisplayNameById,
+      repoConnectionIdById
     ]
   )
 
@@ -835,7 +854,7 @@ export function ResourceUsageStatusSegment({
   }, [])
 
   const navigateToTab = useCallback(
-    (tabId: string) => {
+    (tabId: string, paneKey: string | null) => {
       // Resolve the tab → worktree from the store so we can also reveal the
       // worktree in the sidebar before flipping the active tab.
       for (const [worktreeId, tabs] of Object.entries(tabsByWorktree)) {
@@ -845,9 +864,19 @@ export function ResourceUsageStatusSegment({
         }
       }
       setActiveView('terminal')
-      setActiveTab(tabId)
+      // Why: snapshot-derived rows carry a `${tabId}:${paneId}` paneKey from
+      // the main-process pty registry — parse the paneId tail so split-tab
+      // clicks land focus on the *clicked* pane rather than whichever pane
+      // was last active. Daemon-only rows have paneKey=null and degrade to
+      // tab-only activation.
+      const colon = paneKey ? paneKey.indexOf(':') : -1
+      const tail = colon > 0 && paneKey ? paneKey.slice(colon + 1) : ''
+      const parsed = /^\d+$/.test(tail) ? Number.parseInt(tail, 10) : NaN
+      const paneId =
+        Number.isFinite(parsed) && parsed > 0 && paneKey?.slice(0, colon) === tabId ? parsed : null
+      activateTabAndFocusPane(tabId, paneId)
     },
-    [tabsByWorktree, setActiveTab, setActiveView]
+    [tabsByWorktree, setActiveView]
   )
 
   const deleteWorktree = useCallback((worktreeId: string): void => {
@@ -979,11 +1008,11 @@ export function ResourceUsageStatusSegment({
         sideOffset={8}
         className="w-[26rem] p-0"
         onOpenAutoFocus={(event) => event.preventDefault()}
-        // Why: clicking a terminal row calls setActiveTab, which causes
-        // xterm to programmatically focus the terminal DOM node. Radix
-        // would interpret that as a focus-outside event and close the
-        // popover. Suppress focus-driven closes; the popover still closes
-        // on outside-click (onPointerDownOutside default) and Escape.
+        // Why: clicking a terminal row activates a tab, which causes xterm
+        // to programmatically focus the terminal DOM node. Radix would
+        // interpret that as a focus-outside event and close the popover.
+        // Suppress focus-driven closes; the popover still closes on
+        // outside-click (onPointerDownOutside default) and Escape.
         onFocusOutside={(event) => event.preventDefault()}
       >
         {/* Why: header strip — title on the left, daemon-control icons on

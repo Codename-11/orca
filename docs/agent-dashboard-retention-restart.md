@@ -2,11 +2,11 @@
 
 ## Goal
 
-When a user has the experimental agent dashboard toggle on (`settings.experimentalAgentDashboard === true`), the per-workspace agent activity they see on each worktree card should survive an Orca app restart.
+Per-workspace agent activity shown on each worktree card should survive an Orca app restart.
 
 The user-visible problem is broader than "done rows vanish": any agent whose status was visible before quit and which does not re-emit a hook event on its own — `done` agents (process gone, no future event), `blocked` Claudes (idle at a permission prompt, no event until the user acts), and `working` agents that happen to be quiet at quit time — disappears from the dashboard until something happens to make them speak again. The most-cited symptom is `done` rows winking out, but the same restart-erasure hits `blocked` and quiet `working` for exactly the same reason: nothing replays the last-known status across the boundary.
 
-Persisting the hook server's existing per-pane status cache fixes all three at once. The renderer pulls a main-process snapshot after settings and workspace tabs are hydrated, so startup delivery no longer depends on early IPC timing; dismissals still flow back to main through `agentStatus:drop`.
+Persisting the hook server's existing per-pane status cache fixes all three at once. The renderer pulls a main-process snapshot after workspace tabs are hydrated, so startup delivery no longer depends on early IPC timing; dismissals still flow back to main through `agentStatus:drop`.
 
 ## Scope
 
@@ -15,14 +15,13 @@ In scope:
 - Persist `lastStatusByPaneKey` (the module-level `Map` in `src/main/agent-hooks/server.ts` that already caches the latest hook payload per `paneKey`) to a JSON file under `userData/agent-hooks/`. Hydrate it on `start()` before the HTTP server begins accepting requests.
 - Mirror cache mutations to disk through a debounced trailing write so a burst of hook events does not produce N file writes. Force a synchronous final flush on `stop()` so quit-time state is captured.
 - Update the on-disk file when `clearPaneState(paneKey)` is called from PTY teardown (`src/main/ipc/pty.ts`), so a pane that closes during a session does not resurrect on the next launch.
-- Gate disk _writes_ on `experimentalAgentDashboard === true` so users who have not opted in do not accumulate on-disk hook payloads. Skip hydration when the flag is off at launch.
 
 Out of scope:
 
 - Renderer-side persistence (`retainedAgentsByPaneKey`, `acknowledgedAgentsByPaneKey`, `retentionSuppressedPaneKeys`). The renderer's retention slice and `useRetainedAgentsSync` continue to operate purely in memory; their "stay until dismissed" contract is upheld by the live entry being pulled from the main-process status snapshot after renderer hydration.
 - Daemon-side persistence. The daemon owns PTY lifetime and scrollback, not hook events. The hook server (in the Electron main process) is the right home.
 - Cross-device sync. The on-disk file lives in `userData`; running Orca on a second machine does not carry retained activity.
-- Changing the experimental gate itself. The gate stays; this proposal makes the feature behave correctly when it is on.
+- Reintroducing the old experimental dashboard gate. Agent activity is now default-on; row visibility is controlled by worktree-card properties.
 - A visible "completed N days ago" indicator. The `done`-only retention case where staleness was sharpest in the prior renderer-side draft is unchanged here (`done` rows still auto-evict on dismiss; users who quit mid-task and return next morning see what they saw last).
 
 ## Background
@@ -34,9 +33,9 @@ The Electron main process runs a loopback HTTP server (`AgentHookServer` in `src
 1. `lastStatusByPaneKey.set(paneKey, payload)` — caches the latest normalized payload per pane (the module-level `Map` in `server.ts`).
 2. `this.onAgentStatus?.(payload)` — fires the registered listener.
 
-`src/main/index.ts` registers the listener on window creation. The listener forwards the payload to the renderer via `webContents.send('agentStatus:set', …)`, gated on `experimentalAgentDashboard === true` in `index.ts`. The renderer's `agentStatusByPaneKey` slice receives the IPC and writes the entry. From there, `useRetainedAgentsSync` produces `retainedAgentsByPaneKey` (sticky `done` snapshots), and the rest of the dashboard reads from those two maps.
+`src/main/index.ts` registers the listener on window creation. The listener forwards the payload to the renderer via `webContents.send('agentStatus:set', …)`. The renderer's `agentStatusByPaneKey` slice receives the IPC and writes the entry. From there, `useRetainedAgentsSync` produces `retainedAgentsByPaneKey` (sticky `done` snapshots), and the rest of the dashboard reads from those two maps.
 
-The cache exists for a reason that already overlaps with this proposal: hook events arrive while Orca is windowless (common on macOS when the user closes the window but leaves the app running), so re-registering the listener replays everything cached so far. Disk hydration writes into the same map. The renderer now also has a pull-based `agentStatus:getSnapshot` path, which lets startup restore wait until renderer settings and workspace tabs are ready instead of relying on early replay timing.
+The cache exists for a reason that already overlaps with this proposal: hook events arrive while Orca is windowless (common on macOS when the user closes the window but leaves the app running), so re-registering the listener replays everything cached so far. Disk hydration writes into the same map. The renderer now also has a pull-based `agentStatus:getSnapshot` path, which lets startup restore wait until workspace tabs are ready instead of relying on early replay timing.
 
 ### What survives restart today, indirectly
 
@@ -106,19 +105,13 @@ Why no field-level cap on payload size: the same payloads are already accepted i
 | `lastStatusByPaneKey.delete(...)` in `clearPaneState()` in `server.ts`   | PTY for the pane has torn down    | Schedule debounced write                                  |
 | `lastStatusByPaneKey.clear()` in `stop()` in `server.ts`                 | Server is shutting down           | Schedule write, then synchronously flush before returning |
 
-A single helper inside the class — `private scheduleStatusPersist()` — sets a 250 ms trailing timer, captured per-instance. Each scheduled write reads the current `lastStatusByPaneKey` and the current `experimentalAgentDashboard` setting, then:
-
-- If the gate is on, writes `{ version: 2, entries: {…} }` to `last-status.json` (atomic via tmp + rename — same pattern as `writeEndpointFile()` in `server.ts`).
-- If the gate is off, the write is a no-op for users who never opted in (the file does not exist; do not create one). For users who previously opted in, the write deletes the existing file once (one filesystem op, idempotent on subsequent attempts) and stops scheduling further writes until the gate flips back on. Deletion is preferred to "write empty" so a flag-off user never has hook-payload data on disk after the next sync.
+A single helper inside the class — `private scheduleStatusPersist()` — sets a 250 ms trailing timer, captured per-instance. Each scheduled write serializes the current `lastStatusByPaneKey` and writes `{ version: 2, entries: {…} }` to `last-status.json` atomically via tmp + rename, matching the `writeEndpointFile()` pattern in `server.ts`.
 
 A `flushStatusPersistSync()` method runs the pending write synchronously. `stop()` calls it before clearing the map so quit-time state is captured even if a debounced write was pending. `will-quit` already has the synchronous order it needs (`agentHookServer.stop()` in `index.ts` runs before `app.quit()` resolves), so the synchronous flush slots in cleanly.
 
 Specifics:
 
-- Gate writes on `experimentalAgentDashboard === true`. Read the setting at write time via the same `store?.getSettings()` accessor `src/main/index.ts` already uses for the IPC forwarding gate. Importing the store handle into the hook server is the cleanest seam; the alternative (passing the gate as a callback into `start()`) works too and keeps the server class agnostic of the store. Pick whichever is closer to the existing dependency direction in the file at implementation time. (Today, the server class has zero direct references to the renderer-side store; pushing a `getSettings`-style callback through `start()` preserves that and is the recommended path.)
 - Debounce 250 ms trailing. A burst of hook events from a multi-agent run otherwise produces a write per event. The existing PTY-data path uses similar trailing batching for renderer IPC, so the latency budget is consistent.
-- When the gate flips from on → off, delete the existing `last-status.json` once (no-op if it does not exist) and skip subsequent writes until the flag flips back on. Use deletion rather than "write empty" so a flag-off user has no hook-payload data on disk afterwards. The in-memory cache stays populated — the gate only controls IPC forwarding to the renderer (in `index.ts`) and disk persistence. Cursor-agent's title-driving in `index.ts` operates on the live event payload (not on `lastStatusByPaneKey.get(...)`), so leaving the cache populated is not strictly required for cursor; we leave it because (a) the cache is already populated by every hook event regardless of gate state and pruning it adds complexity for no gain, and (b) flipping the gate back on later should resume from the same state without re-collecting events.
-- When the gate flips from off → on, do not eagerly write. The next `set`/`delete` will pick up persistence naturally on its scheduled trigger, and any payload already in the in-memory cache will be persisted on the first write after the flip.
 - Identity check before write: if the JSON-stringified payload is byte-identical to the last persisted payload (cached on the instance as `lastWrittenJson`), skip the write. Cheap protection against re-firing trailing timers when nothing actually changed.
 
 `clearPaneState(paneKey)` (called from `src/main/ipc/pty.ts` on PTY teardown) already handles the within-session "pane is gone" case by deleting from the in-memory map. Mirroring it to disk through the same scheduled write means a pane closed in the previous session is absent from the on-disk file the next time it's read, so hydration cannot resurrect it.
@@ -133,7 +126,7 @@ This means:
 
 - IPC channel: a new `agentStatus:drop` request (renderer → main). Single argument: `paneKey: string`. Fire-and-forget; no response needed.
 - Renderer wiring: extend the `dropAgentStatus` action in `agent-status.ts` to invoke the IPC at the end of its zustand `set(...)` block. The existing intra-renderer behavior is unchanged; the IPC is a write-through mirror, exactly like the disk persistence side of the hook server.
-- Main wiring: add a tiny IPC handler in `src/main/index.ts` (or a dedicated handler file) that calls `agentHookServer.dropStatusEntry(paneKey)`. Keep it gated on the same `experimentalAgentDashboard === true` check used elsewhere in main — even though `dropStatusEntry` is itself idempotent, the gate prevents a non-opted-in user's renderer (which still calls `dropAgentStatus` for non-dashboard reasons like cursor-agent OSC fallback) from churning the hook server's persistence path.
+- Main wiring: add a tiny IPC handler in `src/main/index.ts` (or a dedicated handler file) that calls `agentHookServer.dropStatusEntry(paneKey)`. `dropStatusEntry` is idempotent, so repeated renderer sends are harmless.
 - `dismissRetainedAgent` does not need its own IPC — `dropAgentStatus` covers the "remove this paneKey from everything" intent, and the dismiss-from-retained-only case is rare enough (and benign enough) to ride on the same path. If we later separate the two, add `agentStatus:drop` symmetry then.
 - `dismissRetainedAgentsByWorktree` (the worktree-scoped bulk dismissal action in `agent-status.ts`) DOES need to propagate. Currently no production code path calls it — the live worktree-archive flow goes through `dropAgentStatusByTabPrefix` per-tab and PTY teardown then propagates `clearPaneState` (see below). We add the fan-out defensively so a future caller cannot reintroduce a disk leak. Wiring: in the slice action's set callback, collect the paneKeys being removed, then after the set completes, fire one `window.api.agentStatus.drop(paneKey)` per key. The IPC surface stays at a single channel; only the call count fans out. We do NOT add a separate `agentStatus:dropByWorktree` IPC because per-paneKey overhead is not a concern at the call rates this action would be invoked, and a single channel keeps the main-process handler shape simple.
 - `dropAgentStatusByTabPrefix` (in `agent-status.ts`, called from `terminals.ts` on tab close and on worktree shutdown/sleep) does NOT need IPC fan-out. Every caller subsequently kills the affected PTYs via `window.api.pty.kill(...)`, and the existing main-process PTY-onExit chain calls `clearProviderPtyState` → `agentHookServer.clearPaneState(paneKey)` (in `src/main/ipc/pty.ts`), which evicts the persisted entry through the same scheduled-write helper that handles every other eviction. The disk follows naturally.
@@ -142,7 +135,7 @@ The `agentStatus:drop` and `agentStatus:getSnapshot` channels are the IPC surfac
 
 ## Hydration Rules
 
-Hydration runs inside `start()` after the userDataPath is set up but before `server.listen()` is called (in `server.ts`) — so the in-memory map is fully populated before the first hook POST can arrive. The renderer reads that hydrated map through `agentStatus:getSnapshot` after settings and workspace tabs are ready.
+Hydration runs inside `start()` after the userDataPath is set up but before `server.listen()` is called (in `server.ts`) — so the in-memory map is fully populated before the first hook POST can arrive. The renderer reads that hydrated map through `agentStatus:getSnapshot` after workspace tabs are ready.
 
 Order of operations on launch:
 
@@ -150,9 +143,7 @@ Order of operations on launch:
 2. Inside `start()`, before binding the HTTP server: read `userData/agent-hooks/last-status.json`, parse, sanitize, and `lastStatusByPaneKey.set(...)` each surviving entry. Failure modes (missing file, parse error, schema mismatch) all degrade gracefully — log once, leave the in-memory map empty.
 3. The HTTP server binds and starts accepting POSTs. New hook events go through the same `lastStatusByPaneKey.set` write site (in the HTTP handler in `server.ts`), overwriting hydrated entries naturally.
 4. Window creation registers the renderer listener via `setListener()` in `index.ts`. Live pushes remain best-effort, but the startup restore no longer depends on these early sends being accepted by the renderer.
-5. `useIpcEvents.ts` waits until `settings.experimentalAgentDashboard === true` and `workspaceSessionReady === true`, then invokes `window.api.agentStatus.getSnapshot()` and applies each surviving entry through `setAgentStatus(...)`.
-
-Gate hydration on `experimentalAgentDashboard === true` at launch. When the flag is off, skip reading the file (the IPC forwarding gate in `index.ts` already drops anything that arrives anyway, and we want to avoid loading event payloads into memory the user has not opted into). The next persistence pass deletes any existing file so a flag-off user does not keep hook payloads on disk.
+5. `useIpcEvents.ts` waits until `workspaceSessionReady === true`, then invokes `window.api.agentStatus.getSnapshot()` and applies each surviving entry through `setAgentStatus(...)`.
 
 Sanitization is field-by-field rather than whole-entry rejection so a single bad pane cannot tank the whole hydration:
 
@@ -173,11 +164,11 @@ Hydration timing relative to window creation:
 
 - The hook server starts before the window (both calls live in `src/main/index.ts`). Hydration is therefore complete before any renderer code can register a listener.
 - `setListener()` is registered synchronously inside `openMainWindow()` (in `src/main/index.ts`) and may replay before the renderer bundle has loaded or before `tabsByWorktree` is hydrated.
-- The renderer treats those early pushes as disposable: if settings or workspace state is not ready, `useIpcEvents.ts` ignores the push. Once both are ready, it pulls the authoritative snapshot from main and applies entries whose paneKeys still resolve to live tabs.
+- The renderer treats those early pushes as disposable: if workspace state is not ready, `useIpcEvents.ts` ignores the push. Once it is ready, it pulls the authoritative snapshot from main and applies entries whose paneKeys still resolve to live tabs.
 
 To make hydration visible after launch, we add **one small renderer change** plus a deferred snapshot trigger:
 
-1. **Renderer snapshot pull.** Modify `useIpcEvents.ts` so live `agentStatus:set` pushes are applied only when the dashboard is enabled and `workspaceSessionReady` is true. Register a store subscription in the same effect; once those conditions are true, call `window.api.agentStatus.getSnapshot()`, re-resolve each paneKey, drop entries whose tab is still unknown, and call `setAgentStatus(...)` for the rest.
+1. **Renderer snapshot pull.** Modify `useIpcEvents.ts` so live `agentStatus:set` pushes are applied only when `workspaceSessionReady` is true. Register a store subscription in the same effect; once that condition is true, call `window.api.agentStatus.getSnapshot()`, re-resolve each paneKey, drop entries whose tab is still unknown, and call `setAgentStatus(...)` for the rest.
 
 2. **Snapshot timing.** Include `receivedAt` and `stateStartedAt` in both the persisted file and the IPC payload. `setAgentStatus` accepts those timestamps so restored rows retain their actual age, and it ignores an older snapshot entry if a newer live push already landed for the same pane.
 
@@ -208,27 +199,22 @@ The renderer slice's persistence model is otherwise unchanged, and `useRetainedA
 
 **SSH worktrees.** Hook payloads for panes whose worktree happens to be SSH-mounted are persisted exactly like local panes — the hook server only sees the paneKey and the payload, not the worktree's transport. If the SSH connection drops post-restart, the hydrated entry remains visible until the renderer's existing tab/worktree filters take it out. Same behavior as in-session today.
 
-**Settings flag flipped off after a session populated the file, then quit.** The flag flip itself triggered a one-shot delete of `last-status.json` (see Write Rules). The next launch with the gate off skips hydration regardless. Flipping the flag back on later starts from no on-disk state; the dashboard is empty until the next hook event repopulates the cache and the next scheduled write rewrites the file.
-
-**Settings flag flipped off mid-session.** The next debounced write deletes `last-status.json` (idempotent) and subsequent writes are skipped while the flag stays off. The in-memory cache is _not_ cleared so a later flip back on resumes from the same state.
-
 ## Implementation Notes
 
 Primary file:
 
 - `src/main/agent-hooks/server.ts` — all changes land here:
   - Add a private `lastStatusFilePath: string | null` set in `start()` from `userDataPath`.
-  - Add a private `getDashboardEnabled: (() => boolean) | null` callback set from `start({ getDashboardEnabled })`. The hook server stays decoupled from the store — `index.ts` passes a closure that reads `store?.getSettings().experimentalAgentDashboard === true`.
-  - Add `private hydrateLastStatusFromDisk()` invoked at the top of `start()` (gated on `getDashboardEnabled?.() === true`). Reads file, `JSON.parse`s the envelope, sanitizes field-by-field, validates each `entry.payload` via `normalizeAgentStatusPayload` (in `src/shared/agent-status-types.ts` — accepts `unknown`, returns parsed `ParsedAgentStatusPayload | null`), and calls `lastStatusByPaneKey.set(...)` for survivors. Use `normalizeAgentStatusPayload`, not `parseAgentStatusPayload` — the latter takes a JSON string only and would force a wasteful stringify/parse round-trip.
+  - Add `private hydrateLastStatusFromDisk()` invoked at the top of `start()`. Reads file, `JSON.parse`s the envelope, sanitizes field-by-field, validates each `entry.payload` via `normalizeAgentStatusPayload` (in `src/shared/agent-status-types.ts` — accepts `unknown`, returns parsed `ParsedAgentStatusPayload | null`), and calls `lastStatusByPaneKey.set(...)` for survivors. Use `normalizeAgentStatusPayload`, not `parseAgentStatusPayload` — the latter takes a JSON string only and would force a wasteful stringify/parse round-trip.
   - Add `private scheduleStatusPersist()` and `private flushStatusPersistSync()`. Wire them into the three mutation sites: HTTP handler `set`, `clearPaneState` `delete`, and `stop()` `clear` (all in `server.ts`). The `stop()` path uses the synchronous flush before `lastStatusByPaneKey.clear()`.
   - Add atomic write helper that mirrors the existing `writeEndpointFile()` pattern (tmp + rename, 0o600 mode, owner-only directory at 0o700 — see the directory and atomic-write helpers in `server.ts`). Tmp filename: `.last-status-<pid>-<uuid>.tmp` (distinct prefix so a future filename change to one writer does not affect the other). Extend the existing orphan-tmp sweep in `server.ts` to match either prefix (`.endpoint-` OR `.last-status-`) so a crash mid-write of either file is cleaned up by either subsequent start.
-  - Add `getStatusSnapshot()` so the renderer can pull the current hydrated map after its own settings/session state is ready. `setListener()` remains unchanged for the existing windowless-window recreation path.
+  - Add `getStatusSnapshot()` so the renderer can pull the current hydrated map after its own workspace session state is ready. `setListener()` remains unchanged for the existing windowless-window recreation path.
 
-- `src/main/index.ts` — pass `getDashboardEnabled` to `agentHookServer.start({...})`. Forward live `agentStatus:set` payloads with `receivedAt` and `stateStartedAt`. Existing `setListener` registration remains unchanged.
+- `src/main/index.ts` — forward live `agentStatus:set` payloads with `receivedAt` and `stateStartedAt`. Existing `setListener` registration remains unchanged.
 
-- `src/main/ipc/agent-hooks.ts` — add `agentStatus:getSnapshot`, gated on `experimentalAgentDashboard === true`, returning `agentHookServer.getStatusSnapshot()`. The existing `agentStatus:drop` handler continues to call `agentHookServer.dropStatusEntry(paneKey)`. `clearPaneState` is reserved for PTY-teardown, where wiping prompt/tool caches alongside the status entry is correct.
+- `src/main/ipc/agent-hooks.ts` — add `agentStatus:getSnapshot`, returning `agentHookServer.getStatusSnapshot()`. The existing `agentStatus:drop` handler continues to call `agentHookServer.dropStatusEntry(paneKey)`. `clearPaneState` is reserved for PTY-teardown, where wiping prompt/tool caches alongside the status entry is correct.
 
-- `src/renderer/src/hooks/useIpcEvents.ts` — make the `agentStatus.onSet` handler require both the dashboard gate and `workspaceSessionReady`. Add a store subscription that calls `window.api.agentStatus.getSnapshot()` once when those conditions become true, re-resolves each paneKey, drops unknown-tab entries, and applies the rest through `setAgentStatus` with timing metadata.
+- `src/renderer/src/hooks/useIpcEvents.ts` — make the `agentStatus.onSet` handler require `workspaceSessionReady`. Add a store subscription that calls `window.api.agentStatus.getSnapshot()` once when the workspace session becomes ready, re-resolves each paneKey, drops unknown-tab entries, and applies the rest through `setAgentStatus` with timing metadata.
 
 - `src/renderer/src/store/slices/agent-status.ts` — extend `setAgentStatus` to accept optional `{ updatedAt, stateStartedAt }` timing. Use those values for snapshot hydration, and ignore stale snapshot entries if a newer live push is already present.
 
@@ -242,16 +228,15 @@ Tests:
 
 - `src/main/agent-hooks/server.test.ts` — extend with:
   - Sanitization unit tests: bad version, missing entries, malformed paneKey, key/embedded paneKey mismatch, payload that fails `normalizeAgentStatusPayload`.
-  - Persistence unit tests: a `set` schedules a write; the debounce coalesces two rapid `set`s into one write; identical-payload writes are skipped; `stop()` flushes synchronously; flipping the gate from on → off deletes the file (or no-ops if absent) and skips subsequent writes.
+  - Persistence unit tests: a `set` schedules a write; the debounce coalesces two rapid `set`s into one write; identical-payload writes are skipped; `stop()` flushes synchronously.
   - Hydration unit tests: starting with a populated file populates `lastStatusByPaneKey` before the HTTP listener binds; missing file is a no-op; corrupt file is a no-op + warn.
   - Snapshot test: after hydrate, `getStatusSnapshot()` returns the hydrated entries with timing metadata.
-  - Gate test: with `getDashboardEnabled` returning false, `start()` skips hydration and `set` skips writes.
 - Existing `useRetainedAgents.test.ts` runs unchanged.
 - New renderer test in the existing agent-status slice test file: `dropAgentStatus` fires `window.api.agentStatus.drop(paneKey)` exactly once after its zustand mutation; double-drop on the same paneKey only fires once (idempotent).
-- New IPC handler tests in the existing main-process test suite: `agentStatus:drop` with the gate on calls `dropStatusEntry`; with the gate off, the call is a no-op. `agentStatus:getSnapshot` returns cached entries with the gate on and an empty array with the gate off.
-- New snapshot tests in `useIpcEvents.test.ts`: early `agentStatus:set` pushes before settings/session readiness are ignored, `getSnapshot()` is pulled once after readiness, entries whose tabs are still unknown are discarded, and no snapshot is requested while the dashboard gate is off.
+- New IPC handler tests in the existing main-process test suite: `agentStatus:drop` calls `dropStatusEntry`; `agentStatus:getSnapshot` returns cached entries.
+- New snapshot tests in `useIpcEvents.test.ts`: early `agentStatus:set` pushes before session readiness are ignored, `getSnapshot()` is pulled once after readiness, and entries whose tabs are still unknown are discarded.
 - New worktree-archive IPC fan-out test on the slice: calling `dismissRetainedAgentsByWorktree(worktreeId)` fires `window.api.agentStatus.drop(paneKey)` once for each retained paneKey under that worktree.
-- Integration sanity check (manual or in the dashboard suite): a `done` agent finishes → quit → file is written → relaunch → renderer's `agentStatusByPaneKey` is populated after settings/session hydration and snapshot pull → the inline list renders the row → dismiss → re-quit → relaunch → no row.
+- Integration sanity check (manual or in the dashboard suite): a `done` agent finishes → quit → file is written → relaunch → renderer's `agentStatusByPaneKey` is populated after workspace session hydration and snapshot pull → the inline list renders the row → dismiss → re-quit → relaunch → no row.
 
 Telemetry:
 
@@ -271,7 +256,7 @@ Follow-ups (explicitly out of this design):
 - Persisting `retainedAgentsByPaneKey`, `acknowledgedAgentsByPaneKey`, or `retentionSuppressedPaneKeys`. The renderer's retention slice is computed downstream from the live cache; the live cache is now persistent, so retention falls out for free.
 - Daemon-side persistence. The daemon owns PTY lifetime and does not see hook events. The hook server (in the Electron main process) is the right home.
 - Cross-device sync. The persisted file lives in local `userData/agent-hooks/`; running Orca on a second machine does not carry status over.
-- A dedicated settings UI. The behavior is implicit when the experimental dashboard is on; no new toggle is added.
+- A dedicated settings UI. Agent activity is default-on; no new toggle is added.
 - Backfill or migration for users on prior builds. Absence of the file is the same as an empty cache.
 
 ## Why this beats the renderer-side alternative
@@ -286,7 +271,7 @@ The renderer-side approach was strictly smaller code; the upstream approach is s
 
 ## Acceptance Criteria
 
-- **Done row preservation.** Toggle the experimental agent dashboard on. Run an agent to completion. Quit and relaunch Orca. The completion row appears in the worktree's inline agents list after renderer settings and workspace tabs hydrate and the snapshot pull completes.
+- **Done row preservation.** Run an agent to completion. Quit and relaunch Orca. The completion row appears in the worktree's inline agents list after workspace tabs hydrate and the snapshot pull completes.
 - **Blocked row preservation.** Same flow, but quit while a Claude is sitting at a permission prompt (`blocked`). After relaunch, the blocked row is visible with the same prompt text and tool name.
 - **Quiet working preservation.** Same flow, but quit while an agent is in `working` state and not currently emitting events. After relaunch, the row shows `working` with the last-known tool/prompt context. As soon as the agent emits its next event, the row updates naturally.
 - **Live overwrite.** A hydrated row is overwritten when a new hook event fires for the same paneKey post-restart. No UI artifacts (no flicker, no double-rendered row, no orphan retention).
@@ -295,8 +280,5 @@ The renderer-side approach was strictly smaller code; the upstream approach is s
 - **Worktree archive is sticky across restart.** Archive a worktree that has retained agents. Quit and relaunch. None of those rows reappear and `last-status.json` no longer contains them (verified by inspecting the file on disk).
 - **Worktree archived between sessions.** A row is hydrated for a paneKey whose worktree was archived during the previous session. The row does not appear in the dashboard (the renderer's per-worktree filter hides it). No errors thrown.
 - **Tab closed between sessions (race window).** A row is hydrated for a paneKey whose tab was closed in the gap between final write and quit. The row does not appear in the dashboard (the renderer's per-tab filter hides it).
-- **Flag off the entire time.** With `experimentalAgentDashboard` off, the file is never written. `userData/agent-hooks/last-status.json` does not appear on disk. The hook server still runs (cursor-agent title-driving in `index.ts` still works).
-- **Flag flipped off mid-session.** A populated cache exists in memory; the user toggles the flag off. The next scheduled write deletes `last-status.json` (idempotent if already absent) and subsequent scheduled writes are skipped. Memory state is unchanged.
-- **Flag flipped off, then quit, then on.** With the flag off, the file was deleted by the gate-flip-off path (or never created if the user never opted in). Quit. Relaunch with the flag back on; the file is absent → hydration is a no-op → the dashboard starts clean. The first new hook event after launch will recreate the file from a fresh write.
 - **Corrupt file.** Hand-edit `last-status.json` to invalid JSON. Relaunch. Single console warn, dashboard renders normally, no rows from the corrupt file. The first new event repopulates the file from a clean state.
 - **Bounded renderer changes.** `src/renderer/src/components/dashboard/useRetainedAgents.ts`, `src/renderer/src/components/dashboard/useDashboardData.ts`, and `src/renderer/src/App.tsx` are not modified. Existing tests in `useRetainedAgents.test.ts` pass unchanged. The renderer change is limited to snapshot application in `useIpcEvents.ts` and timing-aware `setAgentStatus(...)` hydration.

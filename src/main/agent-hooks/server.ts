@@ -23,13 +23,13 @@ import {
 } from '../../shared/agent-status-types'
 import { ORCA_HOOK_PROTOCOL_VERSION } from '../../shared/agent-hook-types'
 
-// Why: Pi is intentionally absent. Pi has no shell-command hook surface —
-// its extensibility is an in-process TypeScript extension API (pi.on(...)
-// with events like turn_start/turn_end/tool_execution_start), not a
-// settings.json hook block that we could install alongside the Claude/Codex/
-// Gemini ones. Wiring Pi would require shipping a bundled Pi extension
-// that POSTs to this server; until we do that, Pi panes fall back to
-// terminal-title heuristics like any uninstrumented CLI.
+// Why: Pi rides this server via a bundled extension (see
+// pi/agent-status-extension-source) that fetch()es /hook/pi from inside
+// the pi Node process. Like OpenCode, pi has no settings.json hook
+// surface — its extensibility is the in-process TypeScript extension API
+// (pi.on('agent_start'), 'tool_call', etc.), so the extension pre-maps
+// pi's event names to the same hook_event_name vocabulary used here
+// before POSTing. See normalizePiEvent below for the mapping.
 //
 // OpenCode rides this server via a bundled plugin (see opencode/hook-service)
 // that fetch()es /hook/opencode from inside the OpenCode process. Unlike
@@ -42,7 +42,7 @@ import { ORCA_HOOK_PROTOCOL_VERSION } from '../../shared/agent-hook-types'
 // conceptually similar to Claude's settings.json hooks but uses camelCase
 // event names (beforeSubmitPrompt, preToolUse, postToolUse, stop, etc.) per
 // https://cursor.com/docs/hooks. See normalizeCursorEvent below.
-type AgentHookSource = 'claude' | 'codex' | 'gemini' | 'opencode' | 'cursor'
+type AgentHookSource = 'claude' | 'codex' | 'gemini' | 'opencode' | 'cursor' | 'pi'
 
 type AgentHookEventBasePayload = {
   paneKey: string
@@ -278,7 +278,20 @@ const TOOL_INPUT_KEYS_BY_TOOL: Record<string, readonly string[]> = {
   exec_command: ['cmd', 'command'],
   shell_command: ['cmd', 'command'],
   apply_patch: ['path', 'file_path'],
-  view_image: ['path', 'file_path']
+  view_image: ['path', 'file_path'],
+  // Pi tools (lowercase names matching pi's built-in tool registry).
+  // Why: pi's tool_call event forwards the raw input object; surface the
+  // canonical preview field per tool so dashboard rows show useful context
+  // (file path, command, search pattern) without the receiver knowing
+  // anything pi-specific beyond these key names. `glob` is shared with
+  // Gemini (same shape: { pattern }), so no separate entry is needed.
+  bash: ['command'],
+  read: ['path', 'file_path'],
+  write: ['path', 'file_path'],
+  edit: ['path', 'file_path'],
+  grep: ['pattern'],
+  web_search: ['query'],
+  fetch_content: ['url']
 }
 
 function deriveToolInputPreview(
@@ -667,6 +680,33 @@ function extractCursorToolFields(
   return {}
 }
 
+// Why: pi's tool_call / tool_execution_start / tool_execution_end events all
+// carry `tool_name` + `tool_input` in the same shape, so they share one
+// extraction branch; resolveToolState merges across events last-write-wins so
+// the most recent one wins naturally. message_end (assistant role) carries
+// `text` — pi's analogue of Claude's last_assistant_message on Stop.
+function extractPiToolFields(
+  eventName: unknown,
+  hookPayload: Record<string, unknown>
+): ToolSnapshot {
+  if (
+    eventName === 'tool_call' ||
+    eventName === 'tool_execution_start' ||
+    eventName === 'tool_execution_end'
+  ) {
+    const toolName = readString(hookPayload, 'tool_name')
+    const toolInput = deriveToolInputPreview(toolName, hookPayload.tool_input)
+    return { toolName, toolInput }
+  }
+  if (eventName === 'message_end' && hookPayload.role === 'assistant') {
+    const text = readString(hookPayload, 'text')
+    if (text) {
+      return { lastAssistantMessage: text }
+    }
+  }
+  return {}
+}
+
 function isNewTurnEvent(source: AgentHookSource, eventName: unknown): boolean {
   if (source === 'claude') {
     return eventName === 'UserPromptSubmit'
@@ -685,6 +725,12 @@ function isNewTurnEvent(source: AgentHookSource, eventName: unknown): boolean {
     // the fresh prompt). sessionStart also begins a fresh session and should
     // not inherit any cached tool state from whatever was left on disk.
     return eventName === 'beforeSubmitPrompt' || eventName === 'sessionStart'
+  }
+  if (source === 'pi') {
+    // Why: pi fires before_agent_start at the start of every user turn,
+    // carrying the fresh prompt. Reset cached tool state then so a previous
+    // turn's tool preview does not bleed into the new one.
+    return eventName === 'before_agent_start'
   }
   // Why: OpenCode has no UserPromptSubmit analogue, AND the plugin emits the
   // user's MessagePart *before* SessionBusy (message.updated fires on prompt
@@ -711,6 +757,9 @@ function extractToolFields(
   }
   if (source === 'cursor') {
     return extractCursorToolFields(eventName, hookPayload)
+  }
+  if (source === 'pi') {
+    return extractPiToolFields(eventName, hookPayload)
   }
   return extractOpenCodeToolFields(eventName, hookPayload)
 }
@@ -961,6 +1010,63 @@ function normalizeCursorEvent(
   )
 }
 
+// Why: pi exposes an in-process TypeScript extension API (no settings.json
+// hook surface). The bundled orca-agent-status extension installed into the
+// per-PTY pi overlay (PiTitlebarExtensionService) translates pi's lifecycle
+// events into the hook_event_name vocabulary used here so the dashboard
+// row sees the same working/done shape as Claude/Codex/Gemini.
+//
+// Mapping:
+//   before_agent_start | agent_start | tool_call | tool_execution_start |
+//   tool_execution_end | message_end                                       → working
+//   agent_end | session_shutdown                                           → done
+//
+// pi has no permission-prompt event we can hook today (tool_call CAN block
+// via { block: true, reason } but that's a synchronous return, not a
+// separate event), so there is no `waiting` state for pi yet. message_end
+// stays in `working` because the true turn-end signal is agent_end — the
+// assistant message body just updates lastAssistantMessage on the
+// already-active turn.
+function normalizePiEvent(
+  eventName: unknown,
+  promptText: string,
+  paneKey: string,
+  hookPayload: Record<string, unknown>
+): ParsedAgentStatusPayload | null {
+  const state =
+    eventName === 'before_agent_start' ||
+    eventName === 'agent_start' ||
+    eventName === 'tool_call' ||
+    eventName === 'tool_execution_start' ||
+    eventName === 'tool_execution_end' ||
+    eventName === 'message_end'
+      ? 'working'
+      : eventName === 'agent_end' || eventName === 'session_shutdown'
+        ? 'done'
+        : null
+
+  if (!state) {
+    return null
+  }
+
+  const snapshot = resolveToolState(paneKey, extractToolFields('pi', eventName, hookPayload), {
+    resetOnNewTurn: isNewTurnEvent('pi', eventName)
+  })
+
+  return parseAgentStatusPayload(
+    JSON.stringify({
+      state,
+      prompt: resolvePrompt(paneKey, promptText, {
+        resetOnNewTurn: isNewTurnEvent('pi', eventName)
+      }),
+      agentType: 'pi',
+      toolName: snapshot.toolName,
+      toolInput: snapshot.toolInput,
+      lastAssistantMessage: snapshot.lastAssistantMessage
+    })
+  )
+}
+
 function readStringField(record: Record<string, unknown>, key: string): string | undefined {
   const value = record[key]
   if (typeof value !== 'string') {
@@ -1055,7 +1161,9 @@ function normalizeHookPayload(
           ? normalizeGeminiEvent(eventName, promptText, paneKey, hookPayloadRecord)
           : source === 'cursor'
             ? normalizeCursorEvent(eventName, promptText, paneKey, hookPayloadRecord)
-            : normalizeOpenCodeEvent(eventName, promptText, paneKey, hookPayloadRecord)
+            : source === 'pi'
+              ? normalizePiEvent(eventName, promptText, paneKey, hookPayloadRecord)
+              : normalizeOpenCodeEvent(eventName, promptText, paneKey, hookPayloadRecord)
 
   return payload ? { paneKey, tabId, worktreeId, payload } : null
 }
@@ -1220,11 +1328,6 @@ export class AgentHookServer {
   // tests that skip the userDataPath option) — in that case, persistence is
   // a no-op and only in-memory replay applies.
   private lastStatusFilePath: string | null = null
-  // Why: closure that reads the experimentalAgentDashboard setting at write
-  // time. Passed in from index.ts so the hook server stays decoupled from
-  // the Store class. Null fails closed: future callers must opt into disk
-  // persistence explicitly.
-  private getDashboardEnabled: (() => boolean) | null = null
   // Why: trailing-edge debounce timer. captured per-instance so multiple
   // server instances in the same process (tests) don't share state.
   private statusPersistTimer: ReturnType<typeof setTimeout> | null = null
@@ -1232,10 +1335,6 @@ export class AgentHookServer {
   // exactly match the last successful disk write. Cheap protection against
   // re-firing trailing timers when nothing changed.
   private lastWrittenJson: string | null = null
-  // Why: when the gate flips on → off, we delete the file once and skip
-  // subsequent scheduled writes until the gate flips back on. Tracking
-  // delete-attempted on the instance avoids re-stat'ing on every tick.
-  private deletedOnDisable = false
 
   setListener(listener: ((payload: AgentHookEventPayload) => void) | null): void {
     this.onAgentStatus = listener
@@ -1269,11 +1368,7 @@ export class AgentHookServer {
     }
   }
 
-  async start(options?: {
-    env?: string
-    userDataPath?: string
-    getDashboardEnabled?: () => boolean
-  }): Promise<void> {
+  async start(options?: { env?: string; userDataPath?: string }): Promise<void> {
     if (this.server) {
       return
     }
@@ -1286,18 +1381,14 @@ export class AgentHookServer {
       this.endpointFilePathCache = join(this.endpointDir, getEndpointFileName())
       this.lastStatusFilePath = join(this.endpointDir, LAST_STATUS_FILE_NAME)
     }
-    if (options?.getDashboardEnabled) {
-      this.getDashboardEnabled = options.getDashboardEnabled
-    }
     this.token = randomUUID()
     this.endpointFileWritten = false
     this.lastWrittenJson = null
-    this.deletedOnDisable = false
     // Why: hydrate before binding the HTTP listener so any new hook POST
     // (which goes through lastStatusByPaneKey.set) runs against an already-
     // populated map. The renderer later pulls this map as a snapshot after
-    // its settings and workspace tabs are hydrated.
-    if (this.lastStatusFilePath && this.isDashboardEnabled()) {
+    // workspace tabs are hydrated.
+    if (this.lastStatusFilePath) {
       this.hydrateLastStatusFromDisk()
     }
     this.server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
@@ -1337,7 +1428,9 @@ export class AgentHookServer {
                   ? 'opencode'
                   : pathname === '/hook/cursor'
                     ? 'cursor'
-                    : null
+                    : pathname === '/hook/pi'
+                      ? 'pi'
+                      : null
         if (!source) {
           res.writeHead(404)
           res.end()
@@ -1419,9 +1512,7 @@ export class AgentHookServer {
     this.endpointFilePathCache = null
     this.endpointFileWritten = false
     this.lastStatusFilePath = null
-    this.getDashboardEnabled = null
     this.lastWrittenJson = null
-    this.deletedOnDisable = false
     // Why: drop all per-pane cache entries on shutdown so a subsequent start()
     // in the same process (e.g. during tests or a settings-driven restart)
     // does not inherit stale prompt/tool state from the previous run.
@@ -1627,14 +1718,6 @@ export class AgentHookServer {
     }
   }
 
-  // Why: fail closed when the gate isn't wired so a future caller of start()
-  // that forgets the closure cannot silently leak hook payloads to disk.
-  // Production main always passes the closure; tests that need persistence
-  // pass `getDashboardEnabled: () => true` explicitly.
-  private isDashboardEnabled(): boolean {
-    return this.getDashboardEnabled?.() === true
-  }
-
   private hydrateLastStatusFromDisk(): void {
     if (!this.lastStatusFilePath) {
       return
@@ -1643,7 +1726,7 @@ export class AgentHookServer {
     try {
       raw = readFileSync(this.lastStatusFilePath, 'utf8')
     } catch (err) {
-      // Why: missing file is the common case (first launch with the gate on).
+      // Why: missing file is the common case (first launch).
       // Other errors (EACCES, etc.) degrade to empty hydration with a single
       // warn so the dashboard renders normally.
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
@@ -1754,37 +1837,6 @@ export class AgentHookServer {
     if (!this.lastStatusFilePath || !this.endpointDir) {
       return
     }
-    if (!this.isDashboardEnabled()) {
-      // Why: when the gate flips off, delete the existing file once so the
-      // user has no hook-payload data on disk. Subsequent ticks no-op until
-      // the gate flips back on; tracking deletedOnDisable on the instance
-      // avoids re-stat'ing every tick.
-      if (this.deletedOnDisable) {
-        return
-      }
-      // Why: a transient unlink failure must not permanently suppress retries —
-      // the gate is OFF and the file must come off disk on a future tick.
-      let removed = false
-      try {
-        unlinkSync(this.lastStatusFilePath)
-        removed = true
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-          removed = true
-        } else {
-          console.warn('[agent-hooks] failed to delete last-status file:', err)
-        }
-      }
-      if (removed) {
-        this.deletedOnDisable = true
-        this.lastWrittenJson = null
-      }
-      return
-    }
-    // Why: the gate is back on after being off — clear the suppression
-    // flag so the next on→off transition deletes the freshly-written file
-    // again instead of being skipped.
-    this.deletedOnDisable = false
     const json = this.serializeStatusFile()
     if (json === this.lastWrittenJson) {
       return

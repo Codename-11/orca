@@ -57,7 +57,7 @@ describe('dropAgentStatus → IPC fan-out', () => {
     expect(drop).toHaveBeenCalledWith('tab-missing:0')
   })
 
-  it('idempotent: repeated drops on the same paneKey fire the IPC each time (main-side gate is the dedupe)', () => {
+  it('idempotent: repeated drops on the same paneKey fire the IPC each time', () => {
     // Why: the renderer keeps drop() side-effect free relative to its own
     // state — sending an extra IPC for an already-dropped paneKey is safe
     // because main-side dropStatusEntry is a no-op when the entry is gone.

@@ -6,13 +6,12 @@ import { claudeHookService } from '../claude/hook-service'
 import { codexHookService } from '../codex/hook-service'
 import { geminiHookService } from '../gemini/hook-service'
 import { cursorHookService } from '../cursor/hook-service'
-import type { Store } from '../persistence'
 
 // Why: install/remove are intentionally not exposed to the renderer. Orca
 // auto-installs managed hooks at app startup (see src/main/index.ts), so a
 // renderer-triggered remove would be silently reverted on the next launch
 // and mislead the user.
-export function registerAgentHookHandlers(store: Store): void {
+export function registerAgentHookHandlers(): void {
   // Why: matches the defensive pattern in src/main/ipc/pty.ts so re-registration
   // never throws "Attempted to register a second handler..." if this function is
   // ever invoked more than once (e.g. the macOS app re-activation path that
@@ -33,12 +32,6 @@ export function registerAgentHookHandlers(store: Store): void {
     if (typeof paneKey !== 'string' || !isValidPaneKey(paneKey)) {
       return
     }
-    // Why: gate on the same experimentalAgentDashboard flag used everywhere
-    // else in main. dropStatusEntry is itself idempotent, but the gate keeps
-    // a non-opted-in renderer from churning the persistence path.
-    if (store.getSettings().experimentalAgentDashboard !== true) {
-      return
-    }
     try {
       // Why: dropStatusEntry (not clearPaneState) is correct here — the user is
       // dismissing a status row, not tearing down a PTY. clearPaneState would also
@@ -50,12 +43,8 @@ export function registerAgentHookHandlers(store: Store): void {
     }
   })
   ipcMain.handle('agentStatus:getSnapshot', (): AgentStatusIpcPayload[] => {
-    // Why: the renderer pulls this after settings + workspace hydration, so
-    // startup cannot lose replayed statuses while its local store is still
-    // empty. Keep the same opt-in gate as push delivery and disk writes.
-    if (store.getSettings().experimentalAgentDashboard !== true) {
-      return []
-    }
+    // Why: the renderer pulls this after workspace hydration, so startup cannot
+    // lose replayed statuses while its local store is still empty.
     return agentHookServer.getStatusSnapshot()
   })
 

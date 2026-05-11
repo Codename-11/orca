@@ -97,20 +97,28 @@ const FIELD_VALUES_PAGE_SIZE = 100
 // module locals so a dev-time code swap naturally re-runs capability probes
 // instead of carrying a stale "unsupported" flag into fresh code.
 const ownerTypeCache = new Map<string, GitHubProjectOwnerType | null>()
-let parentFieldRetried = false
-let parentFieldWarningLogged = false
-// Why: concurrent fetchAllItems calls all observe parentFieldRetried=false,
-// each issuing a duplicate first-page probe and racing to set the flag. Use
-// an in-flight promise so only one caller drives the probe; siblings await
-// the same result.
-let parentFieldProbeInFlight: Promise<void> | null = null
+// Why: keyed by `${owner}\0${ownerType}` rather than a process-global flag so
+// a single owner's capability gap (e.g. token without scope on org A) doesn't
+// poison every subsequent fetch for unrelated owners that DO support
+// Issue.parent. See bug-scan finding 2.
+const parentFieldRetriedByOwner = new Set<string>()
+const parentFieldWarningLoggedByOwner = new Set<string>()
+// Why: concurrent fetchAllItems calls for the same owner all observe the
+// same "not-yet-retried" state, each issuing a duplicate first-page probe
+// and racing to set the flag. Use an in-flight promise per owner so only
+// one caller drives the probe; siblings await the same result.
+const parentFieldProbeInFlight = new Map<string, Promise<void>>()
+
+function ownerScopeKey(owner: string, ownerType: GitHubProjectOwnerType): string {
+  return `${owner}\u0000${ownerType}`
+}
 
 /** @internal — test-only */
 export function _resetProjectViewModuleState(): void {
   ownerTypeCache.clear()
-  parentFieldRetried = false
-  parentFieldWarningLogged = false
-  parentFieldProbeInFlight = null
+  parentFieldRetriedByOwner.clear()
+  parentFieldWarningLoggedByOwner.clear()
+  parentFieldProbeInFlight.clear()
 }
 
 // ─── Normalizers ───────────────────────────────────────────────────────
@@ -870,30 +878,37 @@ async function fetchAllItems(args: {
   | { ok: true; rows: GitHubProjectRow[]; totalCount: number; parentFieldDropped: boolean }
   | { ok: false; error: GitHubProjectViewError; totalCount?: number }
 > {
-  // Why: if another caller is currently probing whether Issue.parent is
-  // supported, await its decision so we don't fire a duplicate with-parent
-  // probe and don't capture a stale includeParent. We must re-read
-  // parentFieldRetried AFTER awaiting because the probe may have flipped it.
-  if (parentFieldProbeInFlight) {
-    await parentFieldProbeInFlight.catch(() => {})
+  // Why: caches keyed by (owner, ownerType) so a single owner's lack of
+  // Issue.parent capability (e.g. token without scope on org A) doesn't
+  // poison fetches for unrelated owners. See bug-scan finding 2.
+  const scopeKey = ownerScopeKey(args.owner, args.ownerType)
+  // Why: if another caller for the SAME owner is currently probing whether
+  // Issue.parent is supported, await its decision so we don't fire a
+  // duplicate with-parent probe. We must re-read the retried flag AFTER
+  // awaiting because the probe may have flipped it.
+  const inFlight = parentFieldProbeInFlight.get(scopeKey)
+  if (inFlight) {
+    await inFlight.catch(() => {})
   }
-  let includeParent = !parentFieldRetried
-  let parentFieldDropped = parentFieldRetried
-  // First page — single-flight the with-parent attempt so concurrent callers
-  // observe one probe result instead of each issuing their own. We must
-  // assign parentFieldProbeInFlight synchronously (no await between the
-  // null check and the assignment) so concurrent callers race on the same
-  // promise rather than each creating a duplicate probe.
+  let includeParent = !parentFieldRetriedByOwner.has(scopeKey)
+  let parentFieldDropped = !includeParent
+  // First page — single-flight the with-parent attempt PER OWNER so
+  // concurrent callers for the same owner observe one probe result instead
+  // of each issuing their own. We must assign the in-flight promise
+  // synchronously (no await between the get() check and the set()) so
+  // concurrent callers race on the same promise rather than each creating
+  // a duplicate probe.
   let first: Awaited<ReturnType<typeof fetchItemsPageWithRaw>>
   let probePromise: Promise<Awaited<ReturnType<typeof fetchItemsPageWithRaw>>> | null = null
-  if (includeParent && !parentFieldProbeInFlight) {
+  if (includeParent && !parentFieldProbeInFlight.has(scopeKey)) {
     let resolveProbe: () => void = () => {}
-    parentFieldProbeInFlight = new Promise<void>((resolve) => {
+    const probe = new Promise<void>((resolve) => {
       resolveProbe = resolve
     })
+    parentFieldProbeInFlight.set(scopeKey, probe)
     probePromise = (async () => {
       try {
-        return await fetchItemsPageWithRaw({
+        const result = await fetchItemsPageWithRaw({
           owner: args.owner,
           ownerType: args.ownerType,
           projectNumber: args.projectNumber,
@@ -902,9 +917,19 @@ async function fetchAllItems(args: {
           after: null,
           includeParent: true
         })
+        // Why: flip parentFieldRetriedByOwner BEFORE resolveProbe()/clearing
+        // parentFieldProbeInFlight so siblings that awoke on `inFlight.catch()`
+        // observe the updated flag. Doing this in the outer block (after
+        // `await probePromise`) leaves a gap where siblings see
+        // parentFieldProbeInFlight=null and parentFieldRetriedByOwner without
+        // the scopeKey, then issue duplicate with-parent probes.
+        if (!result.ok && errorsIndicateParentField(result.rawErrors, result.stderr)) {
+          parentFieldRetriedByOwner.add(scopeKey)
+        }
+        return result
       } finally {
         resolveProbe()
-        parentFieldProbeInFlight = null
+        parentFieldProbeInFlight.delete(scopeKey)
       }
     })()
     first = await probePromise
@@ -920,16 +945,17 @@ async function fetchAllItems(args: {
     })
   }
   if (!first.ok && includeParent && errorsIndicateParentField(first.rawErrors, first.stderr)) {
-    // Retry the whole table without parent. Set module flag so the rest of
-    // the process never re-probes until HMR or restart.
-    parentFieldRetried = true
+    // Retry the whole table without parent. Mark this owner as retried so
+    // subsequent fetches against the same owner skip the probe — but other
+    // owners are unaffected.
+    parentFieldRetriedByOwner.add(scopeKey)
     includeParent = false
     parentFieldDropped = true
-    if (!parentFieldWarningLogged) {
+    if (!parentFieldWarningLoggedByOwner.has(scopeKey)) {
       console.warn(
-        '[project-view] Issue.parent is not available on this token — retrying without the parent selection.'
+        `[project-view] Issue.parent is not available for ${args.owner} on this token — retrying without the parent selection.`
       )
-      parentFieldWarningLogged = true
+      parentFieldWarningLoggedByOwner.add(scopeKey)
     }
     first = await fetchItemsPageWithRaw({
       owner: args.owner,

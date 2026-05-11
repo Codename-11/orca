@@ -1246,11 +1246,14 @@ export default function TaskPage(): React.JSX.Element {
       githubSearchPersistReadyRef.current = true
       return
     }
-    if (activeTaskPreset !== null) {
-      return
-    }
+    // Why: persist the debounced applied query regardless of the active
+    // preset. The preset-click handler writes the canonical query for that
+    // preset, so persisting again here is at worst idempotent. When the
+    // user types into the search box `handleTaskSearchChange` clears the
+    // preset, but persisting unconditionally also covers paths that change
+    // appliedTaskSearch without going through that handler.
     setTaskResumeState({
-      githubItemsPreset: null,
+      githubItemsPreset: activeTaskPreset,
       githubItemsQuery: appliedTaskSearch.trim()
     })
   }, [activeTaskPreset, appliedTaskSearch, setTaskResumeState, taskResumeApplied])

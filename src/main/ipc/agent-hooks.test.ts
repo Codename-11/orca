@@ -2,8 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Why: cover the agentStatus:drop IPC handler — it must propagate the
 // renderer dismissal to dropStatusEntry so the on-disk last-status file
-// evicts the entry. Gated on experimentalAgentDashboard so a non-opted-in
-// renderer cannot churn the persistence path.
+// evicts the entry.
 
 const dropStatusEntry = vi.fn()
 const getStatusSnapshot = vi.fn()
@@ -68,7 +67,7 @@ afterEach(() => {
 })
 
 describe('agentStatus:getSnapshot IPC', () => {
-  it('returns the hook cache snapshot when the experimental dashboard is on', async () => {
+  it('returns the hook cache snapshot', async () => {
     const snapshot = [
       {
         paneKey: 'tab-1:0',
@@ -81,37 +80,18 @@ describe('agentStatus:getSnapshot IPC', () => {
     ]
     getStatusSnapshot.mockReturnValue(snapshot)
     const { registerAgentHookHandlers } = await import('./agent-hooks')
-    const store = {
-      getSettings: () => ({ experimentalAgentDashboard: true })
-    } as { getSettings: () => { experimentalAgentDashboard: boolean } }
-    registerAgentHookHandlers(store as unknown as Parameters<typeof registerAgentHookHandlers>[0])
+    registerAgentHookHandlers()
 
     const handler = handleHandlers.get('agentStatus:getSnapshot')
     expect(handler).toBeDefined()
     expect(handler!({})).toEqual(snapshot)
   })
-
-  it('returns an empty snapshot when the experimental dashboard is off', async () => {
-    getStatusSnapshot.mockReturnValue([{ paneKey: 'tab-1:0' }])
-    const { registerAgentHookHandlers } = await import('./agent-hooks')
-    const store = {
-      getSettings: () => ({ experimentalAgentDashboard: false })
-    } as { getSettings: () => { experimentalAgentDashboard: boolean } }
-    registerAgentHookHandlers(store as unknown as Parameters<typeof registerAgentHookHandlers>[0])
-
-    const handler = handleHandlers.get('agentStatus:getSnapshot')!
-    expect(handler({})).toEqual([])
-    expect(getStatusSnapshot).not.toHaveBeenCalled()
-  })
 })
 
 describe('agentStatus:drop IPC', () => {
-  it('forwards drop to dropStatusEntry when the experimental dashboard is on', async () => {
+  it('forwards drop to dropStatusEntry', async () => {
     const { registerAgentHookHandlers } = await import('./agent-hooks')
-    const store = {
-      getSettings: () => ({ experimentalAgentDashboard: true })
-    } as { getSettings: () => { experimentalAgentDashboard: boolean } }
-    registerAgentHookHandlers(store as unknown as Parameters<typeof registerAgentHookHandlers>[0])
+    registerAgentHookHandlers()
 
     const handler = onHandlers.get('agentStatus:drop')
     expect(handler).toBeDefined()
@@ -119,23 +99,9 @@ describe('agentStatus:drop IPC', () => {
     expect(dropStatusEntry).toHaveBeenCalledWith('tab-1:0')
   })
 
-  it('no-ops when the experimental dashboard is off (the gate prevents persistence churn)', async () => {
-    const { registerAgentHookHandlers } = await import('./agent-hooks')
-    const store = {
-      getSettings: () => ({ experimentalAgentDashboard: false })
-    } as { getSettings: () => { experimentalAgentDashboard: boolean } }
-    registerAgentHookHandlers(store as unknown as Parameters<typeof registerAgentHookHandlers>[0])
-
-    onHandlers.get('agentStatus:drop')!({}, 'tab-1:0')
-    expect(dropStatusEntry).not.toHaveBeenCalled()
-  })
-
   it('rejects non-string paneKey (defensive against a malformed renderer message)', async () => {
     const { registerAgentHookHandlers } = await import('./agent-hooks')
-    const store = {
-      getSettings: () => ({ experimentalAgentDashboard: true })
-    } as { getSettings: () => { experimentalAgentDashboard: boolean } }
-    registerAgentHookHandlers(store as unknown as Parameters<typeof registerAgentHookHandlers>[0])
+    registerAgentHookHandlers()
 
     const handler = onHandlers.get('agentStatus:drop')!
     const bad: unknown[] = [

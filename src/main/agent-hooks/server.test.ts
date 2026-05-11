@@ -864,6 +864,154 @@ describe('Cursor hook normalization', () => {
   })
 })
 
+describe('Pi hook normalization', () => {
+  it('before_agent_start maps to working and captures the prompt', () => {
+    const result = _internals.normalizeHookPayload(
+      'pi',
+      buildBody({ hook_event_name: 'before_agent_start', prompt: 'rename this fn' }),
+      'production'
+    )
+    expect(result?.payload.state).toBe('working')
+    expect(result?.payload.agentType).toBe('pi')
+    expect(result?.payload.prompt).toBe('rename this fn')
+  })
+
+  it('agent_start without a prompt keeps the cached prompt from the current turn', () => {
+    _internals.normalizeHookPayload(
+      'pi',
+      buildBody({ hook_event_name: 'before_agent_start', prompt: 'first prompt' }),
+      'production'
+    )
+    const result = _internals.normalizeHookPayload(
+      'pi',
+      buildBody({ hook_event_name: 'agent_start' }),
+      'production'
+    )
+    expect(result?.payload.state).toBe('working')
+    expect(result?.payload.prompt).toBe('first prompt')
+  })
+
+  it('before_agent_start clears the previous turn’s tool cache', () => {
+    _internals.normalizeHookPayload(
+      'pi',
+      buildBody({
+        hook_event_name: 'tool_call',
+        tool_name: 'bash',
+        tool_input: { command: 'ls' }
+      }),
+      'production'
+    )
+    const result = _internals.normalizeHookPayload(
+      'pi',
+      buildBody({ hook_event_name: 'before_agent_start', prompt: 'next' }),
+      'production'
+    )
+    expect(result?.payload.toolName).toBeUndefined()
+    expect(result?.payload.toolInput).toBeUndefined()
+  })
+
+  it('tool_call surfaces tool_name + tool_input preview', () => {
+    const result = _internals.normalizeHookPayload(
+      'pi',
+      buildBody({
+        hook_event_name: 'tool_call',
+        tool_name: 'bash',
+        tool_input: { command: 'pnpm test' }
+      }),
+      'production'
+    )
+    expect(result?.payload.state).toBe('working')
+    expect(result?.payload.toolName).toBe('bash')
+    expect(result?.payload.toolInput).toBe('pnpm test')
+  })
+
+  it('tool_execution_start also populates the tool preview', () => {
+    const result = _internals.normalizeHookPayload(
+      'pi',
+      buildBody({
+        hook_event_name: 'tool_execution_start',
+        tool_name: 'read',
+        tool_input: { path: 'src/main/index.ts' }
+      }),
+      'production'
+    )
+    expect(result?.payload.state).toBe('working')
+    expect(result?.payload.toolName).toBe('read')
+    expect(result?.payload.toolInput).toBe('src/main/index.ts')
+  })
+
+  it('message_end (assistant) stays in working but captures lastAssistantMessage', () => {
+    const result = _internals.normalizeHookPayload(
+      'pi',
+      buildBody({
+        hook_event_name: 'message_end',
+        role: 'assistant',
+        text: 'Done — I refactored the helper.'
+      }),
+      'production'
+    )
+    expect(result?.payload.state).toBe('working')
+    expect(result?.payload.lastAssistantMessage).toBe('Done — I refactored the helper.')
+  })
+
+  it('message_end (user) is ignored', () => {
+    const result = _internals.normalizeHookPayload(
+      'pi',
+      buildBody({ hook_event_name: 'message_end', role: 'user', text: 'hi' }),
+      'production'
+    )
+    // Why: pi captures the user prompt via before_agent_start, not via
+    // message_end. A user-role message_end should not flip lastAssistantMessage.
+    expect(result?.payload.lastAssistantMessage).toBeUndefined()
+  })
+
+  it('agent_end maps to done', () => {
+    const result = _internals.normalizeHookPayload(
+      'pi',
+      buildBody({ hook_event_name: 'agent_end' }),
+      'production'
+    )
+    expect(result?.payload.state).toBe('done')
+    expect(result?.payload.agentType).toBe('pi')
+  })
+
+  it('session_shutdown maps to done', () => {
+    const result = _internals.normalizeHookPayload(
+      'pi',
+      buildBody({ hook_event_name: 'session_shutdown' }),
+      'production'
+    )
+    expect(result?.payload.state).toBe('done')
+  })
+
+  it('done preserves the cached lastAssistantMessage from a prior message_end', () => {
+    _internals.normalizeHookPayload(
+      'pi',
+      buildBody({
+        hook_event_name: 'message_end',
+        role: 'assistant',
+        text: 'final reply'
+      }),
+      'production'
+    )
+    const result = _internals.normalizeHookPayload(
+      'pi',
+      buildBody({ hook_event_name: 'agent_end' }),
+      'production'
+    )
+    expect(result?.payload.lastAssistantMessage).toBe('final reply')
+  })
+
+  it('unknown event names are dropped', () => {
+    const result = _internals.normalizeHookPayload(
+      'pi',
+      buildBody({ hook_event_name: 'never_heard_of_it' }),
+      'production'
+    )
+    expect(result).toBeNull()
+  })
+})
+
 describe('Endpoint file lifecycle', () => {
   let userDataPath: string
 
@@ -1101,12 +1249,11 @@ describe('Last-status persistence', () => {
     })
   }
 
-  it('writes last-status.json after a hook event when the gate is on', async () => {
+  it('writes last-status.json after a hook event', async () => {
     const server = new AgentHookServer()
     await server.start({
       env: 'production',
-      userDataPath,
-      getDashboardEnabled: () => true
+      userDataPath
     })
     try {
       await postHookEvent(
@@ -1126,58 +1273,6 @@ describe('Last-status persistence', () => {
         stateStartedAt: expect.any(Number),
         payload: expect.objectContaining({ state: 'working', prompt: 'persist me' })
       })
-    } finally {
-      server.stop()
-    }
-  })
-
-  it('skips writing when the gate is off', async () => {
-    const server = new AgentHookServer()
-    await server.start({
-      env: 'production',
-      userDataPath,
-      getDashboardEnabled: () => false
-    })
-    try {
-      await postHookEvent(
-        server,
-        buildBody({ hook_event_name: 'UserPromptSubmit', prompt: 'gated off' })
-      )
-      server.flushStatusPersistSync()
-      expect(existsSync(lastStatusPath())).toBe(false)
-    } finally {
-      server.stop()
-    }
-  })
-
-  it('deletes last-status.json once after the gate flips on -> off', async () => {
-    let enabled = true
-    const server = new AgentHookServer()
-    await server.start({
-      env: 'production',
-      userDataPath,
-      getDashboardEnabled: () => enabled
-    })
-    try {
-      await postHookEvent(
-        server,
-        buildBody({ hook_event_name: 'UserPromptSubmit', prompt: 'before flip' })
-      )
-      server.flushStatusPersistSync()
-      expect(existsSync(lastStatusPath())).toBe(true)
-      enabled = false
-      // Trigger another event; the next debounced/synchronous write should
-      // observe the gate-off state and delete the file.
-      await postHookEvent(
-        server,
-        buildBody({
-          hook_event_name: 'PostToolUse',
-          tool_name: 'Read',
-          tool_input: { file_path: '/x' }
-        })
-      )
-      server.flushStatusPersistSync()
-      expect(existsSync(lastStatusPath())).toBe(false)
     } finally {
       server.stop()
     }
@@ -1210,8 +1305,7 @@ describe('Last-status persistence', () => {
     const server = new AgentHookServer()
     await server.start({
       env: 'production',
-      userDataPath,
-      getDashboardEnabled: () => true
+      userDataPath
     })
     try {
       const listener = vi.fn()
@@ -1248,38 +1342,6 @@ describe('Last-status persistence', () => {
     }
   })
 
-  it('skips hydration when the gate is off', async () => {
-    mkdirSync(join(userDataPath, 'agent-hooks'), { recursive: true })
-    writeFileSync(
-      lastStatusPath(),
-      JSON.stringify({
-        version: 2,
-        entries: {
-          [PANE]: {
-            paneKey: PANE,
-            receivedAt: 1_700_000_000_000,
-            stateStartedAt: 1_699_999_999_000,
-            payload: { state: 'done', prompt: 'should not load', agentType: 'claude' }
-          }
-        }
-      }),
-      'utf8'
-    )
-    const server = new AgentHookServer()
-    await server.start({
-      env: 'production',
-      userDataPath,
-      getDashboardEnabled: () => false
-    })
-    try {
-      const listener = vi.fn()
-      server.setListener(listener)
-      expect(listener).not.toHaveBeenCalled()
-    } finally {
-      server.stop()
-    }
-  })
-
   it('treats a corrupt file as empty hydration without throwing', async () => {
     mkdirSync(join(userDataPath, 'agent-hooks'), { recursive: true })
     writeFileSync(lastStatusPath(), 'not-json{{', 'utf8')
@@ -1287,8 +1349,7 @@ describe('Last-status persistence', () => {
     const server = new AgentHookServer()
     await server.start({
       env: 'production',
-      userDataPath,
-      getDashboardEnabled: () => true
+      userDataPath
     })
     try {
       const listener = vi.fn()
@@ -1322,8 +1383,7 @@ describe('Last-status persistence', () => {
     const server = new AgentHookServer()
     await server.start({
       env: 'production',
-      userDataPath,
-      getDashboardEnabled: () => true
+      userDataPath
     })
     try {
       const listener = vi.fn()
@@ -1372,8 +1432,7 @@ describe('Last-status persistence', () => {
     const server = new AgentHookServer()
     await server.start({
       env: 'production',
-      userDataPath,
-      getDashboardEnabled: () => true
+      userDataPath
     })
     try {
       const listener = vi.fn()
@@ -1421,8 +1480,7 @@ describe('Last-status persistence', () => {
     const server = new AgentHookServer()
     await server.start({
       env: 'production',
-      userDataPath,
-      getDashboardEnabled: () => true
+      userDataPath
     })
     try {
       const snapshot = server.getStatusSnapshot()
@@ -1456,8 +1514,7 @@ describe('Last-status persistence', () => {
     const server = new AgentHookServer()
     await server.start({
       env: 'production',
-      userDataPath,
-      getDashboardEnabled: () => true
+      userDataPath
     })
     try {
       expect(server.getStatusSnapshot()).toEqual([])
@@ -1470,8 +1527,7 @@ describe('Last-status persistence', () => {
     const server = new AgentHookServer()
     await server.start({
       env: 'production',
-      userDataPath,
-      getDashboardEnabled: () => true
+      userDataPath
     })
     try {
       await postHookEvent(
@@ -1495,8 +1551,7 @@ describe('Last-status persistence', () => {
     const server = new AgentHookServer()
     await server.start({
       env: 'production',
-      userDataPath,
-      getDashboardEnabled: () => true
+      userDataPath
     })
     try {
       await postHookEvent(
@@ -1525,8 +1580,7 @@ describe('Last-status persistence', () => {
     const server = new AgentHookServer()
     await server.start({
       env: 'production',
-      userDataPath,
-      getDashboardEnabled: () => true
+      userDataPath
     })
     try {
       await postHookEvent(
