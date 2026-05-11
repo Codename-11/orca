@@ -6,6 +6,7 @@ import type { NsisUpdater } from 'electron-updater'
 import { is } from '@electron-toolkit/utils'
 import type { UpdateStatus } from '../shared/types'
 import { killAllPty } from './ipc/pty'
+import { withUpdaterSpan } from './observability/instrumentation'
 import {
   beginMacUpdateDownload,
   deferMacQuitUntilInstallerReady,
@@ -330,7 +331,15 @@ function runBackgroundUpdateCheck(
 }
 
 export function checkForUpdates(): void {
-  runBackgroundUpdateCheck()
+  // Fire-and-forget the span so the public function signature stays
+  // synchronous (callers do not await this). The span ends Success even if
+  // the background check ultimately fails — failure routes through
+  // `sendCheckFailureStatus` which fires its own UI status update; capturing
+  // the eventual outcome here would require threading a promise through
+  // the autoUpdater event handlers.
+  void withUpdaterSpan({ stage: 'check' }, async () => {
+    runBackgroundUpdateCheck()
+  })
 }
 
 function enableIncludePrerelease(): void {

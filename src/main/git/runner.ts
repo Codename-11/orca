@@ -6,14 +6,9 @@
  * This module detects WSL paths and routes command execution through `wsl.exe -d <distro>`
  * with translated Linux paths, so every call site gets WSL support for free.
  */
-import {
-  execFile,
-  execFileSync,
-  spawn,
-  type ChildProcess,
-  type SpawnOptions
-} from 'child_process'
+import { execFile, execFileSync, spawn, type ChildProcess, type SpawnOptions } from 'child_process'
 import { promisify } from 'util'
+import { withGitSpan } from '../observability/instrumentation'
 import { parseWslPath, toWindowsWslPath, type WslPathInfo } from '../wsl'
 
 const execFileAsync = promisify(execFile)
@@ -67,11 +62,7 @@ function translateArgsForWsl(args: string[]): string[] {
  * with ERROR_PATH_NOT_FOUND in some configurations). Using bash -c with
  * an explicit cd is universally supported.
  */
-function resolveCommand(
-  command: string,
-  args: string[],
-  cwd: string | undefined
-): ResolvedCommand {
+function resolveCommand(command: string, args: string[], cwd: string | undefined): ResolvedCommand {
   if (!cwd || process.platform !== 'win32') {
     return { binary: command, args, cwd, wsl: null }
   }
@@ -86,9 +77,7 @@ function resolveCommand(
   // inside the bash -c string. Single quotes are safe for all chars except
   // single quotes themselves, which we escape as '\'' (end quote, escaped
   // literal, reopen quote).
-  const escapedArgs = translatedArgs.map(
-    (a) => `'${a.replace(/'/g, "'\\''")}'`
-  )
+  const escapedArgs = translatedArgs.map((a) => `'${a.replace(/'/g, "'\\''")}'`)
   const escapedCwd = wsl.linuxPath.replace(/'/g, "'\\''")
   const shellCmd = `cd '${escapedCwd}' && ${command} ${escapedArgs.join(' ')}`
 
@@ -121,15 +110,24 @@ export async function gitExecFileAsync(
   args: string[],
   options: GitExecOptions
 ): Promise<{ stdout: string; stderr: string }> {
-  const resolved = resolveCommand('git', args, options.cwd)
-  const { stdout, stderr } = await execFileAsync(resolved.binary, resolved.args, {
-    cwd: resolved.cwd,
-    encoding: (options.encoding ?? 'utf-8') as BufferEncoding,
-    maxBuffer: options.maxBuffer,
-    timeout: options.timeout,
-    env: options.env
-  })
-  return { stdout: stdout as string, stderr: stderr as string }
+  // Why wrap here: the resolved binary path / WSL detection is internal
+  // detail; the span attributes track the user-visible `git <subcommand>
+  // <args…>` form so dashboards group cleanly by intent rather than by
+  // platform-conditional binary path.
+  return withGitSpan(
+    { args, ...(options.cwd !== undefined ? { cwd: options.cwd } : {}) },
+    async () => {
+      const resolved = resolveCommand('git', args, options.cwd)
+      const { stdout, stderr } = await execFileAsync(resolved.binary, resolved.args, {
+        cwd: resolved.cwd,
+        encoding: (options.encoding ?? 'utf-8') as BufferEncoding,
+        maxBuffer: options.maxBuffer,
+        timeout: options.timeout,
+        env: options.env
+      })
+      return { stdout: stdout as string, stderr: stderr as string }
+    }
+  )
 }
 
 /**
@@ -175,10 +173,7 @@ export function gitExecFileSync(
  * Spawn a git child process. Drop-in replacement for
  * `spawn('git', args, { cwd, stdio, ... })`.
  */
-export function gitSpawn(
-  args: string[],
-  options: SpawnOptions & { cwd: string }
-): ChildProcess {
+export function gitSpawn(args: string[], options: SpawnOptions & { cwd: string }): ChildProcess {
   const resolved = resolveCommand('git', args, options.cwd)
   return spawn(resolved.binary, resolved.args, {
     ...options,
@@ -234,10 +229,7 @@ export function wslAwareSpawn(
  * are Linux-native (/home/user/repo). The rest of Orca needs Windows UNC
  * paths (\\wsl.localhost\Ubuntu\home\user\repo) to read files via Node fs.
  */
-export function translateWslOutputPaths(
-  output: string,
-  originalCwd: string
-): string {
+export function translateWslOutputPaths(output: string, originalCwd: string): string {
   const wsl = parseWslPath(originalCwd)
   if (!wsl) {
     return output
@@ -245,9 +237,8 @@ export function translateWslOutputPaths(
 
   // Replace absolute Linux paths that start with / and look like filesystem
   // paths in structured git output (e.g. "worktree /home/user/repo/feature")
-  return output.replace(
-    /(?<=worktree )(\/.+)$/gm,
-    (_match, linuxPath: string) => toWindowsWslPath(linuxPath, wsl.distro)
+  return output.replace(/(?<=worktree )(\/.+)$/gm, (_match, linuxPath: string) =>
+    toWindowsWslPath(linuxPath, wsl.distro)
   )
 }
 

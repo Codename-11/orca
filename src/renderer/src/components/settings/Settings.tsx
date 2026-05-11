@@ -44,6 +44,7 @@ import {
   DeveloperPermissionsPane,
   DEVELOPER_PERMISSIONS_PANE_SEARCH_ENTRIES
 } from './DeveloperPermissionsPane'
+import { PrivacyPane, PRIVACY_PANE_SEARCH_ENTRIES } from './PrivacyPane'
 import { SettingsSidebar } from './SettingsSidebar'
 import { SettingsSection } from './SettingsSection'
 import { matchesSettingsSearch, type SettingsSearchEntry } from './settings-search'
@@ -61,6 +62,7 @@ type SettingsNavTarget =
   | 'shortcuts'
   | 'stats'
   | 'ssh'
+  | 'privacy'
   | 'experimental'
   | 'agents'
   | 'repo'
@@ -432,6 +434,13 @@ function Settings(): React.JSX.Element {
         searchEntries: SSH_PANE_SEARCH_ENTRIES
       },
       {
+        id: 'privacy',
+        title: 'Privacy',
+        description: 'Diagnostic traces, bundle sharing, and OTLP export.',
+        icon: ShieldCheck,
+        searchEntries: PRIVACY_PANE_SEARCH_ENTRIES
+      },
+      {
         id: 'experimental',
         title: 'Experimental',
         description: 'New features that are still taking shape. Give them a try.',
@@ -759,6 +768,15 @@ function Settings(): React.JSX.Element {
                   searchEntries={SSH_PANE_SEARCH_ENTRIES}
                 >
                   <SshPane />
+                </SettingsSection>
+
+                <SettingsSection
+                  id="privacy"
+                  title="Privacy"
+                  description="Diagnostic traces, bundle sharing, and OTLP export. The local trace file never leaves your machine unless you explicitly share a bundle."
+                  searchEntries={PRIVACY_PANE_SEARCH_ENTRIES}
+                >
+                  <PrivacyPane />
                 </SettingsSection>
 
                 <SettingsSection

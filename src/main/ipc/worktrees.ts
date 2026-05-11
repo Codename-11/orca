@@ -8,6 +8,7 @@ import { deleteWorktreeHistoryDir } from '../terminal-history'
 import type { CreateWorktreeArgs, CreateWorktreeResult, WorktreeMeta } from '../../shared/types'
 import { removeWorktree } from '../git/worktree'
 import { gitExecFileAsync } from '../git/runner'
+import { withWorktreeSpan } from '../observability/instrumentation'
 import { getDefaultRemote } from '../git/repo'
 import { getWorkItem } from '../github/client'
 import { listRepoWorktrees, createFolderWorktree } from '../repo-worktrees'
@@ -133,20 +134,30 @@ export function registerWorktreeHandlers(
   ipcMain.handle(
     'worktrees:create',
     async (_event, args: CreateWorktreeArgs): Promise<CreateWorktreeResult> => {
-      const repo = store.getRepo(args.repoId)
-      if (!repo) {
-        throw new Error(`Repo not found: ${args.repoId}`)
-      }
-      if (isFolderRepo(repo)) {
-        throw new Error('Folder mode does not support creating worktrees.')
-      }
+      // Why span here: worktree creation chains a clone-or-checkout, an
+      // install hook, and several git invocations. Wrapping the IPC entry
+      // gives every child git span a parent to attach to, so a failure in
+      // step 3 of 5 still shows up in the trace tree alongside steps 1–2.
+      // The branch name and remote URL are intentionally not added as
+      // attributes — branch names can carry user-content (e.g. an issue
+      // title) and the redactor would have to learn yet another rule;
+      // the repo ID is the safer correlator for the bundle.
+      return withWorktreeSpan({ stage: 'create' }, async () => {
+        const repo = store.getRepo(args.repoId)
+        if (!repo) {
+          throw new Error(`Repo not found: ${args.repoId}`)
+        }
+        if (isFolderRepo(repo)) {
+          throw new Error('Folder mode does not support creating worktrees.')
+        }
 
-      // Remote repos route all git operations through the relay
-      if (repo.connectionId) {
-        return createRemoteWorktree(args, repo, store, mainWindow)
-      }
+        // Remote repos route all git operations through the relay
+        if (repo.connectionId) {
+          return createRemoteWorktree(args, repo, store, mainWindow)
+        }
 
-      return createLocalWorktree(args, repo, store, mainWindow)
+        return createLocalWorktree(args, repo, store, mainWindow)
+      })
     }
   )
 
