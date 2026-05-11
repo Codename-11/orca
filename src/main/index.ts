@@ -16,6 +16,7 @@ import { setAppRuntimeFlags } from './ipc/app'
 import { closeAllWatchers } from './ipc/filesystem-watcher'
 import { registerCoreHandlers } from './ipc/register-core-handlers'
 import { initTelemetry, shutdownTelemetry } from './telemetry/client'
+import { initObservability, shutdownObservability } from './observability'
 import { triggerStartupNotificationRegistration } from './ipc/notifications'
 import { OrcaRuntimeService } from './runtime/orca-runtime'
 import { OrcaRuntimeRpcServer } from './runtime/runtime-rpc'
@@ -381,6 +382,13 @@ app.whenReady().then(async () => {
   // the Store reference, seeds common props, and resets per-session burst
   // caps. Actual transport initialization is still gated by both flags.
   initTelemetry(store)
+  // Why: the error-tracking lane (telemetry-error-tracking.md) is its own
+  // composition root — independent of product telemetry — and must
+  // initialize before any IPC handler / runtime span is created so the
+  // tracer's active sink is populated at the moment the first span fires.
+  // Honors DO_NOT_TRACK / ORCA_TELEMETRY_DISABLED / ORCA_DIAGNOSTICS_DISABLED
+  // / CI internally; those gates do not need to be re-checked here.
+  initObservability()
   stats = new StatsCollector()
   claudeUsage = new ClaudeUsageStore(store)
   codexUsage = new CodexUsageStore(store)
@@ -637,6 +645,7 @@ app.on('will-quit', (e) => {
     // quit chain.
     Promise.allSettled([disconnectDaemon(), rpcStopAndClear])
       .then(() => shutdownTelemetry())
+      .then(() => shutdownObservability())
       .catch(() => {
         /* swallow — telemetry must never prevent app.quit() */
       })

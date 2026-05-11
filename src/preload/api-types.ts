@@ -255,6 +255,34 @@ export type StatsApi = {
   getSummary: () => Promise<StatsSummary>
 }
 
+// Diagnostics — error-tracking-lane payload shapes that cross the IPC
+// boundary. Mirror the runtime types in
+// `src/main/observability/{index,bundle}.ts`. Kept here, not imported,
+// because the preload api-types file is the source of truth for the
+// renderer's view of the IPC surface.
+export type DiagnosticsStatusPayload = {
+  readonly localFileEnabled: boolean
+  readonly otlpEnabled: boolean
+  readonly bundleEnabled: boolean
+  readonly otlpStatus: string
+  readonly traceFilePath: string
+  readonly traceFamilySize: number
+  readonly disabledReason?:
+    | 'do_not_track'
+    | 'orca_telemetry_disabled'
+    | 'orca_diagnostics_disabled'
+    | 'ci'
+}
+export type DiagnosticsBundlePayload = {
+  readonly bundleSubmissionId: string
+  readonly payload: string
+  readonly bytes: number
+  readonly spanCount: number
+}
+export type DiagnosticsUploadPayload = {
+  readonly ticketId: string
+}
+
 export type MemoryApi = {
   getSnapshot: () => Promise<MemorySnapshot>
 }
@@ -576,6 +604,19 @@ export type PreloadApi = {
   /** Flip the persisted opt-in preference. Subject to a per-session
    *  consent-mutation rate limit on the main side (≤5/session). */
   telemetrySetOptIn: (optedIn: boolean) => Promise<void>
+  /** Diagnostic-bundle / trace-folder controls. Surface for
+   *  telemetry-error-tracking.md §User controls. The renderer triggers
+   *  flows; main does the filesystem / network work and returns
+   *  serializable results. The shapes of the returned values are
+   *  duck-typed `unknown` here — call sites in the Privacy pane narrow
+   *  with their own zod schemas. */
+  diagnostics: {
+    getStatus: () => Promise<DiagnosticsStatusPayload>
+    openTraceFolder: () => Promise<void>
+    clearTraces: () => Promise<void>
+    collectBundle: (lookbackMinutes?: number) => Promise<DiagnosticsBundlePayload>
+    uploadBundle: (payload: string, bundleSubmissionId: string) => Promise<DiagnosticsUploadPayload>
+  }
   settings: {
     get: () => Promise<GlobalSettings>
     set: (args: Partial<GlobalSettings>) => Promise<GlobalSettings>
