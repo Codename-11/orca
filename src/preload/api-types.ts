@@ -70,6 +70,9 @@ import type {
   MarkdownDocument,
   FloatingTerminalCwdRequest,
   GitHubIssueUpdate,
+  GitHubPRRefreshCandidate,
+  GitHubPRRefreshEvent,
+  GitHubPRRefreshReason,
   GetRateLimitResult,
   NotificationDispatchRequest,
   NotificationDispatchResult,
@@ -82,6 +85,7 @@ import type {
   PRCheckDetail,
   PRComment,
   PRInfo,
+  PRRefreshOutcome,
   Repo,
   ShellHydrationFailureReason,
   SparsePreset,
@@ -749,6 +753,17 @@ export type PreloadApi = {
       branch: string
       linkedPRNumber?: number | null
     }) => Promise<PRInfo | null>
+    refreshPRNow: (args: { candidate: GitHubPRRefreshCandidate }) => Promise<PRRefreshOutcome>
+    enqueuePRRefresh: (args: {
+      candidate: GitHubPRRefreshCandidate
+      reason: GitHubPRRefreshReason
+      priority?: number
+    }) => Promise<boolean>
+    reportVisiblePRRefreshCandidates: (args: {
+      candidates: GitHubPRRefreshCandidate[]
+      generation: number
+    }) => Promise<boolean>
+    onPRRefreshEvent: (callback: (event: GitHubPRRefreshEvent) => void) => () => void
     issue: (args: {
       repoPath: string
       repoId?: string
