@@ -3,53 +3,16 @@ import { Bell } from 'lucide-react'
 import { useAppStore } from '@/store'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-
-function useActivityUnreadCount(): number {
-  return useAppStore((s) => {
-    let count = 0
-    for (const worktrees of Object.values(s.worktreesByRepo)) {
-      for (const worktree of worktrees) {
-        if (worktree.createdAt && worktree.isUnread) {
-          count += 1
-        }
-      }
-    }
-    for (const [paneKey, entry] of Object.entries(s.agentStatusByPaneKey)) {
-      if (entry.state !== 'done' && entry.state !== 'blocked' && entry.state !== 'waiting') {
-        continue
-      }
-      if ((s.acknowledgedAgentsByPaneKey[paneKey] ?? 0) < entry.stateStartedAt) {
-        count += 1
-      }
-    }
-    for (const [paneKey, retained] of Object.entries(s.retainedAgentsByPaneKey)) {
-      if (retained.entry.state !== 'done') {
-        continue
-      }
-      if ((s.acknowledgedAgentsByPaneKey[paneKey] ?? 0) < retained.entry.stateStartedAt) {
-        count += 1
-      }
-    }
-    return count
-  })
-}
+import { collectActivityAgentPaneKeys, useActivityUnreadCount } from './useActivityUnreadCount'
 
 export function ActivityTitlebarControls(): React.JSX.Element {
-  const unreadCount = useActivityUnreadCount()
+  const unreadCount = useActivityUnreadCount(true)
   const acknowledgeAgents = useAppStore((s) => s.acknowledgeAgents)
   const clearWorktreeUnread = useAppStore((s) => s.clearWorktreeUnread)
 
   const markAllRead = (): void => {
     const state = useAppStore.getState()
-    acknowledgeAgents([
-      ...Object.values(state.agentStatusByPaneKey)
-        .filter(
-          (entry) =>
-            entry.state === 'done' || entry.state === 'blocked' || entry.state === 'waiting'
-        )
-        .map((entry) => entry.paneKey),
-      ...Object.values(state.retainedAgentsByPaneKey).map((retained) => retained.entry.paneKey)
-    ])
+    acknowledgeAgents(collectActivityAgentPaneKeys(state))
     for (const worktrees of Object.values(state.worktreesByRepo)) {
       for (const worktree of worktrees) {
         if (worktree.createdAt && worktree.isUnread) {

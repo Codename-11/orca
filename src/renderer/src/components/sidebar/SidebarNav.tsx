@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 import { isGitRepoKind } from '../../../../shared/repo-kind'
 import { getTaskPresetQuery, PER_REPO_FETCH_LIMIT } from '@/lib/new-workspace'
 import { LinearIcon } from '@/components/icons/LinearIcon'
+import { useActivityUnreadCount } from '@/components/activity/useActivityUnreadCount'
 
 const isMac = typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac')
 
@@ -51,36 +52,7 @@ const SidebarNav = React.memo(function SidebarNav() {
 
   const tasksActive = activeView === 'tasks'
   const activityActive = activeView === 'activity'
-  const activityUnreadCount = useAppStore((s) => {
-    if (s.settings?.experimentalActivity !== true) {
-      return 0
-    }
-    let count = 0
-    for (const worktrees of Object.values(s.worktreesByRepo)) {
-      for (const worktree of worktrees) {
-        if (worktree.createdAt && worktree.isUnread) {
-          count += 1
-        }
-      }
-    }
-    for (const [paneKey, entry] of Object.entries(s.agentStatusByPaneKey)) {
-      if (entry.state !== 'done' && entry.state !== 'blocked' && entry.state !== 'waiting') {
-        continue
-      }
-      if ((s.acknowledgedAgentsByPaneKey[paneKey] ?? 0) < entry.stateStartedAt) {
-        count += 1
-      }
-    }
-    for (const [paneKey, retained] of Object.entries(s.retainedAgentsByPaneKey)) {
-      if (retained.entry.state !== 'done') {
-        continue
-      }
-      if ((s.acknowledgedAgentsByPaneKey[paneKey] ?? 0) < retained.entry.stateStartedAt) {
-        count += 1
-      }
-    }
-    return count
-  })
+  const activityUnreadCount = useActivityUnreadCount(showActivityButton)
 
   return (
     <div className="flex flex-col gap-0.5 px-2 pt-2 pb-1">
