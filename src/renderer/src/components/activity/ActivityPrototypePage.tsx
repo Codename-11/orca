@@ -608,7 +608,7 @@ function ThreadAgentStateIndicator({ thread }: { thread: AgentPaneThread }): Rea
     <Tooltip>
       <TooltipTrigger asChild>
         <span className="inline-flex size-4 shrink-0 items-center justify-center">
-          <AgentStateDot state={state} size="sm" />
+          <AgentStateDot state={state} size="md" />
         </span>
       </TooltipTrigger>
       <TooltipContent side="top" sideOffset={4}>
