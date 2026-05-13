@@ -4,8 +4,8 @@ which pieces become production modules. */
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import {
+  Bell,
   BellDot,
-  BellOff,
   ExternalLink,
   MessageSquareText,
   Search,
@@ -25,6 +25,7 @@ import { Input } from '@/components/ui/input'
 import { Toggle } from '@/components/ui/toggle'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { FilledBellIcon } from '../sidebar/WorktreeCardHelpers'
 import {
   setActivityTerminalPortals,
   type ActivityTerminalPortalTarget
@@ -606,40 +607,37 @@ function ThreadRow({
           {thread.paneTitle}
         </span>
         <span className="inline-flex shrink-0 items-center gap-1.5 pt-[3px]">
-          {/* Why (bell slot doubles as Mark-unread): the read/unread state and
-              its toggle belong together. For unread threads, the BellDot is
-              the static cue. For read threads, the slot reveals a Mark-unread
-              icon button on hover — same place the bell lives, no jarring
-              jump to a separate cluster. Reserved `size-6` so the timestamp
-              doesn't shift between read/unread or on hover. */}
-          <span className="relative inline-flex size-6 shrink-0 items-center justify-center">
+          {/* Why (bell matches WorktreeCard pattern): unread → amber filled
+              bell as a static, non-interactive cue (selecting the thread
+              auto-marks it read, so a Mark-read button would be redundant);
+              read → outline Bell that fades in on row hover and acts as
+              Mark-unread. Bare button (no shadcn outline) so it reads as
+              an inline cue rather than a discrete control square. */}
+          <span className="inline-flex size-4 shrink-0 items-center justify-center">
             {thread.unread ? (
-              <BellDot
-                className="size-3.5 shrink-0 text-primary"
-                fill="currentColor"
+              <FilledBellIcon
+                className="size-[13px] shrink-0 text-amber-500 drop-shadow-sm"
                 aria-label="Unread"
               />
             ) : (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button
+                  <button
                     type="button"
-                    variant="outline"
-                    size="icon-xs"
-                    aria-label="Mark thread unread"
-                    className={cn(
-                      'transition-opacity',
-                      'pointer-events-none invisible opacity-0',
-                      'group-hover:pointer-events-auto group-hover:visible group-hover:opacity-100'
-                    )}
                     onClick={(event) => {
                       event.stopPropagation()
                       onMarkUnread()
                     }}
                     onMouseDown={(event) => event.stopPropagation()}
+                    className={cn(
+                      'group/unread flex size-4 shrink-0 cursor-pointer items-center justify-center rounded transition-all',
+                      'hover:bg-accent/80 active:scale-95',
+                      'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
+                    )}
+                    aria-label="Mark thread unread"
                   >
-                    <BellOff className="size-3" />
-                  </Button>
+                    <Bell className="size-3 text-muted-foreground/40 opacity-0 transition-opacity group-hover:opacity-100 group-hover/unread:opacity-100" />
+                  </button>
                 </TooltipTrigger>
                 <TooltipContent side="left">Mark thread unread</TooltipContent>
               </Tooltip>
