@@ -740,9 +740,15 @@ export async function getWorkItemDetails(
     // Promise.all above, so there's no ordering requirement between them.
     const [mentionParticipants, checks] = await Promise.all([
       getMentionParticipants(repoPath, item, comments, participants, connectionId),
-      shas?.headSha
+      (shas?.headSha
         ? getPRChecks(repoPath, item.number, shas.headSha, null, undefined, connectionId)
         : getPRChecks(repoPath, item.number, undefined, null, undefined, connectionId)
+      ).catch((err) => {
+        // Why: details can still render body/comments/files when check fetching
+        // is rate-limited or temporarily unavailable.
+        console.warn('Failed to fetch PR checks for work item details:', err)
+        return []
+      })
     ])
 
     return {

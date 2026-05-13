@@ -1915,7 +1915,7 @@ export async function getPRChecks(
     return await fallbackToPRChecks()
   } catch (err) {
     console.warn('getPRChecks failed:', err)
-    return []
+    throw err
   }
 }
 
