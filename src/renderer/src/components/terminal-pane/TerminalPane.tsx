@@ -540,9 +540,28 @@ export default function TerminalPane({
   // after splits/closes change the manager's pane list.
   useLayoutEffect(() => {
     const snapshots = activityIsolationSnapshotRef.current
+    // Why: refit on rAF so xterm measures the post-layout DOM, not the
+    // pre-toggle one. Mirrors expand-collapse.refreshPaneSizes. Both the
+    // apply and restore paths must refit — restoring without a fit leaves
+    // xterm sized for the isolated single-pane geometry, so the workspace
+    // view (or staging slot) renders at the wrong cols/rows until some
+    // unrelated event triggers another fit.
+    const scheduleRefit = (): number =>
+      requestAnimationFrame(() => {
+        const manager = managerRef.current
+        if (!manager) {
+          return
+        }
+        for (const pane of manager.getPanes()) {
+          safeFit(pane)
+        }
+      })
     if (isolatedPaneId === null) {
       restoreExpandedLayoutFrom(snapshots)
-      return
+      const frame = scheduleRefit()
+      return () => {
+        cancelAnimationFrame(frame)
+      }
     }
     const applied = applyExpandedLayoutTo(isolatedPaneId, {
       managerRef,
@@ -551,19 +570,12 @@ export default function TerminalPane({
     })
     if (!applied) {
       restoreExpandedLayoutFrom(snapshots)
-      return
+      const frame = scheduleRefit()
+      return () => {
+        cancelAnimationFrame(frame)
+      }
     }
-    // Why: refit on rAF so xterm measures the post-layout DOM, not the
-    // pre-toggle one. Mirrors expand-collapse.refreshPaneSizes.
-    const frame = requestAnimationFrame(() => {
-      const manager = managerRef.current
-      if (!manager) {
-        return
-      }
-      for (const pane of manager.getPanes()) {
-        safeFit(pane)
-      }
-    })
+    const frame = scheduleRefit()
     return () => {
       cancelAnimationFrame(frame)
     }
