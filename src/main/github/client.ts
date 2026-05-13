@@ -1829,79 +1829,83 @@ export async function getPRChecks(
 ): Promise<PRCheckDetail[]> {
   const ghOptions = ghRepoExecOptions(githubRepoContext(repoPath, connectionId))
   const ownerRepo = prRepo ?? (await getOwnerRepo(repoPath, connectionId))
+  const fallbackToPRChecks = async (): Promise<PRCheckDetail[]> => {
+    // Why: the REST check-runs path spends core only. Guard GraphQL only when
+    // we actually fall back to `gh pr checks`, so a low GraphQL bucket does not
+    // block fresh REST check data. Keep this outside the gh lock because the
+    // guard may need its own `gh api rate_limit` call.
+    await assertRateLimitBudget('graphql')
+    await acquire()
+    try {
+      const fallbackArgs = ['pr', 'checks', String(prNumber), '--json', 'name,state,link']
+      if (ownerRepo) {
+        fallbackArgs.push('--repo', `${ownerRepo.owner}/${ownerRepo.repo}`)
+      }
+      const { stdout } = await ghExecFileAsync(fallbackArgs, ghOptions)
+      noteRateLimitSpend('graphql')
+      const data = JSON.parse(stdout) as { name: string; state: string; link: string }[]
+      return data.map((d) => ({
+        name: d.name,
+        status: mapCheckStatus(d.state),
+        conclusion: mapCheckConclusion(d.state),
+        url: d.link || null,
+        workflowRunId: parseActionsRunId(d.link)
+      }))
+    } finally {
+      release()
+    }
+  }
+
   if (ownerRepo && headSha) {
     await assertRateLimitBudget('core')
-  }
-  // Why: even the REST check-runs path can fall back to `gh pr checks`, so
-  // guard GraphQL before acquiring the global gh lock.
-  await assertRateLimitBudget('graphql')
-  const fallbackToPRChecks = async (): Promise<PRCheckDetail[]> => {
-    const fallbackArgs = ['pr', 'checks', String(prNumber), '--json', 'name,state,link']
-    if (ownerRepo) {
-      fallbackArgs.push('--repo', `${ownerRepo.owner}/${ownerRepo.repo}`)
-    }
-    const { stdout } = await ghExecFileAsync(fallbackArgs, ghOptions)
-    noteRateLimitSpend('graphql')
-    const data = JSON.parse(stdout) as { name: string; state: string; link: string }[]
-    return data.map((d) => ({
-      name: d.name,
-      status: mapCheckStatus(d.state),
-      conclusion: mapCheckConclusion(d.state),
-      url: d.link || null,
-      workflowRunId: parseActionsRunId(d.link)
-    }))
-  }
-  await acquire()
-  try {
-    if (ownerRepo && headSha) {
-      // Why: --cache 60s saves rate-limit budget during polling, but when the
-      // user explicitly clicks refresh we must skip it so gh fetches fresh data.
+    await acquire()
+    try {
       const cacheArgs = options?.noCache ? [] : ['--cache', '60s']
-      try {
-        const { stdout } = await ghExecFileAsync(
-          [
-            'api',
-            ...cacheArgs,
-            `repos/${ownerRepo.owner}/${ownerRepo.repo}/commits/${encodeURIComponent(headSha)}/check-runs?per_page=100`
-          ],
-          ghOptions
-        )
-        noteRateLimitSpend('core')
-        const data = JSON.parse(stdout) as {
-          check_runs: {
-            id?: number
-            name: string
-            status: string
-            conclusion: string | null
-            html_url: string
-            details_url: string | null
-          }[]
-        }
-        if (data.check_runs.length === 0) {
-          return fallbackToPRChecks()
-        }
-        return data.check_runs.map((d) => ({
-          name: d.name,
-          status: mapCheckRunRESTStatus(d.status),
-          conclusion: mapCheckRunRESTConclusion(d.status, d.conclusion),
-          url: d.details_url || d.html_url || null,
-          ...(typeof d.id === 'number' ? { checkRunId: d.id } : {}),
-          workflowRunId: parseActionsRunId(d.details_url || d.html_url || null)
-        }))
-      } catch (err) {
-        // Why: a PR can outlive the cached head SHA after force-pushes or remote
-        // rewrites. Falling back to `gh pr checks` keeps the panel populated
-        // instead of rendering a false "no checks" state from a stale commit.
-        console.warn('getPRChecks via head SHA failed, falling back to gh pr checks:', err)
+      const { stdout } = await ghExecFileAsync(
+        [
+          'api',
+          ...cacheArgs,
+          `repos/${ownerRepo.owner}/${ownerRepo.repo}/commits/${encodeURIComponent(headSha)}/check-runs?per_page=100`
+        ],
+        ghOptions
+      )
+      noteRateLimitSpend('core')
+      const data = JSON.parse(stdout) as {
+        check_runs: {
+          id?: number
+          name: string
+          status: string
+          conclusion: string | null
+          html_url: string
+          details_url: string | null
+        }[]
       }
+      if (data.check_runs.length === 0) {
+        return fallbackToPRChecks()
+      }
+      return data.check_runs.map((d) => ({
+        name: d.name,
+        status: mapCheckRunRESTStatus(d.status),
+        conclusion: mapCheckRunRESTConclusion(d.status, d.conclusion),
+        url: d.details_url || d.html_url || null,
+        ...(typeof d.id === 'number' ? { checkRunId: d.id } : {}),
+        workflowRunId: parseActionsRunId(d.details_url || d.html_url || null)
+      }))
+    } catch (err) {
+      // Why: a PR can outlive the cached head SHA after force-pushes or remote
+      // rewrites. Falling back to `gh pr checks` keeps the panel populated
+      // instead of rendering a false "no checks" state from a stale commit.
+      console.warn('getPRChecks via head SHA failed, falling back to gh pr checks:', err)
+    } finally {
+      release()
     }
-    // Fallback: no branch provided, empty check-runs, or non-GitHub remote.
-    return fallbackToPRChecks()
+  }
+
+  try {
+    return await fallbackToPRChecks()
   } catch (err) {
     console.warn('getPRChecks failed:', err)
     return []
-  } finally {
-    release()
   }
 }
 
