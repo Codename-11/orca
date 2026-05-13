@@ -262,9 +262,7 @@ const api = {
     setUnreadDockBadgeCount: (count: number): Promise<void> =>
       ipcRenderer.invoke('app:setUnreadDockBadgeCount', count),
     getFloatingTerminalCwd: (args?: FloatingTerminalCwdRequest): Promise<string> =>
-      ipcRenderer.invoke('app:getFloatingTerminalCwd', args),
-    toggleFloatingTerminalWindow: (): Promise<void> =>
-      ipcRenderer.invoke('app:toggleFloatingTerminalWindow')
+      ipcRenderer.invoke('app:getFloatingTerminalCwd', args)
   },
 
   wsl: {

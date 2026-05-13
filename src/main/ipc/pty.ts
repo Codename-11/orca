@@ -5,7 +5,7 @@ boundary. Splitting it by line count would scatter tightly coupled terminal
 process behavior across files without a cleaner ownership seam. */
 import { join, delimiter } from 'path'
 import { randomUUID } from 'crypto'
-import { type BrowserWindow, ipcMain, app, webContents } from 'electron'
+import { type BrowserWindow, ipcMain, app } from 'electron'
 export { getBashShellReadyRcfileContent } from '../providers/local-pty-shell-ready'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
 import type { Store } from '../persistence'
@@ -62,24 +62,6 @@ const ptyPaneKey = new Map<string, string>()
 // back into the pane's data stream) need to find the ptyId for that paneKey.
 // Kept in lock-step with ptyPaneKey via the same spawn and teardown sites.
 const paneKeyPtyId = new Map<string, string>()
-const ptyRendererWebContentsId = new Map<string, number>()
-
-function sendPtyEvent(
-  ptyId: string,
-  fallbackWindow: BrowserWindow,
-  channel: string,
-  payload: unknown
-): void {
-  const ownerId = ptyRendererWebContentsId.get(ptyId)
-  const owner = ownerId === undefined ? null : webContents.fromId(ownerId)
-  if (owner && !owner.isDestroyed()) {
-    owner.send(channel, payload)
-    return
-  }
-  if (!fallbackWindow.isDestroyed()) {
-    fallbackWindow.webContents.send(channel, payload)
-  }
-}
 
 export function getPtyIdForPaneKey(paneKey: string): string | undefined {
   return paneKeyPtyId.get(paneKey)
@@ -406,7 +388,6 @@ export function clearProviderPtyState(id: string): void {
   // new teardown path forgets to remove one provider's overlay/hook state.
   openCodeHookService.clearPty(id)
   piTitlebarExtensionService.clearPty(id)
-  ptyRendererWebContentsId.delete(id)
   ptySizes.delete(id)
   // Why: drop the memory-collector registration so a dead PTY does not keep
   // trying to resolve its (now-dead) pid on every snapshot. Safe no-op for
@@ -569,7 +550,7 @@ export function registerPtyHandlers(
       return
     }
     for (const [id, data] of pendingData) {
-      sendPtyEvent(id, mainWindow, 'pty:data', { id, data })
+      mainWindow.webContents.send('pty:data', { id, data })
     }
     pendingData.clear()
   }
@@ -624,10 +605,10 @@ export function registerPtyHandlers(
         // tears down the terminal on pty:exit before the batch timer fires.
         const remaining = pendingData.get(payload.id)
         if (remaining) {
-          sendPtyEvent(payload.id, mainWindow, 'pty:data', { id: payload.id, data: remaining })
+          mainWindow.webContents.send('pty:data', { id: payload.id, data: remaining })
           pendingData.delete(payload.id)
         }
-        sendPtyEvent(payload.id, mainWindow, 'pty:exit', payload)
+        mainWindow.webContents.send('pty:exit', payload)
       }
     })
   }
@@ -717,7 +698,7 @@ export function registerPtyHandlers(
       if (opts) {
         payload.opts = opts
       }
-      sendPtyEvent(ptyId, mainWindow, 'pty:serializeBuffer:request', payload)
+      mainWindow.webContents.send('pty:serializeBuffer:request', payload)
     })
   }
 
@@ -881,7 +862,7 @@ export function registerPtyHandlers(
       // Why: desktop xterm owns local scrollback, while daemon/SSH providers
       // own their own retained buffers. Clear both surfaces so mobile
       // resubscribe snapshots do not resurrect cleared history.
-      sendPtyEvent(ptyId, mainWindow, 'pty:clearBuffer:request', { ptyId })
+      mainWindow.webContents.send('pty:clearBuffer:request', { ptyId })
       try {
         await getProviderForPty(ptyId).clearBuffer(ptyId)
       } catch {
@@ -925,7 +906,7 @@ export function registerPtyHandlers(
   ipcMain.handle(
     'pty:spawn',
     async (
-      event,
+      _event,
       args: {
         cols: number
         rows: number
@@ -1006,9 +987,6 @@ export function registerPtyHandlers(
       const isMintedSessionId = args.sessionId === undefined && isDaemonHostSpawn
       const effectiveSessionId =
         args.sessionId ?? (isDaemonHostSpawn ? mintPtySessionId(args.worktreeId) : undefined)
-      if (effectiveSessionId !== undefined) {
-        ptyRendererWebContentsId.set(effectiveSessionId, event.sender.id)
-      }
       const baseEnv = claudeAuth ? { ...args.env, ...claudeAuth.envPatch } : args.env
       let env: Record<string, string> | undefined = baseEnv
       const preAllocatedHandle =
@@ -1158,7 +1136,6 @@ export function registerPtyHandlers(
         }
       }
       ptyOwnership.set(result.id, args.connectionId ?? null)
-      ptyRendererWebContentsId.set(result.id, event.sender.id)
       if (preAllocatedHandle) {
         runtime?.registerPreAllocatedHandleForPty(result.id, preAllocatedHandle)
       }

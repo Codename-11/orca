@@ -386,8 +386,6 @@ export type AppApi = {
   setUnreadDockBadgeCount: (count: number) => Promise<void>
   /** Resolves the launch directory for global Floating Terminal tabs. */
   getFloatingTerminalCwd: (args?: FloatingTerminalCwdRequest) => Promise<string>
-  /** Shows or hides the native Floating Terminal window. */
-  toggleFloatingTerminalWindow: () => Promise<void>
 }
 
 export type PreloadApi = {

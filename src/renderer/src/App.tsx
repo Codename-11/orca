@@ -38,7 +38,10 @@ import { TelemetryFirstLaunchSurface } from './components/TelemetryFirstLaunchSu
 import { ZoomOverlay } from './components/ZoomOverlay'
 import { shouldShowOnboarding } from './components/onboarding/should-show-onboarding'
 import { SshPassphraseDialog } from './components/settings/SshPassphraseDialog'
-import { FloatingTerminalToggleButton } from './components/floating-terminal/FloatingTerminalPanel'
+import {
+  FloatingTerminalPanel,
+  FloatingTerminalToggleButton
+} from './components/floating-terminal/FloatingTerminalPanel'
 import { TOGGLE_FLOATING_TERMINAL_EVENT } from '@/lib/floating-terminal'
 import { useGitStatusPolling } from './components/right-sidebar/useGitStatusPolling'
 import { useEditorExternalWatch } from './hooks/useEditorExternalWatch'
@@ -148,6 +151,7 @@ const OnboardingFlow = lazy(() => import('./components/onboarding/OnboardingFlow
 
 function App(): React.JSX.Element {
   useUnreadDockBadge()
+  const [floatingTerminalOpen, setFloatingTerminalOpen] = useState(false)
 
   // Why: Zustand actions are referentially stable, but each individual
   // useAppStore(s => s.someAction) still registers a subscription that React
@@ -195,11 +199,17 @@ function App(): React.JSX.Element {
   useEffect(() => {
     const toggleFloatingTerminal = (): void => {
       if (floatingTerminalEnabled) {
-        void window.api.app.toggleFloatingTerminalWindow()
+        setFloatingTerminalOpen((open) => !open)
       }
     }
     window.addEventListener(TOGGLE_FLOATING_TERMINAL_EVENT, toggleFloatingTerminal)
     return () => window.removeEventListener(TOGGLE_FLOATING_TERMINAL_EVENT, toggleFloatingTerminal)
+  }, [floatingTerminalEnabled])
+
+  useEffect(() => {
+    if (!floatingTerminalEnabled) {
+      setFloatingTerminalOpen(false)
+    }
   }, [floatingTerminalEnabled])
   const sidebarWidth = useAppStore((s) => s.sidebarWidth)
   const sidebarOpen = useAppStore((s) => s.sidebarOpen)
@@ -1113,10 +1123,16 @@ function App(): React.JSX.Element {
           {showRightSidebarControls ? <RightSidebar /> : null}
         </div>
         {floatingTerminalEnabled ? (
-          <FloatingTerminalToggleButton
-            open={false}
-            onToggle={() => void window.api.app.toggleFloatingTerminalWindow()}
-          />
+          <>
+            <FloatingTerminalPanel
+              open={floatingTerminalOpen}
+              onOpenChange={setFloatingTerminalOpen}
+            />
+            <FloatingTerminalToggleButton
+              open={floatingTerminalOpen}
+              onToggle={() => setFloatingTerminalOpen((open) => !open)}
+            />
+          </>
         ) : null}
         <StatusBar />
         {/* Why: NewWorkspaceComposerCard renders Radix <Tooltip>s that crash

@@ -7,7 +7,6 @@ import type { FloatingTerminalCwdRequest } from '../../shared/types'
 import { isPwshAvailable } from '../pwsh'
 import { isWslAvailable } from '../wsl'
 import { setUnreadDockBadgeCount } from '../dock/unread-badge'
-import { toggleFloatingTerminalWindow } from '../window/floating-terminal-window'
 
 const execFileAsync = promisify(execFile)
 
@@ -108,7 +107,4 @@ export function registerAppHandlers(): void {
   ipcMain.handle('app:getFloatingTerminalCwd', (_event, args?: FloatingTerminalCwdRequest) =>
     resolveFloatingTerminalCwd(args)
   )
-  ipcMain.handle('app:toggleFloatingTerminalWindow', () => {
-    toggleFloatingTerminalWindow()
-  })
 }
