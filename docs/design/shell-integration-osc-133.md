@@ -2,9 +2,9 @@
 
 **Issue:** #1165 (to be retitled)
 **Branch:** `brennanb2025/foreground-process-agent-exit` (to be renamed to match PR title)
-**PR title:** `feat(terminal): OSC 133 shell integration for zsh + PowerShell (behind flag)`
+**PR title:** `feat(terminal): OSC 133 shell integration for zsh + PowerShell`
 **Author:** Brennan Benson
-**Status:** Approved for implementation (trimmed scope, 2026-04-27)
+**Status:** Approved for implementation (refreshed against current `origin/main`, 2026-05-14)
 
 ## Problem
 
@@ -29,7 +29,7 @@ This is a **cross-platform mechanism by construction**: OSC sequences are just b
 - Ship injection scripts for **zsh** and **PowerShell** only. Extend the existing shell-ready wrapper infrastructure (`src/main/providers/local-pty-shell-ready.ts`, `src/main/daemon/shell-ready.ts`) rather than building a parallel injection system.
 - Parse OSC 133 sequences in the renderer (xterm.js v6 via `parser.registerOscHandler`). Parser lives on the renderer only (Option A).
 - Keep `agent-foreground-poller.ts` + its IPC plumbing deleted. Replace it with a renderer-local handler that drops `agentStatusByPaneKey` entries on `OSC 133;D`.
-- Gated behind the existing compile-time `AGENT_DASHBOARD_ENABLED` constant only. The runtime `experimentalAgentTracking` user toggle is a follow-up PR that lands before `AGENT_DASHBOARD_ENABLED` flips to `true` at release.
+- No `AGENT_DASHBOARD_ENABLED` gate. Current `origin/main` removed the experimental agent-dashboard flag in #1538; agent status is default-on. Install the OSC 133 parser for terminal panes unconditionally and make the command-finished handler no-op unless the pane currently has a live agent-status entry.
 - Graceful fallback: users with broken/missing injection fall back to the existing 30-minute TTL + renderer decay-to-idle.
 - **Windows feature parity** — PowerShell on Windows lights up the same way zsh does on macOS.
 
@@ -40,7 +40,7 @@ This is a **cross-platform mechanism by construction**: OSC sequences are just b
 - Remote PTYs (SSH). Injection would need to happen on the remote side.
 - Exit-code-aware UX (failed-command badges, re-run shortcuts), command navigation, telemetry counters, and diagnostic "shell integration inactive" UI. This design only uses `OSC 133;D` to *drop* a stale dashboard row.
 - Consolidation of `local-pty-shell-ready.ts` + `daemon/shell-ready.ts`.
-- Tri-state (auto / always-on) feature flag and graduation-to-default machinery.
+- New feature flags or runtime toggles. This is now a correctness fix for the default-on agent-status stack, not an experimental feature launch.
 - Agent-status hook replacement. We keep the existing per-agent hooks (Claude/Codex/Gemini/OpenCode/Cursor) for state entry; shell integration only solves the "agent exited, nobody said so" gap.
 
 ## Existing Architecture
@@ -56,15 +56,15 @@ This codebase is further along than a greenfield OSC 133 project would be. The k
 | Shell-ready wrapper files (on disk) | `~/Library/Application Support/orca/shell-ready/zsh/{.zshenv,.zshrc,.zlogin,.zprofile}`, `.../bash/rcfile` | Regenerated from template at app launch by `ensureShellReadyWrappers()`. We already own the injection point. |
 | Headless emulator (daemon) | `src/main/daemon/headless-emulator.ts`, `src/main/daemon/session.ts` | `@xterm/headless` instance that parses every byte the daemon receives. Already scans for `\x1b]777;orca-shell-ready\x07` to gate startup-command flush. |
 | xterm.js in renderer | `src/renderer/src/components/terminal-pane/pty-connection.ts` (+ siblings) | Full xterm.js v6 with `parser.registerOscHandler` API. |
-| Agent-status hook ingress | `src/main/index.ts` + `src/renderer/src/hooks/useIpcEvents.ts` | Native agent hooks already populate `agentStatusByPaneKey`; OSC 133 only supplies the missing "command ended" signal. |
-| PTY-exit cleanup | `src/renderer/src/components/terminal-pane/pty-connection.ts` | Removes `agentStatusByPaneKey` only when the whole terminal PTY exits. The title-reversion path now clears cache timers only; do not restore title-based status removal. |
+| Agent-status hook ingress | `src/main/index.ts` + renderer IPC listeners | Native agent hooks populate `agentStatusByPaneKey` directly; this path is no longer behind an agent-dashboard flag. OSC 133 only supplies the missing "command ended" signal. |
+| PTY / pane teardown cleanup | `src/renderer/src/components/terminal-pane/pty-connection.ts`, `src/renderer/src/components/terminal-pane/use-terminal-pane-lifecycle.ts`, `src/renderer/src/store/slices/agent-status.ts` | PTY exit calls `removeAgentStatus`; user-initiated pane/tab/worktree teardown calls `dropAgentStatus` so retained rows do not reappear. Current main still has a legacy title-reversion removal heuristic with a TODO for this PR; OSC 133 should become the authoritative agent-process-exit signal and retire that TODO path for this bug. |
 
 ### What's missing
 
 1. **Shell emission.** The wrappers emit only `OSC 133;A` today, and only when the one-shot ready flag is set. We need `OSC 133;C` (command start) and `OSC 133;D;<exit>` (command end) persistently across the pane's lifetime — not just at first prompt. (OSC 133 emission is a different signal from the existing one-shot shell-ready marker; both live in the same wrapper file for now but could be extracted later.)
 2. **PowerShell wrapper.** Zero Windows coverage today; the shell-ready infrastructure currently `return`s early on `win32`. We need a PowerShell `$PROFILE` injection path.
 3. **Parsing.** Nothing parses OSC 133 sub-sequences A/B/C/D. The daemon emulator scans for the `orca-shell-ready` string marker but not for general OSC 133.
-4. **Renderer consumer.** There is no OSC 133 consumer yet. Add one in the terminal pane lifecycle/connection path and have `OSC 133;D` remove the matching pane's agent-status row. The old `pty:foreground-shell` IPC path has already been deleted.
+4. **Renderer consumer.** There is no OSC 133 consumer yet. Add one near the existing OSC 52/OSC 7 parser setup in `use-terminal-pane-lifecycle.ts` and have `OSC 133;D` remove the matching pane's agent-status row. The old `pty:foreground-shell` IPC path has already been deleted.
 
 ### Cleanup already completed
 
@@ -128,11 +128,18 @@ This is the **new infrastructure** — there is no PowerShell path in the curren
 
 **On-disk path:** `${app.getPath('userData')}/shell-ready/pwsh/orca-shell-integration.ps1` (mirrors the existing zsh/bash wrapper root; both `local-pty-shell-ready.ts` and `daemon/shell-ready.ts` write their own copy until consolidation). LF line endings are fine — PowerShell parses LF-terminated scripts correctly and we do not sign them.
 
-**Script content:**
+**Script shape:** model this after VS Code's `shellIntegration.ps1`: wrap `prompt` and `PSConsoleHostReadLine`, not the Enter key binding. This is the standard PowerShell integration point and avoids clobbering custom PSReadLine key handlers.
 
 ```powershell
-# OSC 133 shell integration for PowerShell
-# Authoritative reference: VS Code's shellIntegration.ps1.
+# Orca OSC 133 shell integration for PowerShell.
+if ((Test-Path variable:global:__OrcaOsc133State) -and
+    $null -ne $Global:__OrcaOsc133State.OriginalPrompt) {
+    return
+}
+
+if ($ExecutionContext.SessionState.LanguageMode -ne "FullLanguage") {
+    return
+}
 
 # Why source $PROFILE here (not from the -Command line): users commonly rebind
 # $function:prompt from $PROFILE (oh-my-posh, starship, posh-git). If we
@@ -140,45 +147,52 @@ This is the **new infrastructure** — there is no PowerShell path in the curren
 # stock prompt, not the user's customized one. Loading $PROFILE first and
 # capturing after means we wrap what the user actually sees.
 if (Test-Path $PROFILE) {
-    # Swallow errors so a broken $PROFILE does not disable the drop signal.
-    # The user still sees the error via PowerShell's default handling.
     try { . $PROFILE } catch { Write-Error $_ }
 }
 
-$Global:__OrcaInCommand = $false
-$Global:__OrcaOriginalPrompt = $function:prompt
+$Global:__OrcaOsc133State = @{
+    OriginalPrompt = $function:prompt
+    OriginalReadLine = $function:PSConsoleHostReadLine
+    LastHistoryId = -1
+    IsInExecution = $false
+    HasPSReadLine = $null -ne (Get-Module -Name PSReadLine)
+}
+
 function Global:prompt {
-    # Capture FIRST — any other expression clobbers $? and may reset $LASTEXITCODE.
-    $lastExit = $LASTEXITCODE
-    $lastOk = $?
-    $exitCode = if ($null -ne $lastExit) { $lastExit } elseif ($lastOk) { 0 } else { 1 }
-    if ($Global:__OrcaInCommand) {
-        [Console]::Write("`e]133;D;$exitCode`a")
-        $Global:__OrcaInCommand = $false
+    # Capture FIRST — any other expression clobbers $global:?.
+    $fakeExitCode = [int](!$global:?)
+    Set-StrictMode -Off
+    $lastHistory = Get-History -Count 1
+    $result = ""
+
+    if ($Global:__OrcaOsc133State.LastHistoryId -ne -1 -and
+        ($Global:__OrcaOsc133State.HasPSReadLine -eq $false -or
+         $Global:__OrcaOsc133State.IsInExecution -eq $true)) {
+        $Global:__OrcaOsc133State.IsInExecution = $false
+        $result += "`e]133;D;$fakeExitCode`a"
     }
-    [Console]::Write("`e]133;A`a")
-    $result = & $Global:__OrcaOriginalPrompt
-    [Console]::Write("`e]133;B`a")
+
+    $result += "`e]133;A`a"
+    # Preserve the previous success/failure value for prompts that inspect it.
+    if ($fakeExitCode -ne 0) { Write-Error "failure" -ea ignore }
+    $result += $Global:__OrcaOsc133State.OriginalPrompt.Invoke()
+    $result += "`e]133;B`a"
+    $Global:__OrcaOsc133State.LastHistoryId = $lastHistory.Id
     $result
 }
 
-# Hook command execution via PSReadLine.
-# Known limitation: this overwrites any user-bound Enter handler. A future PR
-# should `Get-PSReadLineKeyHandler -Key Enter` first and skip registration (or
-# chain) if the user has already customized Enter. Shipping the overwrite now
-# because (a) the default AcceptLine binding is what 99% of users have, and
-# (b) missing OSC 133;C only degrades the shell-integration feature to "D-only"
-# in that session — the drop signal still fires from the prompt wrapper.
-if (Get-Module PSReadLine) {
-    Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {
+if ($Global:__OrcaOsc133State.HasPSReadLine -and
+    $null -ne $Global:__OrcaOsc133State.OriginalReadLine) {
+    function Global:PSConsoleHostReadLine {
+        $commandLine = $Global:__OrcaOsc133State.OriginalReadLine.Invoke()
+        $Global:__OrcaOsc133State.IsInExecution = $true
         [Console]::Write("`e]133;C`a")
-        $Global:__OrcaInCommand = $true
-        [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
+        return $commandLine
     }
 }
 ```
 
-**Launch invocation:** `pwsh.exe -NoLogo -NoProfile -NoExit -Command ". '<abs-path-to-orca-shell-integration.ps1>'"`. `-NoProfile` prevents PowerShell from auto-loading `$PROFILE` at startup; the integration script loads it explicitly, in the correct order. Absolute path to the `.ps1` is resolved once in `getWrappedShellLaunchConfig` (see §2c Launch wiring) and embedded directly into the `-Command` string — no `$env:ORCA_SHELL_INTEGRATION` indirection needed.
+**Launch invocation:** `pwsh.exe -NoLogo -NoProfile -NoExit -ExecutionPolicy Bypass -Command ". '<abs-path-to-orca-shell-integration.ps1>'"` (same shape for `powershell.exe`). `-NoProfile` prevents PowerShell from auto-loading `$PROFILE`; the integration script loads it explicitly before wrapping prompt/readline. Resolve the absolute script path once in `getWrappedShellLaunchConfig` (see §2c Launch wiring) and embed it directly into the `-Command` string — no `$env:ORCA_SHELL_INTEGRATION` indirection needed.
 
 #### 2c. Launch wiring
 
@@ -188,9 +202,17 @@ Both `src/main/providers/local-pty-shell-ready.ts:199` and `src/main/daemon/shel
 const pwshNames = new Set(['pwsh', 'pwsh.exe', 'powershell', 'powershell.exe'])
 if (pwshNames.has(shellName)) {
   ensureShellReadyWrappers()  // extend this helper to also write the .ps1 on win32
-  const scriptPath = `${getShellReadyWrapperRoot()}/pwsh/orca-shell-integration.ps1`
+  const scriptPath = join(getShellReadyWrapperRoot(), 'pwsh', 'orca-shell-integration.ps1')
   return {
-    args: ['-NoLogo', '-NoProfile', '-NoExit', '-Command', `. '${scriptPath.replace(/'/g, "''")}'`],
+    args: [
+      '-NoLogo',
+      '-NoProfile',
+      '-NoExit',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-Command',
+      `. '${scriptPath.replace(/'/g, "''")}'`
+    ],
     env: {
       // No ORCA_SHELL_READY_MARKER — the existing OSC 777 barrier is POSIX-only
       // today; PowerShell startup-command panes are a separate follow-up.
@@ -204,11 +226,11 @@ The existing `if (process.platform === 'win32') return` early-return in both fil
 
 Both the local and daemon shell-ready files need this same edit — another instance of the ~80% duplication called out in §Cleanups (still deferred). The duplicated edit is intentional this PR; consolidation is a follow-up.
 
-Note: **PSReadLine is present by default in Windows PowerShell 5.1+ and PowerShell 7+**, which covers the overwhelming majority of Windows users. If PSReadLine is disabled/missing (some enterprise Windows environments do this), the drop signal does not fire — pane falls back to 30-min TTL. Acceptable for initial ship; document in release notes.
+Note: **PSReadLine is present by default in Windows PowerShell 5.1+ and PowerShell 7+**, which covers the overwhelming majority of Windows users. If PSReadLine is disabled/missing (some enterprise Windows environments do this), Orca misses the `C` mark but still gets `D` from the prompt wrapper. If the whole wrapper fails to load, the pane falls back to the 30-minute TTL.
 
 ### 3. Parser: xterm.js in renderer only (Option A)
 
-xterm.js v6 exposes `terminal.parser.registerOscHandler(oscCode, handler)`. Register a handler for code `133` at pane-creation time. Daemon-backed panes work transparently because the daemon already forwards all PTY bytes to the renderer's xterm.js. Option B (parsing in the daemon's `HeadlessEmulator`) is not chosen — renderer-only matches VS Code and requires zero daemon changes.
+xterm.js v6 exposes `terminal.parser.registerOscHandler(oscCode, handler)`. Register a handler for code `133` at pane-creation time alongside the existing OSC 52 and OSC 7 handlers in `src/renderer/src/components/terminal-pane/use-terminal-pane-lifecycle.ts`. Daemon-backed panes work transparently because the daemon already forwards all PTY bytes to the renderer's xterm.js. Option B (parsing in the daemon's `HeadlessEmulator`) is not chosen — renderer-only matches VS Code and requires zero daemon changes.
 
 Implementation sketch:
 
@@ -285,7 +307,7 @@ We fire `removeAgentStatus` when **both** conditions hold at the moment `OSC 133
 1. The pane currently has a live `agentStatusByPaneKey` entry (otherwise there's nothing to drop).
 2. That entry's `state` is one of `working | blocked | waiting` (not already `done`).
 
-The gate check lives in the renderer call site that invokes `attachShellIntegration` (alongside the existing OSC handlers at `src/renderer/src/components/terminal-pane/pty-connection.ts`); it reads `useAppStore.getState().agentStatusByPaneKey[paneKey]` synchronously inside `onCommandFinished`.
+The gate check lives in the renderer call site that invokes `attachShellIntegration` (alongside the existing OSC handlers in `use-terminal-pane-lifecycle.ts`); it reads `useAppStore.getState().agentStatusByPaneKey[paneKey]` synchronously inside `onCommandFinished`.
 
 Pure "D → drop" is fine for this PR. A third gate (requiring a recent `C` after the agent hook fired) was considered to prevent spurious drops on incidental shell commands between agent turns, but in practice the agent hook re-fires and re-populates immediately. Revisit only if user testing surfaces spurious drops.
 
@@ -340,33 +362,20 @@ Fixing injection for remote panes is a follow-up project, not a blocker for this
 
 ## Rollout
 
-### Flag: compile-time only in this PR
+### No feature gate
 
-Shell integration ships behind the existing compile-time `AGENT_DASHBOARD_ENABLED` constant (`src/shared/constants.ts:20`). No runtime user toggle in this PR.
+Do not use or re-add `AGENT_DASHBOARD_ENABLED`. Current `origin/main` removed that flag in #1538 and the agent-status stack is default-on: main sends `agentStatus:set`, renderer stores `agentStatusByPaneKey`, and the workspace-card inline agents list reads it directly.
 
-**Why only compile-time here:**
-
-- `AGENT_DASHBOARD_ENABLED` already gates the entire agent-status stack — hooks, store writes, dashboard UI, sidebar sort inputs. Shell integration is just another branch inside that same gate.
-- Currently hardcoded `false` on this branch after the poller cleanup. Implementation work can temporarily flip it locally while dogfooding, but commits intended for merge should leave it `false` until the runtime-toggle PR is ready.
-- Avoids coupling this PR's scope to a user-facing settings UI change. Ship the mechanism first, add the toggle second.
-
-### Follow-up PR: runtime toggle
-
-A separate PR lands before `AGENT_DASHBOARD_ENABLED` flips to `true`. It adds:
-
-- `experimentalAgentTracking: boolean` (default `false`) on `GlobalSettings`, persisted.
-- A `SearchableSetting` block in `ExperimentalPane.tsx` below the daemon toggle, rendered only when `AGENT_DASHBOARD_ENABLED === true`.
-- Idiomatic composition: `AGENT_DASHBOARD_ENABLED && s.settings.experimentalAgentTracking` on every existing agent-status read site.
-
-That PR is where the toggle's read semantics (main-at-spawn for injection, renderer-at-creation for parser, new-panes-only for mid-session toggle) get specified and wired. Out of scope here.
+Shell integration should be installed unconditionally for supported terminal panes. Its observable behavior is still naturally scoped: `OSC 133;D` only calls `removeAgentStatus(paneKey)` when there is a current live agent-status entry for that pane, and otherwise returns without changing state.
 
 ### Ordering
 
-1. Current committed state: poller deleted, title-reversion status removal disabled, design doc added, compile-time flag remains `false`.
-2. Next commits on this branch: add OSC 133 shell emission + renderer parser behind `AGENT_DASHBOARD_ENABLED`, keeping the flag `false` for merge.
-3. Follow-up PR: runtime toggle lands, compile-time flag still `false`.
-4. Release-ready: compile-time flag flips to `true`, toggle becomes user-visible (default off).
-5. Graduation: after a clean release cycle, both gates are removed in a cleanup PR and the feature is permanent.
+1. Rebase this branch onto current `origin/main` before implementation. The branch snapshot that introduced this doc is hundreds of commits behind main and still contains removed flag-era code.
+2. Keep the foreground poller and `pty:foreground-shell` IPC path deleted.
+3. Add renderer OSC 133 parsing near the existing OSC 52/OSC 7 handlers in `use-terminal-pane-lifecycle.ts`.
+4. Extend local and daemon shell-ready wrappers to emit persistent zsh OSC 133 command lifecycle marks.
+5. Add PowerShell wrapper generation and launch args for `powershell.exe` / `pwsh.exe`.
+6. Retire the legacy title-reversion TODO in `pty-connection.ts` once OSC 133 owns the Ctrl+C/drop behavior.
 
 ## Testing
 
@@ -391,13 +400,13 @@ That PR is where the toggle's read semantics (main-at-spawn for injection, rende
 | PowerShell | Windows | codex | Same |
 | PowerShell | Windows | claude (via node) | Same |
 | zsh | macOS, user has custom `.zshrc` with their own `precmd_functions` | codex | Row drops, user's precmd still runs |
-| PowerShell | Windows, PSReadLine disabled | codex | No drop (documented gap); 30-min TTL fires |
+| PowerShell | Windows, PSReadLine disabled | codex | Row still drops from prompt `D`; no `C` command-start mark |
 | SSH remote zsh | via relay | codex | No drop (documented gap); 30-min TTL fires |
 
 ## Risks
 
 1. **Shell-wrapper edge cases.** Every shell has a long tail of user configs that break injection: custom `ZDOTDIR`, antigen/zinit/zplug, oh-my-posh, starship, PowerShell `$PROFILE` hooks. The existing shell-ready wrapper has already fought battles here (see the `fix-zdotdir-recursion` PR). Same class of problem; same mitigation (defensive scripting, graceful fallback to TTL).
-2. **Timing of exit-code capture.** `$?` in zsh and `$LASTEXITCODE` / `$?` in PowerShell must be captured **before** any other command runs. Our `__orca_osc133_precmd` must be the first thing in the function — ordering matters. Test explicitly.
+2. **Timing of exit-code capture.** `$?` in zsh and `$global:?` in PowerShell must be captured **before** any other command runs. Our `__orca_osc133_precmd` and PowerShell `prompt` wrapper must read status first — ordering matters. Test explicitly.
 3. **Interaction with `scanForShellReady` and startup-command flush.** The existing scanner at `local-pty-shell-ready.ts:35` consumes the first `OSC 133;A` from the data stream before xterm.js sees it, but only when `ORCA_SHELL_READY_MARKER=1` (startup-command panes). After this PR, the wrapper emits `OSC 133;A` on every prompt, not just the first. Two things to verify and specify:
 
     **A. Who consumes which bytes.** The daemon wrapper emits `OSC 777;orca-shell-ready` instead of `OSC 133;A` (see `daemon/shell-ready.ts:84-89`). The local wrapper historically emitted `OSC 133;A` for the barrier (`local-pty-shell-ready.ts:168`). To keep the signals cleanly separated, **the local wrapper switches to `OSC 777;orca-shell-ready` for the barrier** (matching the daemon) when injecting the new per-prompt OSC 133 emission. `scanForShellReady` switches to scanning for `OSC 777` as well. After this change: the barrier scanner and the OSC 133 parser never touch the same bytes. The "claude claude" double-echo fix continues to work because the OSC 777 barrier preserves its current semantics; xterm.js parser ignores OSC 777 (no registered handler) and passes it through unconsumed — which is fine because it's an OSC escape, not printable content.
@@ -405,8 +414,8 @@ That PR is where the toggle's read semantics (main-at-spawn for injection, rende
     **B. Regression test.** Add one test (inside the renderer parser unit test file) that feeds a mixed byte sequence — `OSC 777;orca-shell-ready\x07` followed by `OSC 133;A\x07` followed by shell output — into the scanner, asserts only the OSC 777 is consumed by the barrier, and confirms xterm.js parser then sees the OSC 133;A plus the shell output unchanged.
 4. **PTY byte ordering.** Node-pty batches writes. An OSC 133 sequence could theoretically straddle a chunk boundary. xterm.js's parser handles this — it buffers incomplete escape sequences. Verified by the fact that VS Code uses the same parser. No action required.
 5. **User hijacks our precmd.** Mitigate by appending our function inside `.zshrc`. If a user reassigns `precmd_functions=()` after our line, we lose the signal and fall back to the 30-min TTL. A follow-up PR may add a diagnostic banner when `A` is never observed.
-6. **PowerShell injection overriding user profile.** Our `-Command ". '$env:ORCA_SHELL_INTEGRATION'; . $PROFILE"` invocation assumes the user's `$PROFILE` is well-behaved. Some users set `$PROFILE` to exit if non-interactive. Test against Microsoft's default profile template and document override behavior.
-7. **PowerShell `-NoProfile` ordering.** `-NoProfile -NoExit -Command '... $PROFILE'` invocation means our integration loads *before* the user's `$PROFILE`. If the user's `$PROFILE` throws during load, the user sees the error but our integration still works. If the user relies on `$PROFILE` running before interactive-shell startup (rare), behavior differs from a plain pwsh launch. Document in release notes; no code change needed.
+6. **PowerShell profile compatibility.** Launching with `-NoProfile` means Orca owns profile loading. The integration script must source `$PROFILE` before capturing `prompt` / `PSConsoleHostReadLine`, so custom prompts (oh-my-posh, starship, posh-git) are wrapped instead of overwritten. Broken profiles should surface their normal error and still fall back gracefully to TTL if they abort integration.
+7. **PowerShell readline compatibility.** The standard path wraps `PSConsoleHostReadLine` instead of binding Enter. This avoids clobbering user key handlers, but some profiles may replace `PSConsoleHostReadLine` after our script or remove PSReadLine entirely. The prompt wrapper still emits `D`; if the readline wrapper is absent, only `C` is missing.
 
 ## Cleanups (opportunistic)
 
@@ -419,12 +428,12 @@ Rough estimate for a solo engineer on this codebase:
 | Phase | Scope | Days |
 |-------|-------|------|
 | 1 | Delete poller + IPC plumbing (net-negative diff first) | Done (`6be091d3`) |
-| 2 | Renderer OSC 133 parser, gated inside the existing `AGENT_DASHBOARD_ENABLED` branches | 1-2 |
+| 2 | Rebase onto current `origin/main`, then add renderer OSC 133 parser beside existing terminal OSC handlers | 1-2 |
 | 3 | zsh wrapper extension + golden-file test | 1-2 |
 | 4 | PowerShell wrapper + golden-file test + Windows smoke test | 2-3 |
 | 5 | Dogfood hardening (Orca team on their own shells) | 1-2 |
 
-**Working estimate: 1–2 weeks wall-clock to ship behind the compile-time flag.** The runtime user toggle is a separate follow-up PR (see §Rollout).
+**Working estimate: 1–2 weeks wall-clock after rebasing onto current main.** No compile-time or runtime agent-dashboard gate is part of this plan.
 
 Target is 1–2 weeks for both zsh + PowerShell. No zsh-only fallback — PowerShell ships with this PR.
 
@@ -433,7 +442,7 @@ Target is 1–2 weeks for both zsh + PowerShell. No zsh-only fallback — PowerS
 ### VS Code (`/Users/thebr/source/repos/public/vscode`)
 
 - `src/vs/platform/terminal/common/xterm/shellIntegrationAddon.ts` — the xterm.js addon. Read the `FinalTermOscPt` enum for the authoritative sequence list. The parser wiring (`_handleFinalTermSequence`) is a direct model for ours.
-- `src/vs/workbench/contrib/terminal/common/scripts/shellIntegration.ps1` — PowerShell injection. Note the `Set-PSReadLineKeyHandler` patterns for Enter/Chord handling — the "simpler" version in this design may need to grow to match.
+- `src/vs/workbench/contrib/terminal/common/scripts/shellIntegration.ps1` — PowerShell injection. Model the prompt and `PSConsoleHostReadLine` wrapping pattern; do not bind Enter directly.
 - `src/vs/workbench/contrib/terminal/common/scripts/shellIntegration-rc.zsh` — zsh injection. Notable for the `_vsc_in_command` state tracking.
 - `src/vs/workbench/contrib/terminal/test/browser/xterm/shellIntegrationAddon.test.ts` — test patterns we can model our unit tests on.
 
@@ -446,6 +455,6 @@ Target is 1–2 weeks for both zsh + PowerShell. No zsh-only fallback — PowerS
 
 - `src/main/providers/local-pty-shell-ready.ts` — where zsh wrappers are emitted today; extend here.
 - `src/main/daemon/shell-ready.ts` — daemon-side parallel implementation; extend here (consolidation deferred).
-- `src/renderer/src/components/terminal-pane/pty-connection.ts` / `use-terminal-pane-lifecycle.ts` — attach the renderer-local OSC 133 handler near existing xterm parser wiring.
-- `src/renderer/src/components/terminal-pane/pty-connection.ts:240` — title reversion now clears cache timers only; keep agent-status removal tied to explicit hooks, PTY exit, and OSC 133 command-finished marks.
+- `src/renderer/src/components/terminal-pane/use-terminal-pane-lifecycle.ts` — attach the renderer-local OSC 133 handler near existing xterm parser wiring.
+- `src/renderer/src/components/terminal-pane/pty-connection.ts` — PTY exit cleanup stays; replace/retire the stale title-reversion TODO once OSC 133 command-finished marks own agent-process exit.
 - `src/main/index.ts` — agent hooks still feed `agentStatus:set`; do not add a new poller or `pty:foreground-shell` IPC path here.
