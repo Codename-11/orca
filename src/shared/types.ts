@@ -209,6 +209,7 @@ export type WorktreeLineageOrigin = 'orchestration' | 'cli' | 'manual'
 export type WorktreeLineageCaptureConfidence = 'explicit' | 'inferred'
 export type WorktreeLineageCaptureSource =
   | 'explicit-cli-flag'
+  | 'cwd-context'
   | 'terminal-context'
   | 'orchestration-context'
   | 'manual-action'
@@ -1029,7 +1030,12 @@ export type CreateWorktreeArgs = {
 }
 
 export type CreateWorktreeResult = {
-  worktree: Worktree
+  worktree: Worktree & {
+    parentWorktreeId?: string | null
+    childWorktreeIds?: string[]
+    lineage?: WorktreeLineage | null
+    git?: GitWorktreeInfo
+  }
   lineage?: WorktreeLineage | null
   warnings?: WorktreeLineageWarning[]
   setup?: WorktreeSetupLaunch

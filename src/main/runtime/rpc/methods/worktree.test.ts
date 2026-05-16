@@ -97,6 +97,30 @@ describe('worktree RPC methods', () => {
     expect(runtime.updateManagedWorktreeMeta).not.toHaveBeenCalled()
   })
 
+  it('lists raw worktree lineage through the runtime server', async () => {
+    const lineage = {
+      'repo::/child': {
+        worktreeId: 'repo::/child',
+        worktreeInstanceId: 'child-instance',
+        parentWorktreeId: 'repo::/missing-parent',
+        parentWorktreeInstanceId: 'parent-instance',
+        origin: 'manual',
+        capture: { source: 'manual-action', confidence: 'explicit' },
+        createdAt: 1
+      }
+    }
+    const runtime = {
+      getRuntimeId: () => 'test-runtime',
+      listWorktreeLineage: vi.fn().mockResolvedValue(lineage)
+    } as unknown as OrcaRuntimeService
+    const dispatcher = new RpcDispatcher({ runtime, methods: WORKTREE_METHODS })
+
+    const response = await dispatcher.dispatch(makeRequest('worktree.lineageList'))
+
+    expect(runtime.listWorktreeLineage).toHaveBeenCalled()
+    expect(response).toMatchObject({ ok: true, result: { lineage } })
+  })
+
   it('persists smart sort order on the runtime server', async () => {
     const runtime = {
       getRuntimeId: () => 'test-runtime',

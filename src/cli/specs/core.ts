@@ -105,6 +105,8 @@ export const CORE_COMMAND_SPECS: CommandSpec[] = [
       'activate'
     ],
     notes: [
+      'By default, Orca records the new worktree as a child of the caller workspace when it can infer one from the Orca terminal or current directory.',
+      'Pass --parent-worktree to choose a parent explicitly, or --no-parent to force no lineage.',
       'By default this creates the worktree and its first terminal without switching the active Orca workspace.',
       'Repo-defined setup hooks follow the repository setup policy; pass --run-hooks to force them.',
       'Pass --activate when the CLI caller intentionally wants to reveal the new worktree in the app.',

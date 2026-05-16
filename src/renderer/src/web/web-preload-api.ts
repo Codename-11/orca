@@ -324,16 +324,12 @@ function createWorktreesApi(): NonNullable<Partial<PreloadApi>['worktrees']> {
           ...updates
         })
       ).worktree,
-    listLineage: async () => {
-      const lineageById: Record<string, WorktreeLineage> = {}
-      for (const worktree of await listAllRuntimeWorktrees()) {
-        const lineage = (worktree as Worktree & { lineage?: WorktreeLineage | null }).lineage
-        if (lineage) {
-          lineageById[lineage.worktreeId] = lineage
-        }
-      }
-      return lineageById
-    },
+    listLineage: async () =>
+      (
+        await callRuntimeResult<{ lineage: Record<string, WorktreeLineage> }>(
+          'worktree.lineageList'
+        )
+      ).lineage,
     updateLineage: async ({ worktreeId, parentWorktreeId, noParent }) => {
       cachedWorktrees = null
       const result = await callRuntimeResult<{

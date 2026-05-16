@@ -2854,6 +2854,113 @@ describe('OrcaRuntimeService', () => {
     )
   })
 
+  it('falls back to cwd lineage when the caller terminal handle is stale', async () => {
+    const parentPath = '/tmp/worktree-parent'
+    const childPath = '/tmp/workspaces/cwd-child'
+    const parentId = `${TEST_REPO_ID}::${parentPath}`
+    const childId = `${TEST_REPO_ID}::${childPath}`
+    const metaById: Record<string, WorktreeMeta> = {
+      [parentId]: makeWorktreeMeta({ instanceId: 'parent-instance' })
+    }
+    const setWorktreeLineage = vi.fn((_worktreeId: string, lineage) => lineage)
+    const runtimeStore = {
+      ...store,
+      getAllWorktreeMeta: () => metaById,
+      getWorktreeMeta: (worktreeId: string) => metaById[worktreeId],
+      setWorktreeMeta: (worktreeId: string, meta: Partial<WorktreeMeta>) => {
+        const existing = metaById[worktreeId] ?? makeWorktreeMeta()
+        metaById[worktreeId] = { ...existing, ...meta }
+        return metaById[worktreeId]
+      },
+      getWorktreeLineage: () => undefined,
+      setWorktreeLineage
+    }
+    const runtime = new OrcaRuntimeService(runtimeStore as never)
+    computeWorktreePathMock.mockReturnValue(childPath)
+    ensurePathWithinWorkspaceMock.mockReturnValue(childPath)
+    vi.mocked(listWorktrees)
+      .mockResolvedValueOnce([
+        {
+          path: parentPath,
+          head: 'abc',
+          branch: 'feature/parent',
+          isBare: false,
+          isMainWorktree: false
+        }
+      ])
+      .mockResolvedValueOnce([
+        {
+          path: childPath,
+          head: 'def',
+          branch: 'cwd-child',
+          isBare: false,
+          isMainWorktree: false
+        }
+      ])
+
+    const result = await runtime.createManagedWorktree({
+      repoSelector: 'id:repo-1',
+      name: 'cwd-child',
+      lineage: {
+        callerTerminalHandle: 'term_stale',
+        cwdParentWorktree: `id:${parentId}`
+      }
+    })
+
+    expect(result.lineage).toMatchObject({
+      worktreeId: childId,
+      parentWorktreeId: parentId,
+      origin: 'cli',
+      capture: { source: 'cwd-context', confidence: 'inferred' }
+    })
+    expect(result.worktree).toMatchObject({
+      parentWorktreeId: parentId,
+      childWorktreeIds: [],
+      lineage: result.lineage
+    })
+    expect(setWorktreeLineage).toHaveBeenCalledWith(childId, expect.any(Object))
+  })
+
+  it('keeps cwd-inferred lineage best-effort when the cwd parent cannot be resolved', async () => {
+    const childPath = '/tmp/workspaces/no-cwd-parent'
+    computeWorktreePathMock.mockReturnValue(childPath)
+    ensurePathWithinWorkspaceMock.mockReturnValue(childPath)
+    vi.mocked(listWorktrees)
+      .mockResolvedValueOnce(MOCK_GIT_WORKTREES)
+      .mockResolvedValueOnce([
+        {
+          path: childPath,
+          head: 'def',
+          branch: 'no-cwd-parent',
+          isBare: false,
+          isMainWorktree: false
+        }
+      ])
+    const runtime = new OrcaRuntimeService(store)
+
+    const result = await runtime.createManagedWorktree({
+      repoSelector: 'id:repo-1',
+      name: 'no-cwd-parent',
+      lineage: {
+        cwdParentWorktree: 'id:repo-1::/tmp/missing-parent'
+      }
+    })
+
+    expect(result.lineage).toBeNull()
+    expect(result.worktree).toMatchObject({
+      parentWorktreeId: null,
+      childWorktreeIds: [],
+      lineage: null
+    })
+    expect(result.warnings).toEqual([
+      expect.objectContaining({
+        code: 'LINEAGE_PARENT_CONTEXT_MISSING',
+        message:
+          'Worktree created, but Orca could not validate the current directory as a parent workspace.'
+      })
+    ])
+  })
+
   it('infers orchestration lineage from task-id comments when dispatch is completed', async () => {
     const workerPath = '/tmp/worktree-worker'
     const childPath = '/tmp/workspaces/worker-child'

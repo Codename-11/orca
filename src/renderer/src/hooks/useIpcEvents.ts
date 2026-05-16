@@ -79,6 +79,7 @@ async function prepareRemoteWorkspaceTarget(targetId: string): Promise<boolean> 
     repos = useAppStore.getState().repos.filter((repo) => repo.connectionId === targetId)
   }
   await Promise.all(repos.map((repo) => useAppStore.getState().fetchWorktrees(repo.id)))
+  await useAppStore.getState().fetchWorktreeLineage()
   return true
 }
 
@@ -1298,7 +1299,8 @@ export function useIpcEvents(): void {
           // lets it detect that providers are now available and retry.
           store.bumpSshConnectedGeneration()
 
-          void Promise.all(remoteRepos.map((r) => store.fetchWorktrees(r.id))).then(() => {
+          void Promise.all(remoteRepos.map((r) => store.fetchWorktrees(r.id))).then(async () => {
+            await useAppStore.getState().fetchWorktreeLineage()
             // Why: terminal panes that failed to spawn (no PTY provider on cold
             // start) sit inert. Bumping generation forces TerminalPane to remount
             // and retry pty:spawn. Only bump tabs with no live ptyId.

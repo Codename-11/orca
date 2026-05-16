@@ -6,6 +6,7 @@ import type {
 } from '../../shared/runtime-types'
 import type { CommandHandler } from '../dispatch'
 import { formatWorktreeList, formatWorktreePs, formatWorktreeShow, printResult } from '../format'
+import { RuntimeClientError } from '../runtime-client'
 import {
   getOptionalNullableNumberFlag,
   getOptionalNumberFlag,
@@ -13,7 +14,11 @@ import {
   getOptionalStringFlag,
   getRequiredStringFlag
 } from '../flags'
-import { getRequiredWorktreeSelector, resolveCurrentWorktreeSelector } from '../selectors'
+import {
+  getOptionalWorktreeSelector,
+  getRequiredWorktreeSelector,
+  resolveCurrentWorktreeSelector
+} from '../selectors'
 
 type HookWarningResult = {
   warning?: string
@@ -36,16 +41,34 @@ function printLineageSummary(result: RuntimeWorktreeCreateResult, json: boolean)
     const source =
       result.lineage.capture.source === 'terminal-context'
         ? 'terminal'
-        : result.lineage.capture.source === 'orchestration-context'
-          ? 'orchestration'
-          : result.lineage.capture.source === 'explicit-cli-flag'
-            ? 'explicit flag'
-            : 'manual action'
+        : result.lineage.capture.source === 'cwd-context'
+          ? 'cwd'
+          : result.lineage.capture.source === 'orchestration-context'
+            ? 'orchestration'
+            : result.lineage.capture.source === 'explicit-cli-flag'
+              ? 'explicit flag'
+              : 'manual action'
     console.error(
       `parent: ${result.lineage.parentWorktreeId} (${result.lineage.capture.confidence} from ${source})`
     )
   } else {
     console.error('parent: none')
+  }
+}
+
+function assertParentFlagsCompatible(flags: Map<string, string | boolean>): void {
+  if (flags.has('parent-worktree') && flags.get('no-parent') === true) {
+    throw new RuntimeClientError(
+      'invalid_argument',
+      'Choose either --parent-worktree or --no-parent, not both.'
+    )
+  }
+  const parentWorktree = flags.get('parent-worktree')
+  if (
+    flags.has('parent-worktree') &&
+    (typeof parentWorktree !== 'string' || parentWorktree === '')
+  ) {
+    throw new RuntimeClientError('invalid_argument', 'Missing required --parent-worktree')
   }
 }
 
@@ -76,21 +99,27 @@ export const WORKTREE_HANDLERS: Record<string, CommandHandler> = {
     printResult(result, json, formatWorktreeShow)
   },
   'worktree create': async ({ flags, client, cwd, json }) => {
+    assertParentFlagsCompatible(flags)
     const callerTerminalHandle =
       typeof process.env.ORCA_TERMINAL_HANDLE === 'string' &&
       process.env.ORCA_TERMINAL_HANDLE.length > 0
         ? process.env.ORCA_TERMINAL_HANDLE
         : undefined
-    const explicitParentWorktree = getOptionalStringFlag(flags, 'parent-worktree')
+    const explicitParentWorktree = await getOptionalWorktreeSelector(
+      flags,
+      'parent-worktree',
+      cwd,
+      client
+    )
     const noParent = flags.get('no-parent') === true
-    let parentWorktree = explicitParentWorktree
-    if (!parentWorktree && !noParent && !callerTerminalHandle) {
+    let cwdParentWorktree: string | undefined
+    if (!explicitParentWorktree && !noParent) {
       try {
         // Why: agent shells can lose ORCA_TERMINAL_HANDLE while still running
         // inside an Orca worktree. Cwd keeps CLI-created children nestable.
-        parentWorktree = await resolveCurrentWorktreeSelector(cwd, client)
+        cwdParentWorktree = await resolveCurrentWorktreeSelector(cwd, client)
       } catch {
-        parentWorktree = undefined
+        cwdParentWorktree = undefined
       }
     }
     const result = await client.call<RuntimeWorktreeCreateResult>('worktree.create', {
@@ -101,7 +130,8 @@ export const WORKTREE_HANDLERS: Record<string, CommandHandler> = {
       comment: getOptionalStringFlag(flags, 'comment'),
       runHooks: flags.get('run-hooks') === true,
       activate: flags.get('activate') === true || flags.get('run-hooks') === true,
-      parentWorktree,
+      parentWorktree: explicitParentWorktree,
+      ...(cwdParentWorktree ? { cwdParentWorktree } : {}),
       noParent,
       callerTerminalHandle
     })
@@ -110,12 +140,13 @@ export const WORKTREE_HANDLERS: Record<string, CommandHandler> = {
     printResult(result, json, formatWorktreeShow)
   },
   'worktree set': async ({ flags, client, cwd, json }) => {
+    assertParentFlagsCompatible(flags)
     const result = await client.call<{ worktree: RuntimeWorktreeRecord }>('worktree.set', {
       worktree: await getRequiredWorktreeSelector(flags, 'worktree', cwd, client),
       displayName: getOptionalStringFlag(flags, 'display-name'),
       linkedIssue: getOptionalNullableNumberFlag(flags, 'issue'),
       comment: getOptionalStringFlag(flags, 'comment'),
-      parentWorktree: getOptionalStringFlag(flags, 'parent-worktree'),
+      parentWorktree: await getOptionalWorktreeSelector(flags, 'parent-worktree', cwd, client),
       noParent: flags.get('no-parent') === true
     })
     printResult(result, json, formatWorktreeShow)

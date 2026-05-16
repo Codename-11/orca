@@ -256,11 +256,128 @@ describe('fetchWorktrees', () => {
     })
     expect(mockApi.worktrees.list).not.toHaveBeenCalled()
   })
+
+  it('updates remote worktree records when only lineage changes', async () => {
+    const store = createTestStore()
+    const initial = makeWorktree({
+      id: 'repo1::/remote/wt1',
+      repoId: 'repo1',
+      path: '/remote/wt1',
+      branch: 'refs/heads/remote'
+    })
+    const lineage = makeLineage({ worktreeId: initial.id })
+    const refreshed = { ...initial, lineage }
+    store.setState({
+      settings: { activeRuntimeEnvironmentId: 'env-1' } as never,
+      worktreesByRepo: { repo1: [initial] },
+      sortEpoch: 7
+    } as Partial<AppState>)
+    runtimeEnvironmentCall.mockImplementation(({ method }: RuntimeEnvironmentCallRequest) => {
+      const result =
+        method === 'worktree.lineageList'
+          ? { lineage: { [lineage.worktreeId]: lineage } }
+          : { worktrees: [refreshed], totalCount: 1, truncated: false }
+      return Promise.resolve({
+        id: 'rpc-1',
+        ok: true,
+        result,
+        _meta: { runtimeId: 'runtime-remote' }
+      })
+    })
+
+    await store.getState().fetchWorktrees('repo1')
+
+    expect(store.getState().worktreesByRepo.repo1).toEqual([refreshed])
+    expect(store.getState().worktreeLineageById).toEqual({ [lineage.worktreeId]: lineage })
+    expect(store.getState().sortEpoch).toBe(8)
+  })
+
+  it('refreshes remote lineage when the worktree payload is otherwise unchanged', async () => {
+    const store = createTestStore()
+    const worktree = makeWorktree({
+      id: 'repo1::/remote/wt1',
+      repoId: 'repo1',
+      path: '/remote/wt1',
+      branch: 'refs/heads/remote'
+    })
+    const staleLineage = makeLineage({
+      worktreeId: worktree.id,
+      parentWorktreeId: 'repo1::/remote/old-parent'
+    })
+    const freshLineage = makeLineage({
+      worktreeId: worktree.id,
+      parentWorktreeId: 'repo1::/remote/new-parent'
+    })
+    store.setState({
+      settings: { activeRuntimeEnvironmentId: 'env-1' } as never,
+      worktreesByRepo: { repo1: [worktree] },
+      worktreeLineageById: { [worktree.id]: staleLineage },
+      sortEpoch: 7
+    } as Partial<AppState>)
+    runtimeEnvironmentCall.mockImplementation(({ method }: RuntimeEnvironmentCallRequest) => {
+      const result =
+        method === 'worktree.lineageList'
+          ? { lineage: { [freshLineage.worktreeId]: freshLineage } }
+          : { worktrees: [worktree], totalCount: 1, truncated: false }
+      return Promise.resolve({
+        id: 'rpc-1',
+        ok: true,
+        result,
+        _meta: { runtimeId: 'runtime-remote' }
+      })
+    })
+
+    await store.getState().fetchWorktrees('repo1')
+
+    expect(store.getState().worktreesByRepo.repo1).toEqual([worktree])
+    expect(store.getState().worktreeLineageById).toEqual({
+      [freshLineage.worktreeId]: freshLineage
+    })
+    expect(store.getState().sortEpoch).toBe(7)
+  })
+
+  it('keeps a successful remote worktree refresh when lineage refresh fails', async () => {
+    const store = createTestStore()
+    const refreshed = makeWorktree({
+      id: 'repo1::/remote/wt1',
+      repoId: 'repo1',
+      path: '/remote/wt1',
+      branch: 'refs/heads/remote'
+    })
+    const staleLineage = makeLineage({ worktreeId: refreshed.id })
+    store.setState({
+      settings: { activeRuntimeEnvironmentId: 'env-1' } as never,
+      worktreesByRepo: {},
+      worktreeLineageById: { [staleLineage.worktreeId]: staleLineage },
+      sortEpoch: 7
+    } as Partial<AppState>)
+    runtimeEnvironmentCall.mockImplementation(({ method }: RuntimeEnvironmentCallRequest) => {
+      if (method === 'worktree.lineageList') {
+        return Promise.reject(new Error('lineage timeout'))
+      }
+      return Promise.resolve({
+        id: 'rpc-1',
+        ok: true,
+        result: { worktrees: [refreshed], totalCount: 1, truncated: false },
+        _meta: { runtimeId: 'runtime-remote' }
+      })
+    })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await store.getState().fetchWorktrees('repo1')
+
+    expect(store.getState().worktreesByRepo.repo1).toEqual([refreshed])
+    expect(store.getState().worktreeLineageById).toEqual({
+      [staleLineage.worktreeId]: staleLineage
+    })
+    expect(store.getState().sortEpoch).toBe(8)
+  })
 })
 
 describe('worktree lineage state', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    resetRemoteRuntimeMocks()
   })
 
   it('fetches persisted lineage into the renderer store', async () => {
@@ -320,6 +437,107 @@ describe('worktree lineage state', () => {
 
     expect(mockApi.worktrees.listLineage).toHaveBeenCalled()
     expect(store.getState().worktreeLineageById).toEqual({ [lineage.worktreeId]: lineage })
+  })
+
+  it('fetches raw lineage from the active remote runtime environment', async () => {
+    const store = createTestStore()
+    const lineage = makeLineage()
+    runtimeEnvironmentCall.mockResolvedValue({
+      id: 'rpc-lineage-list',
+      ok: true,
+      result: { lineage: { [lineage.worktreeId]: lineage } },
+      _meta: { runtimeId: 'runtime-remote' }
+    })
+    store.setState({
+      settings: { activeRuntimeEnvironmentId: 'env-1' } as never,
+      worktreesByRepo: {}
+    } as Partial<AppState>)
+
+    await store.getState().fetchWorktreeLineage()
+
+    expect(runtimeEnvironmentCall).toHaveBeenCalledWith({
+      selector: 'env-1',
+      method: 'worktree.lineageList',
+      params: undefined,
+      timeoutMs: 15_000
+    })
+    expect(mockApi.worktrees.listLineage).not.toHaveBeenCalled()
+    expect(store.getState().worktreeLineageById).toEqual({ [lineage.worktreeId]: lineage })
+  })
+
+  it('updates lineage through the active remote runtime environment', async () => {
+    const store = createTestStore()
+    const lineage = makeLineage()
+    const child = makeWorktree({
+      id: lineage.worktreeId,
+      repoId: 'repo1',
+      path: '/remote/child'
+    })
+    const updatedChild = { ...child, lineage }
+    runtimeEnvironmentCall.mockResolvedValue({
+      id: 'rpc-set-lineage',
+      ok: true,
+      result: { worktree: updatedChild },
+      _meta: { runtimeId: 'runtime-remote' }
+    })
+    store.setState({
+      settings: { activeRuntimeEnvironmentId: 'env-1' } as never,
+      worktreesByRepo: { repo1: [child] },
+      sortEpoch: 3
+    } as Partial<AppState>)
+
+    await store.getState().updateWorktreeLineage(lineage.worktreeId, {
+      parentWorktreeId: lineage.parentWorktreeId
+    })
+
+    expect(runtimeEnvironmentCall).toHaveBeenCalledWith({
+      selector: 'env-1',
+      method: 'worktree.set',
+      params: {
+        worktree: lineage.worktreeId,
+        parentWorktree: `id:${lineage.parentWorktreeId}`
+      },
+      timeoutMs: 15_000
+    })
+    expect(mockApi.worktrees.updateLineage).not.toHaveBeenCalled()
+    expect(store.getState().worktreeLineageById).toEqual({ [lineage.worktreeId]: lineage })
+    expect(store.getState().worktreesByRepo.repo1?.[0]).toEqual(updatedChild)
+    expect(store.getState().sortEpoch).toBe(4)
+  })
+
+  it('clears lineage through the active remote runtime environment', async () => {
+    const store = createTestStore()
+    const lineage = makeLineage()
+    const child = makeWorktree({
+      id: lineage.worktreeId,
+      repoId: 'repo1',
+      path: '/remote/child',
+      lineage
+    } as Partial<Worktree> & { id: string; repoId: string })
+    const updatedChild = { ...child, lineage: null }
+    runtimeEnvironmentCall.mockResolvedValue({
+      id: 'rpc-clear-lineage',
+      ok: true,
+      result: { worktree: updatedChild },
+      _meta: { runtimeId: 'runtime-remote' }
+    })
+    store.setState({
+      settings: { activeRuntimeEnvironmentId: 'env-1' } as never,
+      worktreesByRepo: { repo1: [child] },
+      worktreeLineageById: { [lineage.worktreeId]: lineage },
+      sortEpoch: 3
+    } as Partial<AppState>)
+
+    await store.getState().updateWorktreeLineage(lineage.worktreeId, { noParent: true })
+
+    expect(runtimeEnvironmentCall).toHaveBeenCalledWith({
+      selector: 'env-1',
+      method: 'worktree.set',
+      params: { worktree: lineage.worktreeId, noParent: true },
+      timeoutMs: 15_000
+    })
+    expect(store.getState().worktreeLineageById).toEqual({})
+    expect(store.getState().worktreesByRepo.repo1?.[0]).toEqual(updatedChild)
   })
 })
 

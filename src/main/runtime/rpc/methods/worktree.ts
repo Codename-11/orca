@@ -58,6 +58,7 @@ const WorktreeCreate = z
     runHooks: OptionalBoolean,
     activate: OptionalBoolean,
     parentWorktree: OptionalString,
+    cwdParentWorktree: OptionalString,
     noParent: OptionalBoolean,
     callerTerminalHandle: OptionalString,
     orchestrationContext: z
@@ -159,6 +160,11 @@ export const WORKTREE_METHODS: RpcMethod[] = [
     handler: async (params, { runtime }) => runtime.listManagedWorktrees(params.repo, params.limit)
   }),
   defineMethod({
+    name: 'worktree.lineageList',
+    params: null,
+    handler: async (_params, { runtime }) => ({ lineage: await runtime.listWorktreeLineage() })
+  }),
+  defineMethod({
     name: 'worktree.show',
     params: WorktreeSelector,
     handler: async (params, { runtime }) => ({
@@ -197,6 +203,7 @@ export const WORKTREE_METHODS: RpcMethod[] = [
         startup: params.startupCommand ? { command: params.startupCommand } : undefined,
         lineage: {
           parentWorktree: params.parentWorktree,
+          ...(params.cwdParentWorktree ? { cwdParentWorktree: params.cwdParentWorktree } : {}),
           noParent: params.noParent === true,
           callerTerminalHandle: params.callerTerminalHandle,
           orchestrationContext: params.orchestrationContext

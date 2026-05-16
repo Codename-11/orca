@@ -1,7 +1,12 @@
 /* eslint-disable max-lines */
 import type { StateCreator } from 'zustand'
 import type { AppState } from '../types'
-import type { Worktree, WorkspaceVisibleTabType, WorktreeMeta } from '../../../../shared/types'
+import type {
+  Worktree,
+  WorkspaceVisibleTabType,
+  WorktreeLineage,
+  WorktreeMeta
+} from '../../../../shared/types'
 import {
   findWorktreeById,
   applyWorktreeUpdates,
@@ -21,6 +26,29 @@ function arraysShallowEqual(a: string[] | undefined, b: string[] | undefined): b
     return !a?.length && !b?.length
   }
   return a.every((v, i) => v === b[i])
+}
+
+function areLineageRecordsEqual(
+  a: WorktreeLineage | null | undefined,
+  b: WorktreeLineage | null | undefined
+): boolean {
+  if (!a || !b) {
+    return !a && !b
+  }
+  return (
+    a.worktreeId === b.worktreeId &&
+    a.worktreeInstanceId === b.worktreeInstanceId &&
+    a.parentWorktreeId === b.parentWorktreeId &&
+    a.parentWorktreeInstanceId === b.parentWorktreeInstanceId &&
+    a.origin === b.origin &&
+    a.capture.source === b.capture.source &&
+    a.capture.confidence === b.capture.confidence &&
+    a.orchestrationRunId === b.orchestrationRunId &&
+    a.taskId === b.taskId &&
+    a.coordinatorHandle === b.coordinatorHandle &&
+    a.createdByTerminalHandle === b.createdByTerminalHandle &&
+    a.createdAt === b.createdAt
+  )
 }
 
 function areWorktreesEqual(current: Worktree[] | undefined, next: Worktree[]): boolean {
@@ -56,13 +84,46 @@ function areWorktreesEqual(current: Worktree[] | undefined, next: Worktree[]): b
       worktree.pushTarget?.branchName === candidate.pushTarget?.branchName &&
       worktree.pushTarget?.remoteUrl === candidate.pushTarget?.remoteUrl &&
       worktree.sparseBaseRef === candidate.sparseBaseRef &&
-      arraysShallowEqual(worktree.sparseDirectories, candidate.sparseDirectories)
+      arraysShallowEqual(worktree.sparseDirectories, candidate.sparseDirectories) &&
+      (worktree as WorktreeWithLineage).parentWorktreeId ===
+        (candidate as WorktreeWithLineage).parentWorktreeId &&
+      arraysShallowEqual(
+        (worktree as WorktreeWithLineage).childWorktreeIds,
+        (candidate as WorktreeWithLineage).childWorktreeIds
+      ) &&
+      areLineageRecordsEqual(
+        (worktree as WorktreeWithLineage).lineage,
+        (candidate as WorktreeWithLineage).lineage
+      )
     )
   })
 }
 
 function toVisibleTabType(contentType: string): WorkspaceVisibleTabType {
   return contentType === 'browser' ? 'browser' : contentType === 'terminal' ? 'terminal' : 'editor'
+}
+
+type WorktreeWithLineage = Worktree & {
+  parentWorktreeId?: string | null
+  childWorktreeIds?: string[]
+  lineage?: WorktreeLineage | null
+}
+
+function replaceWorktreeInRepoLists(
+  worktreesByRepo: Record<string, Worktree[]>,
+  updatedWorktree: Worktree
+): Record<string, Worktree[]> {
+  const repoId = getRepoIdFromWorktreeId(updatedWorktree.id)
+  const current = worktreesByRepo[repoId]
+  if (!current) {
+    return worktreesByRepo
+  }
+  return {
+    ...worktreesByRepo,
+    [repoId]: current.map((worktree) =>
+      worktree.id === updatedWorktree.id ? updatedWorktree : worktree
+    )
+  }
 }
 
 async function listWorktreesForRepo(
@@ -82,6 +143,39 @@ async function listWorktreesForRepo(
     { timeoutMs: 15_000 }
   )
   return result.worktrees
+}
+
+async function listWorktreeLineageForRuntime(
+  settings: AppState['settings']
+): Promise<Record<string, WorktreeLineage>> {
+  const target = getActiveRuntimeTarget(settings)
+  if (target.kind === 'local') {
+    return window.api.worktrees.listLineage()
+  }
+  return (
+    await callRuntimeRpc<{ lineage: Record<string, WorktreeLineage> }>(
+      target,
+      'worktree.lineageList',
+      undefined,
+      { timeoutMs: 15_000 }
+    )
+  ).lineage
+}
+
+async function refreshRemoteWorktreeLineageBestEffort(
+  settings: AppState['settings'],
+  set: (partial: Partial<AppState>) => void
+): Promise<void> {
+  if (getActiveRuntimeTarget(settings).kind === 'local') {
+    return
+  }
+  try {
+    set({ worktreeLineageById: await listWorktreeLineageForRuntime(settings) })
+  } catch (err) {
+    // Why: lineage is supplemental to the worktree list. A remote timeout here
+    // must not discard a successful worktree refresh.
+    console.error('Failed to fetch worktree lineage:', err)
+  }
 }
 
 async function persistWorktreeMeta(
@@ -116,9 +210,11 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
 
   fetchWorktrees: async (repoId) => {
     try {
-      const worktrees = await listWorktreesForRepo(get().settings, repoId)
+      const settings = get().settings
+      const worktrees = await listWorktreesForRepo(settings, repoId)
       const current = get().worktreesByRepo[repoId]
       if (areWorktreesEqual(current, worktrees)) {
+        await refreshRemoteWorktreeLineageBestEffort(settings, set)
         return
       }
 
@@ -140,6 +236,7 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
         worktreesByRepo: { ...s.worktreesByRepo, [repoId]: worktrees },
         sortEpoch: s.sortEpoch + 1
       }))
+      await refreshRemoteWorktreeLineageBestEffort(settings, set)
     } catch (err) {
       console.error(`Failed to fetch worktrees for repo ${repoId}:`, err)
     }
@@ -213,8 +310,7 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
 
   fetchWorktreeLineage: async () => {
     try {
-      const lineage = await window.api.worktrees.listLineage()
-      set({ worktreeLineageById: lineage })
+      set({ worktreeLineageById: await listWorktreeLineageForRuntime(get().settings) })
     } catch (err) {
       console.error('Failed to fetch worktree lineage:', err)
     }
@@ -222,7 +318,24 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
 
   updateWorktreeLineage: async (worktreeId, args) => {
     try {
-      const lineage = await window.api.worktrees.updateLineage({ worktreeId, ...args })
+      const target = getActiveRuntimeTarget(get().settings)
+      let updatedRemoteWorktree: WorktreeWithLineage | undefined
+      const lineage =
+        target.kind === 'local'
+          ? await window.api.worktrees.updateLineage({ worktreeId, ...args })
+          : await callRuntimeRpc<{ worktree: WorktreeWithLineage }>(
+              target,
+              'worktree.set',
+              {
+                worktree: worktreeId,
+                ...(args.parentWorktreeId ? { parentWorktree: `id:${args.parentWorktreeId}` } : {}),
+                ...(args.noParent === true ? { noParent: true } : {})
+              },
+              { timeoutMs: 15_000 }
+            ).then((result) => {
+              updatedRemoteWorktree = result.worktree
+              return result.worktree.lineage ?? null
+            })
       set((s) => {
         const next = { ...s.worktreeLineageById }
         if (lineage) {
@@ -230,11 +343,18 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
         } else {
           delete next[worktreeId]
         }
-        return { worktreeLineageById: next, sortEpoch: s.sortEpoch + 1 }
+        return {
+          worktreeLineageById: next,
+          worktreesByRepo:
+            target.kind === 'local' || !updatedRemoteWorktree
+              ? s.worktreesByRepo
+              : replaceWorktreeInRepoLists(s.worktreesByRepo, updatedRemoteWorktree),
+          sortEpoch: s.sortEpoch + 1
+        }
       })
     } catch (err) {
       console.error('Failed to update worktree lineage:', err)
-      void get().fetchWorktreeLineage()
+      await get().fetchWorktreeLineage()
     }
   },
 

@@ -485,6 +485,7 @@ type ResolvedWorktree = Worktree & {
 
 type WorktreeLineageInput = {
   parentWorktree?: string
+  cwdParentWorktree?: string
   noParent?: boolean
   callerTerminalHandle?: string
   comment?: string
@@ -517,7 +518,7 @@ type RuntimeWorktreeScanResult =
   | { ok: false; worktrees: [] }
 
 type WorktreeLineageCandidate = {
-  source: 'terminal-context' | 'orchestration-context'
+  source: 'cwd-context' | 'terminal-context' | 'orchestration-context'
   parent: ResolvedWorktree
   orchestrationRunId?: string
   taskId?: string
@@ -5411,7 +5412,13 @@ export class OrcaRuntimeService {
       }
     }
     return {
-      worktree,
+      worktree: {
+        ...worktree,
+        parentWorktreeId: lineage?.parentWorktreeId ?? null,
+        childWorktreeIds: [],
+        lineage,
+        git: created
+      },
       ...(lineageInput ? { lineage, warnings: lineageWarnings } : {}),
       ...(setup ? { setup } : {}),
       ...(warning ? { warning } : {})
@@ -6830,6 +6837,7 @@ export class OrcaRuntimeService {
 
     const warnings: WorktreeLineageWarning[] = []
     const candidates: WorktreeLineageCandidate[] = []
+    let cwdCandidate: WorktreeLineageCandidate | null = null
     let terminalContextResolved = false
 
     if (input.orchestrationContext?.parentWorktreeId) {
@@ -6891,6 +6899,26 @@ export class OrcaRuntimeService {
           details: { callerTerminalHandle: input.callerTerminalHandle }
         })
       }
+    }
+
+    if (input.cwdParentWorktree) {
+      try {
+        cwdCandidate = {
+          source: 'cwd-context',
+          parent: await this.resolveWorktreeSelector(input.cwdParentWorktree)
+        }
+      } catch {
+        warnings.push({
+          code: 'LINEAGE_PARENT_CONTEXT_MISSING',
+          message:
+            'Worktree created, but Orca could not validate the current directory as a parent workspace.',
+          details: { cwdParentWorktree: input.cwdParentWorktree }
+        })
+      }
+    }
+
+    if (candidates.length === 0 && cwdCandidate) {
+      candidates.push(cwdCandidate)
     }
 
     if (candidates.length === 0) {
@@ -7017,6 +7045,11 @@ export class OrcaRuntimeService {
         createdAt: Date.now()
       })
     }
+  }
+
+  async listWorktreeLineage(): Promise<Record<string, WorktreeLineage>> {
+    await this.hydrateInferredWorktreeLineage()
+    return this.store?.getAllWorktreeLineage?.() ?? {}
   }
 
   private async resolveRepoSelector(selector: string): Promise<Repo> {
