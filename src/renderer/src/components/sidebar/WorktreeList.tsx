@@ -109,13 +109,12 @@ function getWorktreeOptionId(worktreeId: string): string {
   return `worktree-list-option-${encodeURIComponent(worktreeId)}`
 }
 
-const LINEAGE_INDENT = 24
+const LINEAGE_INDENT = 18
 
 type VirtualizedWorktreeViewportProps = {
   rows: Row[]
   activeWorktreeId: string | null
   groupBy: WorktreeGroupBy
-  showWorkspaceLineage: boolean
   showInlineAgentCards: boolean
   repoGroupOrdering: RepoGroupOrdering
   toggleGroup: (key: string) => void
@@ -172,11 +171,7 @@ function renderRowContainsWorktree(row: RenderRow, worktreeId: string | null): b
   return row.type === 'item' && row.worktree.id === worktreeId
 }
 
-function buildRenderableRows(rows: Row[], showWorkspaceLineage: boolean): RenderRow[] {
-  if (!showWorkspaceLineage) {
-    return rows
-  }
-
+function buildRenderableRows(rows: Row[]): RenderRow[] {
   const renderRows: RenderRow[] = []
   for (let index = 0; index < rows.length; index++) {
     const row = rows[index]
@@ -245,7 +240,6 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   rows,
   activeWorktreeId,
   groupBy,
-  showWorkspaceLineage,
   showInlineAgentCards,
   repoGroupOrdering,
   toggleGroup,
@@ -286,10 +280,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     onCommit: reorderRepos,
     getScrollContainer: () => scrollRef.current
   })
-  const renderRows = useMemo(
-    () => buildRenderableRows(rows, showWorkspaceLineage),
-    [rows, showWorkspaceLineage]
-  )
+  const renderRows = useMemo(() => buildRenderableRows(rows), [rows])
   const activeWorktreeRowIndex = useMemo(
     () => renderRows.findIndex((row) => renderRowContainsWorktree(row, activeWorktreeId)),
     [renderRows, activeWorktreeId]
@@ -372,7 +363,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
 
     {
       const targetWorktree = worktrees.find((w) => w.id === pendingRevealWorktreeId)
-      if (targetWorktree && showWorkspaceLineage && !targetWorktree.isPinned) {
+      if (targetWorktree && !targetWorktree.isPinned) {
         const seen = new Set<string>()
         let current: Worktree | undefined = targetWorktree
         while (current && !seen.has(current.id)) {
@@ -440,7 +431,6 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     prCache,
     worktreeLineageById,
     worktreeMap,
-    showWorkspaceLineage,
     renderRows,
     virtualizer,
     clearPendingRevealWorktreeId,
@@ -531,7 +521,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
         repoGroupOrdering,
         worktreeLineageById,
         worktreeMap,
-        showWorkspaceLineage
+        true
       ).filter((r): r is Extract<Row, { type: 'item' }> => r.type === 'item')
       if (worktreeRows.length === 0) {
         return
@@ -576,8 +566,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
       repoOrder,
       workspaceStatuses,
       worktreeLineageById,
-      worktreeMap,
-      showWorkspaceLineage
+      worktreeMap
     ]
   )
 
@@ -1154,7 +1143,6 @@ const WorktreeList = React.memo(function WorktreeList({
   const worktreesByRepo = useAppStore((s) => s.worktreesByRepo)
   const activeWorktreeId = useAppStore((s) => s.activeWorktreeId)
   const groupBy = useAppStore((s) => s.groupBy)
-  const showWorkspaceLineage = useAppStore((s) => s.showWorkspaceLineage)
   const workspaceStatuses = useAppStore((s) => s.workspaceStatuses)
   const sortBy = useAppStore((s) => s.sortBy)
   const showActiveOnly = useAppStore((s) => s.showActiveOnly)
@@ -1480,7 +1468,7 @@ const WorktreeList = React.memo(function WorktreeList({
         repoGroupOrdering,
         worktreeLineageById,
         worktreeMap,
-        showWorkspaceLineage
+        true
       ),
     [
       groupBy,
@@ -1492,8 +1480,7 @@ const WorktreeList = React.memo(function WorktreeList({
       workspaceStatuses,
       repoGroupOrdering,
       worktreeLineageById,
-      worktreeMap,
-      showWorkspaceLineage
+      worktreeMap
     ]
   )
   // Why: header/mode changes can shift entire groups, so remount the
@@ -1505,8 +1492,8 @@ const WorktreeList = React.memo(function WorktreeList({
       .filter((r): r is GroupHeaderRow => r.type === 'header')
       .map((r) => r.key)
       .join(',')
-    return `${groupBy}:${showWorkspaceLineage ? 'lineage' : 'flat'}:${headers}`
-  }, [groupBy, rows, showWorkspaceLineage])
+    return `${groupBy}:lineage:${headers}`
+  }, [groupBy, rows])
 
   // Why: derive the rendered item order from the post-buildRows() row list,
   // not the flat `worktrees` array, because grouping (groupBy: 'repo' or
@@ -1726,7 +1713,6 @@ const WorktreeList = React.memo(function WorktreeList({
       rows={rows}
       activeWorktreeId={selectedSidebarWorktreeId}
       groupBy={groupBy}
-      showWorkspaceLineage={showWorkspaceLineage}
       showInlineAgentCards={cardProps.includes('inline-agents')}
       repoGroupOrdering={repoGroupOrdering}
       toggleGroup={toggleGroup}
