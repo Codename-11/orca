@@ -20,7 +20,7 @@ import {
 import { STEPS, type StepNumber } from './use-onboarding-flow-types'
 import { persistStep, useCloseWith, usePersistCurrentStep } from './use-onboarding-flow-persistence'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
-import { buildOnboardingFolderAgentStartup } from './onboarding-folder-agent-startup'
+import { buildOnboardingFolderAgentStartup } from '@/lib/onboarding-folder-agent-startup'
 
 export { STEPS } from './use-onboarding-flow-types'
 export type { StepId, StepNumber } from './use-onboarding-flow-types'
@@ -527,6 +527,11 @@ export function useOnboardingFlow(
       setTheme(settings.theme)
       applyDocumentTheme(settings.theme)
     }
+    // Why: the repo step seeds folder terminals from saved settings. Preserve
+    // the visible agent choice when optional preferences are skipped.
+    if (currentStep.id === 'agent' && selectedAgent) {
+      await updateSettings({ defaultTuiAgent: selectedAgent })
+    }
     try {
       const nextState = await persistStep(repoStep.stepNumber - 1)
       onOnboardingChange(nextState)
@@ -549,7 +554,9 @@ export function useOnboardingFlow(
     currentStep.id,
     currentStep.stepNumber,
     onOnboardingChange,
-    settings
+    selectedAgent,
+    settings,
+    updateSettings
   ])
 
   const openSshSettings = useCallback(async () => {

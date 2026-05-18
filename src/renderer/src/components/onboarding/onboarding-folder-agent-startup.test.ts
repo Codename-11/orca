@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { getDefaultSettings } from '../../../../shared/constants'
-import { buildOnboardingFolderAgentStartup } from './onboarding-folder-agent-startup'
+import { getDefaultOnboardingState, getDefaultSettings } from '../../../../shared/constants'
+import {
+  buildDismissedOnboardingFolderAgentStartup,
+  buildOnboardingFolderAgentStartup,
+  shouldSeedFolderAgentAfterDismissedOnboarding
+} from './onboarding-folder-agent-startup'
 
 describe('buildOnboardingFolderAgentStartup', () => {
   it('queues the persisted default agent with onboarding telemetry', () => {
@@ -35,5 +39,44 @@ describe('buildOnboardingFolderAgentStartup', () => {
     })
 
     expect(startup).toBeUndefined()
+  })
+
+  it('seeds after a dismissed onboarding run before any project was added', () => {
+    expect(
+      shouldSeedFolderAgentAfterDismissedOnboarding({
+        ...getDefaultOnboardingState(),
+        outcome: 'dismissed'
+      })
+    ).toBe(true)
+  })
+
+  it('does not seed after onboarding already added a project', () => {
+    expect(
+      shouldSeedFolderAgentAfterDismissedOnboarding({
+        ...getDefaultOnboardingState(),
+        outcome: 'dismissed',
+        checklist: { ...getDefaultOnboardingState().checklist, addedFolder: true }
+      })
+    ).toBe(false)
+  })
+
+  it('builds the skipped-onboarding folder startup from the persisted default agent', () => {
+    expect(
+      buildDismissedOnboardingFolderAgentStartup(
+        {
+          ...getDefaultSettings('/tmp/orca-workspaces'),
+          defaultTuiAgent: 'codex',
+          agentCmdOverrides: { codex: 'echo onboarding-folder-agent' }
+        },
+        { ...getDefaultOnboardingState(), outcome: 'dismissed' }
+      )
+    ).toEqual({
+      command: 'echo onboarding-folder-agent',
+      telemetry: {
+        agent_kind: 'codex',
+        launch_source: 'onboarding',
+        request_kind: 'new'
+      }
+    })
   })
 })

@@ -30,6 +30,8 @@ const reposPickFolder = vi.fn()
 const reposRemove = vi.fn()
 const reposUpdate = vi.fn()
 const reposReorder = vi.fn()
+const worktreesList = vi.fn()
+const onboardingGet = vi.fn()
 const ptyKill = vi.fn()
 const runtimeEnvironmentCall = vi.fn()
 const runtimeEnvironmentTransportCall = vi.fn()
@@ -42,6 +44,8 @@ beforeEach(() => {
   reposRemove.mockReset()
   reposUpdate.mockReset()
   reposReorder.mockReset()
+  worktreesList.mockReset()
+  onboardingGet.mockReset()
   ptyKill.mockReset()
   runtimeEnvironmentCall.mockReset()
   runtimeEnvironmentTransportCall.mockReset()
@@ -57,6 +61,12 @@ beforeEach(() => {
         remove: reposRemove,
         update: reposUpdate,
         reorder: reposReorder
+      },
+      worktrees: {
+        list: worktreesList
+      },
+      onboarding: {
+        get: onboardingGet
       },
       pty: { kill: ptyKill },
       runtimeEnvironments: { call: runtimeEnvironmentTransportCall }
