@@ -46,13 +46,10 @@ test.describe('Feature tour modal', () => {
     })
     await expect(orcaPage.getByText('Reopen any time from Help > Feature tour.')).toBeVisible()
 
-    // Five workflow rows in the rail.
+    // Six workflow rows in the rail.
     const rail = orcaPage.getByRole('navigation', { name: 'Workflows' })
-    await expect(rail.getByRole('tab')).toHaveCount(5)
-    await expect(rail.getByRole('tab', { name: /Tasks & worktrees/i })).toHaveAttribute(
-      'aria-selected',
-      'true'
-    )
+    await expect(rail.getByRole('tab')).toHaveCount(6)
+    await expect(rail.getByRole('tab', { name: /Tasks/i })).toHaveAttribute('aria-selected', 'true')
 
     // Default-selected workflow's primary tile poster loads.
     await expect
@@ -63,7 +60,12 @@ test.describe('Feature tour modal', () => {
       .toBe(true)
 
     // ArrowDown moves selection through the rail.
-    await rail.getByRole('tab', { name: /Tasks & worktrees/i }).focus()
+    await rail.getByRole('tab', { name: /Tasks/i }).focus()
+    await orcaPage.keyboard.press('ArrowDown')
+    await expect(rail.getByRole('tab', { name: /Workspaces/i })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
     await orcaPage.keyboard.press('ArrowDown')
     await expect(rail.getByRole('tab', { name: /Agents & orchestration/i })).toHaveAttribute(
       'aria-selected',

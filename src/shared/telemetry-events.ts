@@ -163,11 +163,12 @@ export const featureWallOpenSourceSchema = z.enum(['help_menu', 'popup', 'unknow
 export type FeatureWallOpenSourceTelemetry = z.infer<typeof featureWallOpenSourceSchema>
 
 export const featureWallWorkflowIdSchema = z.enum([
-  'start-work',
-  'coordinate-agents',
-  'inspect-edit',
-  'review-ship',
-  'work-remotely'
+  'tasks',
+  'workspaces',
+  'agents-orchestration',
+  'build-surface',
+  'review',
+  'remote-development'
 ])
 export type FeatureWallWorkflowIdTelemetry = z.infer<typeof featureWallWorkflowIdSchema>
 

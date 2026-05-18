@@ -12,7 +12,7 @@ const NUDGE_VISUAL_INTERVAL_MS = 2_000
 const NUDGE_VISUAL_COPY = [
   {
     title: 'Parallel work',
-    caption: 'Fan tasks across isolated worktrees.'
+    caption: 'Fan tasks across isolated workspaces.'
   },
   {
     title: 'One workspace',

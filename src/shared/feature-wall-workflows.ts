@@ -6,11 +6,12 @@ import {
 } from './feature-wall-tiles'
 
 export type FeatureWallWorkflowId =
-  | 'start-work'
-  | 'coordinate-agents'
-  | 'inspect-edit'
-  | 'review-ship'
-  | 'work-remotely'
+  | 'tasks'
+  | 'workspaces'
+  | 'agents-orchestration'
+  | 'build-surface'
+  | 'review'
+  | 'remote-development'
 
 // Renderer-only action discriminator. Resolved to a real store call in
 // FeatureWallModal — kept as an ID here so this module stays import-safe
@@ -42,32 +43,51 @@ export type FeatureWallWorkflow = {
 
 export const FEATURE_WALL_WORKFLOWS: readonly FeatureWallWorkflow[] = [
   {
-    id: 'start-work',
-    title: 'Tasks & worktrees',
-    meta: 'GitHub · Linear · Orca CLI',
-    lede: 'Browse work, spin up isolated worktrees, and let agents drive Orca from the same task surface.',
+    id: 'tasks',
+    title: 'Tasks',
+    meta: 'GitHub · Linear',
+    lede: 'Browse GitHub and Linear work in Orca, then start from the task that needs attention.',
     bullets: [
-      'GitHub and Linear tasks live in Orca, ready to become worktrees.',
-      'One worktree per task — branch, terminal, editor, and browser stay together.',
-      'Orca CLI lets agents create worktrees, snapshot, click, and fill.'
+      'GitHub issues, PRs, and Linear tasks are available in-app.',
+      'Open task details, comments, and review context without switching tools.',
+      'Start a workspace from the work item when you are ready to build.'
     ],
     primaryTileId: 'tile-03',
-    relatedTileIds: ['tile-01', 'tile-09'],
+    relatedTileIds: [],
     primaryCta: { kind: 'in-app', action: 'open-tasks', label: 'Open tasks' },
     docsUrl: 'https://www.onorca.dev/docs/review/linear'
   },
   {
-    id: 'coordinate-agents',
+    id: 'workspaces',
+    title: 'Workspaces',
+    meta: 'Isolated work · Context kept together',
+    lede: 'Give each piece of work its own workspace so code, tools, and agent activity stay organized.',
+    bullets: [
+      'Run multiple efforts side by side without branch juggling.',
+      'Keep the relevant terminal, editor, browser, and review state with the workspace.',
+      'Compare outcomes and continue from the workspace that is moving best.'
+    ],
+    primaryTileId: 'tile-01',
+    relatedTileIds: ['tile-10'],
+    primaryCta: {
+      kind: 'docs',
+      label: 'Read workspace docs',
+      url: 'https://www.onorca.dev/docs/model/worktrees'
+    },
+    docsUrl: 'https://www.onorca.dev/docs/model/worktrees'
+  },
+  {
+    id: 'agents-orchestration',
     title: 'Agents & orchestration',
-    meta: 'Agents · Usage · Shortcuts',
-    lede: 'Run several agents at once. Fan one prompt across Claude, Codex, and Cursor — compare results, merge the winner.',
+    meta: 'Agents · Usage · Orca CLI',
+    lede: 'Run several agents at once, track their progress, and let automation drive Orca when it helps.',
     bullets: [
       'Preconfigured for Claude Code, Codex, Cursor CLI, Gemini, Copilot, OpenCode, and Pi.',
       'See live usage and rate-limit resets in the titlebar.',
-      'Jump across worktrees, open files, and remap shortcuts without reaching for the mouse.'
+      'Use Orca CLI automation for workspace creation and browser actions.'
     ],
     primaryTileId: 'tile-04',
-    relatedTileIds: ['tile-11', 'tile-10'],
+    relatedTileIds: ['tile-11', 'tile-09'],
     primaryCta: {
       kind: 'in-app',
       action: 'open-agent-settings',
@@ -76,14 +96,14 @@ export const FEATURE_WALL_WORKFLOWS: readonly FeatureWallWorkflow[] = [
     docsUrl: 'https://www.onorca.dev/docs/agents/supported'
   },
   {
-    id: 'inspect-edit',
+    id: 'build-surface',
     title: 'Build surface',
-    meta: 'Terminal · Editor · Browser',
-    lede: 'Understand and modify what agents changed. Each worktree gets its own terminal, Monaco editor, and Chromium window.',
+    meta: 'Terminal · Editor · Browser · Files',
+    lede: 'Use the core tools for building and inspecting changes from one workspace.',
     bullets: [
-      'Ghostty-class terminal with WebGL rendering and full scrollback search.',
-      "VS Code's editor with autosave, quick-open, and drag-to-agent.",
-      'Click any UI element in the embedded browser to send HTML, CSS, and a screenshot to your agent.'
+      'Work in a fast terminal and Monaco editor next to your code.',
+      'Use the embedded browser and Design Mode to inspect product UI.',
+      'Preview PDFs, images, CSV, Markdown, and image diffs without leaving Orca.'
     ],
     primaryTileId: 'tile-02',
     relatedTileIds: ['tile-07', 'tile-05', 'tile-12'],
@@ -91,17 +111,17 @@ export const FEATURE_WALL_WORKFLOWS: readonly FeatureWallWorkflow[] = [
     docsUrl: 'https://www.onorca.dev/docs/terminal'
   },
   {
-    id: 'review-ship',
-    title: 'Review & preview',
-    meta: 'Diffs · PRs · Files',
-    lede: 'Review changes, preview repo files, and send focused feedback back to the agent without leaving Orca.',
+    id: 'review',
+    title: 'Review',
+    meta: 'Diffs · Comments · PRs',
+    lede: 'Review what changed, leave focused feedback, and send it back to the agent.',
     bullets: [
-      'Inline markdown comments on any diff line.',
-      'Batch feedback and ship it back to the agent in one click.',
-      'Preview PDFs, images, CSV, Markdown, and image diffs next to code review.'
+      'Comment directly on changed lines.',
+      'Batch feedback and send it back to the agent.',
+      'Open PRs, inspect CI, and move the change toward merge.'
     ],
     primaryTileId: 'tile-08',
-    relatedTileIds: ['tile-12'],
+    relatedTileIds: [],
     // Why: there is no clean store action that opens "review mode" — the
     // SourceControl sidebar surfaces automatically when a worktree has
     // changes. Falling back to docs keeps the CTA honest; the helper text
@@ -114,14 +134,14 @@ export const FEATURE_WALL_WORKFLOWS: readonly FeatureWallWorkflow[] = [
     docsUrl: 'https://www.onorca.dev/docs/review/annotate-ai-diff'
   },
   {
-    id: 'work-remotely',
+    id: 'remote-development',
     title: 'Remote development',
-    meta: 'SSH · Port forwarding',
-    lede: 'Run agents on a beefy remote box with full file editing, git, and terminals — first-class, not advanced-only.',
+    meta: 'Remote machines',
+    lede: 'Use Orca with remote machines when the work needs more compute or a different environment.',
     bullets: [
-      'Auto-reconnect, port forwarding, and passphrase caching out of the box.',
-      'Same Orca UI; the heavy lifting happens on the remote host.',
-      'Works alongside local worktrees in the same window.'
+      'Run agents and tools on the remote machine.',
+      'Keep the same Orca workflow for local and remote work.',
+      'Move between remote and local workspaces in the same window.'
     ],
     primaryTileId: 'tile-06',
     relatedTileIds: [],
@@ -150,4 +170,4 @@ export function getFeatureWallWorkflow(id: FeatureWallWorkflowId): FeatureWallWo
   return FEATURE_WALL_WORKFLOWS.find((w) => w.id === id) ?? null
 }
 
-export const DEFAULT_FEATURE_WALL_WORKFLOW_ID: FeatureWallWorkflowId = 'start-work'
+export const DEFAULT_FEATURE_WALL_WORKFLOW_ID: FeatureWallWorkflowId = 'tasks'

@@ -47,7 +47,7 @@ describe('feature wall schemas', () => {
   it('accepts the workflow group telemetry payload', () => {
     expect(
       eventSchemas.feature_wall_group_selected.safeParse({
-        group_id: 'start-work',
+        group_id: 'tasks',
         source: 'help_menu'
       }).success
     ).toBe(true)
@@ -62,14 +62,14 @@ describe('feature wall schemas', () => {
   it('accepts the feature-selected telemetry payload', () => {
     expect(
       eventSchemas.feature_wall_feature_selected.safeParse({
-        group_id: 'inspect-edit',
+        group_id: 'build-surface',
         tile_id: 'tile-02',
         source: 'help_menu'
       }).success
     ).toBe(true)
     expect(
       eventSchemas.feature_wall_feature_selected.safeParse({
-        group_id: 'inspect-edit',
+        group_id: 'build-surface',
         tile_id: 'tile-02'
       }).success
     ).toBe(false)
@@ -78,14 +78,14 @@ describe('feature wall schemas', () => {
   it('accepts only the in-app/docs primary CTA actions', () => {
     expect(
       eventSchemas.feature_wall_primary_cta_clicked.safeParse({
-        group_id: 'start-work',
+        group_id: 'tasks',
         action: 'in-app',
         source: 'popup'
       }).success
     ).toBe(true)
     expect(
       eventSchemas.feature_wall_primary_cta_clicked.safeParse({
-        group_id: 'start-work',
+        group_id: 'tasks',
         action: 'external',
         source: 'popup'
       }).success
@@ -95,7 +95,7 @@ describe('feature wall schemas', () => {
   it('accepts the docs-clicked telemetry payload', () => {
     expect(
       eventSchemas.feature_wall_docs_clicked.safeParse({
-        group_id: 'work-remotely',
+        group_id: 'remote-development',
         tile_id: 'tile-06',
         source: 'help_menu'
       }).success
