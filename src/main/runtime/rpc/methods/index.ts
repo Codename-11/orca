@@ -18,6 +18,7 @@ import { GIT_METHODS } from './git'
 import { GITHUB_METHODS } from './github'
 import { HOSTED_REVIEW_METHODS } from './hosted-review'
 import { LINEAR_METHODS } from './linear'
+import { JIRA_METHODS } from './jira'
 import { SPEECH_METHODS } from './speech'
 import { CLIENT_UI_METHODS } from './client-ui'
 
@@ -44,6 +45,7 @@ export const ALL_RPC_METHODS: readonly RpcAnyMethod[] = [
   ...GITHUB_METHODS,
   ...HOSTED_REVIEW_METHODS,
   ...LINEAR_METHODS,
+  ...JIRA_METHODS,
   ...SPEECH_METHODS,
   ...CLIENT_UI_METHODS
 ]

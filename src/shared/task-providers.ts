@@ -1,6 +1,6 @@
-export type TaskProvider = 'github' | 'gitlab' | 'linear'
+export type TaskProvider = 'github' | 'gitlab' | 'linear' | 'jira'
 
-export const TASK_PROVIDERS: readonly TaskProvider[] = ['github', 'gitlab', 'linear']
+export const TASK_PROVIDERS: readonly TaskProvider[] = ['github', 'gitlab', 'linear', 'jira']
 
 const TASK_PROVIDER_SET = new Set<TaskProvider>(TASK_PROVIDERS)
 
@@ -40,7 +40,12 @@ export function filterAvailableTaskProviders(
     if (provider === 'gitlab') {
       return availability.gitlabInstalled
     }
-    return availability.linearConnected
+    if (provider === 'linear') {
+      return availability.linearConnected
+    }
+    // Why: Jira can be connected from the Tasks surface itself, so hiding it
+    // when disconnected would remove the entry point for first-time setup.
+    return true
   })
 
   return available.length > 0 ? available : ['github']

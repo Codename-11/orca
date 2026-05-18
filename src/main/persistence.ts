@@ -1218,6 +1218,16 @@ export class Store {
         const migratedExperimentalActivity = experimentalActivityDefaultedOffForAllUsers
           ? (parsed.settings?.experimentalActivity ?? false)
           : false
+        const rawVisibleTaskProviders = normalizeVisibleTaskProviders(
+          parsed.settings?.visibleTaskProviders
+        )
+        const visibleTaskProvidersDefaultedForJira =
+          parsed.settings?.visibleTaskProvidersDefaultedForJira === true
+        const migratedVisibleTaskProviders = visibleTaskProvidersDefaultedForJira
+          ? rawVisibleTaskProviders
+          : rawVisibleTaskProviders.includes('jira')
+            ? rawVisibleTaskProviders
+            : [...rawVisibleTaskProviders, 'jira' as const]
         result = {
           ...defaults,
           ...parsed,
@@ -1238,9 +1248,8 @@ export class Store {
             terminalQuickCommands: normalizeTerminalQuickCommands(
               parsed.settings?.terminalQuickCommands
             ),
-            visibleTaskProviders: normalizeVisibleTaskProviders(
-              parsed.settings?.visibleTaskProviders
-            ),
+            visibleTaskProviders: migratedVisibleTaskProviders,
+            visibleTaskProvidersDefaultedForJira: true,
             openInApplications: normalizeOpenInApplications(parsed.settings?.openInApplications),
             notifications: {
               ...getDefaultNotificationSettings(),
@@ -2120,6 +2129,7 @@ export class Store {
       sanitizedUpdates.visibleTaskProviders = normalizeVisibleTaskProviders(
         updates.visibleTaskProviders
       )
+      sanitizedUpdates.visibleTaskProvidersDefaultedForJira = true
     }
     if ('openInApplications' in updates) {
       sanitizedUpdates.openInApplications = normalizeOpenInApplications(updates.openInApplications)

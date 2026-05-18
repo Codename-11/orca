@@ -87,6 +87,8 @@ import GitHubItemDialog from '@/components/GitHubItemDialog'
 import GitLabItemDialog from '@/components/GitLabItemDialog'
 import ProjectViewWrapper from '@/components/github-project/ProjectViewWrapper'
 import LinearIssueWorkspace from '@/components/LinearIssueWorkspace'
+import JiraIssueWorkspace from '@/components/JiraIssueWorkspace'
+import { JiraIcon } from '@/components/icons/JiraIcon'
 import { cn } from '@/lib/utils'
 import {
   getLinkedWorkItemSuggestedName,
@@ -99,6 +101,7 @@ import { isGitRepoKind } from '../../../shared/repo-kind'
 import {
   buildTaskPageRepoSourceState,
   findTaskPageDialogWorkItem,
+  findTaskPageJiraIssue,
   findTaskPageLinearIssue,
   selectTaskPageWorkItemsCacheEntries,
   type TaskPageRepoSourceState
@@ -109,6 +112,9 @@ import type {
   GitHubWorkItem,
   GitLabTodo,
   GitLabWorkItem,
+  JiraIssue,
+  JiraIssueType,
+  JiraProject,
   LinearIssue,
   LinearTeam,
   LinearWorkflowState,
@@ -124,6 +130,12 @@ import {
   linearTeamStates,
   linearUpdateIssue
 } from '@/runtime/runtime-linear-client'
+import {
+  jiraCreateIssue,
+  jiraGetIssue,
+  jiraListIssueTypes,
+  jiraListProjects
+} from '@/runtime/runtime-jira-client'
 import {
   filterAvailableTaskProviders,
   normalizeVisibleTaskProviders,
@@ -189,6 +201,11 @@ const SOURCE_OPTIONS: SourceOption[] = [
     id: 'linear',
     label: 'Linear',
     Icon: ({ className }) => <LinearIcon className={className} />
+  },
+  {
+    id: 'jira',
+    label: 'Jira',
+    Icon: ({ className }) => <JiraIcon className={className} />
   }
 ]
 
@@ -213,8 +230,30 @@ const LINEAR_PRESETS: LinearPreset[] = [
   { id: 'completed', label: 'Completed' }
 ]
 
+type JiraPresetId = 'assigned' | 'reported' | 'all' | 'done'
+type JiraPreset = { id: JiraPresetId; label: string }
+
+const JIRA_PRESETS: JiraPreset[] = [
+  { id: 'assigned', label: 'Assigned' },
+  { id: 'reported', label: 'Reported' },
+  { id: 'all', label: 'All Open' },
+  { id: 'done', label: 'Done' }
+]
+
 const TASK_SEARCH_DEBOUNCE_MS = 300
 const LINEAR_ITEM_LIMIT = 36
+const JIRA_ITEM_LIMIT = 50
+const IS_MAC_PLATFORM = typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac')
+const SUBMIT_SHORTCUT_LABEL = IS_MAC_PLATFORM ? '⌘+Enter' : 'Ctrl+Enter'
+
+function isSubmitShortcut(event: React.KeyboardEvent): boolean {
+  return (
+    event.key === 'Enter' &&
+    !event.altKey &&
+    !event.shiftKey &&
+    (IS_MAC_PLATFORM ? event.metaKey : event.ctrlKey)
+  )
+}
 
 const GITHUB_TASK_GRID_CLASS =
   'min-w-[860px] grid-cols-[72px_minmax(260px,2fr)_minmax(130px,0.8fr)_100px_92px_158px]'
@@ -632,6 +671,20 @@ function getLinearIssueGridTemplate(visibleProperties: ReadonlySet<LinearDisplay
   }
   columns.push('72px')
   return columns.join(' ')
+}
+
+function getJiraStatusTone(categoryKey: string): string {
+  if (categoryKey === 'done') {
+    return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200'
+  }
+  if (categoryKey === 'indeterminate') {
+    return 'border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-200'
+  }
+  return 'border-border/50 bg-muted/40 text-muted-foreground'
+}
+
+function getJiraProjectSelectionKey(project: JiraProject): string {
+  return `${project.siteId ?? 'selected'}:${project.id}`
 }
 
 function GHStatusCell({
@@ -1643,6 +1696,13 @@ export default function TaskPage(): React.JSX.Element {
   const patchLinearIssue = useAppStore((s) => s.patchLinearIssue)
   const checkLinearConnection = useAppStore((s) => s.checkLinearConnection)
   const refreshPreflightStatus = useAppStore((s) => s.refreshPreflightStatus)
+  const jiraStatus = useAppStore((s) => s.jiraStatus)
+  const jiraStatusChecked = useAppStore((s) => s.jiraStatusChecked)
+  const connectJira = useAppStore((s) => s.connectJira)
+  const selectJiraSite = useAppStore((s) => s.selectJiraSite)
+  const searchJiraIssues = useAppStore((s) => s.searchJiraIssues)
+  const listJiraIssues = useAppStore((s) => s.listJiraIssues)
+  const checkJiraConnection = useAppStore((s) => s.checkJiraConnection)
   const eligibleRepos = useMemo(() => repos.filter((repo) => isGitRepoKind(repo)), [repos])
 
   // Why: initial selection resolution honors (1) an explicit preselection from
@@ -1719,6 +1779,9 @@ export default function TaskPage(): React.JSX.Element {
     linearStatus.activeWorkspaceId ??
     linearWorkspaces[0]?.id ??
     null
+  const jiraSites = jiraStatus.sites ?? []
+  const selectedJiraSiteId =
+    jiraStatus.selectedSiteId ?? jiraStatus.activeSiteId ?? jiraSites[0]?.id ?? null
   const preferredVisibleTaskProviders = useMemo(
     () => normalizeVisibleTaskProviders(settings?.visibleTaskProviders),
     [settings?.visibleTaskProviders]
@@ -1754,6 +1817,7 @@ export default function TaskPage(): React.JSX.Element {
   const taskResumeAppliedRef = useRef(false)
   const githubSearchPersistReadyRef = useRef(false)
   const linearSearchPersistReadyRef = useRef(false)
+  const jiraSearchPersistReadyRef = useRef(false)
   const [taskResumeApplied, setTaskResumeApplied] = useState(false)
 
   // Why: pageData.taskSource changes when the user clicks a specific source
@@ -2044,6 +2108,28 @@ export default function TaskPage(): React.JSX.Element {
     setSelectedLinearIssueFallback(null)
   }, [])
 
+  const [selectedJiraIssueKey, setSelectedJiraIssueKey] = useState<string | null>(null)
+  const [selectedJiraIssueFallback, setSelectedJiraIssueFallback] = useState<JiraIssue | null>(null)
+  const jiraCacheSnapshot = useAppStore(
+    useShallow((s) => ({
+      issueCache: s.jiraIssueCache,
+      searchCache: s.jiraSearchCache
+    }))
+  )
+  const cachedSelectedJiraIssue = findTaskPageJiraIssue(
+    jiraCacheSnapshot.issueCache,
+    jiraCacheSnapshot.searchCache,
+    selectedJiraIssueKey
+  )
+  const selectedJiraIssue = selectedJiraIssueKey
+    ? (cachedSelectedJiraIssue ?? selectedJiraIssueFallback)
+    : null
+
+  const setSelectedJiraIssue = useCallback((issue: JiraIssue | null) => {
+    setSelectedJiraIssueKey(issue?.key ?? null)
+    setSelectedJiraIssueFallback(issue)
+  }, [])
+
   // Linear tab state
   const [linearIssues, setLinearIssues] = useState<LinearIssue[]>([])
   const [linearLoading, setLinearLoading] = useState(false)
@@ -2065,6 +2151,15 @@ export default function TaskPage(): React.JSX.Element {
     ReadonlySet<string>
   >(() => new Set())
   const lastLinearRequestRef = useRef<{ nonce: number; signature: string } | null>(null)
+
+  // Jira tab state
+  const [jiraIssues, setJiraIssues] = useState<JiraIssue[]>([])
+  const [jiraLoading, setJiraLoading] = useState(false)
+  const [jiraError, setJiraError] = useState<string | null>(null)
+  const [jiraSearchInput, setJiraSearchInput] = useState('')
+  const [appliedJiraSearch, setAppliedJiraSearch] = useState('')
+  const [activeJiraPreset, setActiveJiraPreset] = useState<JiraPresetId>('assigned')
+  const [jiraRefreshNonce, setJiraRefreshNonce] = useState(0)
 
   useEffect(() => {
     if (taskResumeAppliedRef.current || !persistedUIReady || !settings) {
@@ -2101,6 +2196,12 @@ export default function TaskPage(): React.JSX.Element {
     setActiveLinearPreset(linearPreset)
     setLinearSearchInput(linearQuery)
     setAppliedLinearSearch(linearQuery)
+
+    const jiraPreset = taskResumeState?.jiraPreset ?? 'assigned'
+    const jiraQuery = taskResumeState?.jiraQuery ?? ''
+    setActiveJiraPreset(jiraPreset)
+    setJiraSearchInput(jiraQuery)
+    setAppliedJiraSearch(jiraQuery)
 
     // Why: settings and persisted UI hydrate asynchronously. Apply the restored
     // Tasks context exactly once so later source/filter clicks remain local.
@@ -2157,6 +2258,42 @@ export default function TaskPage(): React.JSX.Element {
     getCachedLinearTeams,
     listLinearTeams
   ])
+
+  const [availableJiraProjects, setAvailableJiraProjects] = useState<JiraProject[]>([])
+  const [jiraProjectsLoading, setJiraProjectsLoading] = useState(false)
+
+  useEffect(() => {
+    if (!taskResumeApplied) {
+      return
+    }
+    if (taskSource !== 'jira' || !jiraStatus.connected) {
+      setAvailableJiraProjects([])
+      setJiraProjectsLoading(false)
+      return
+    }
+    let cancelled = false
+    setAvailableJiraProjects([])
+    setJiraProjectsLoading(true)
+    void jiraListProjects(settings, selectedJiraSiteId)
+      .then((projects) => {
+        if (!cancelled) {
+          setAvailableJiraProjects(projects)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          console.warn('[TaskPage] Failed to fetch Jira projects')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setJiraProjectsLoading(false)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [settings, taskSource, jiraStatus.connected, selectedJiraSiteId, taskResumeApplied])
 
   // Why: stable key for `selectedRepos` so the GitLab fetch effect below
   // doesn't re-run on every parent re-render just because the array
@@ -2542,6 +2679,20 @@ export default function TaskPage(): React.JSX.Element {
       return next
     })
   }, [])
+
+  const displayedJiraIssues = useMemo(
+    () =>
+      jiraIssues.map(
+        (issue) =>
+          findTaskPageJiraIssue(
+            jiraCacheSnapshot.issueCache,
+            jiraCacheSnapshot.searchCache,
+            issue.key
+          ) ?? issue
+      ),
+    [jiraIssues, jiraCacheSnapshot.issueCache, jiraCacheSnapshot.searchCache]
+  )
+
   // New Linear issue dialog state
   const [newLinearIssueOpen, setNewLinearIssueOpen] = useState(false)
   const [newLinearIssueTitle, setNewLinearIssueTitle] = useState('')
@@ -2562,6 +2713,75 @@ export default function TaskPage(): React.JSX.Element {
   const [linearConnectError, setLinearConnectError] = useState<string | null>(null)
 
   const activeGithubTaskKind = getGitHubTaskKind(activeTaskPreset, appliedTaskSearch)
+
+  const [newJiraIssueOpen, setNewJiraIssueOpen] = useState(false)
+  const [newJiraIssueTitle, setNewJiraIssueTitle] = useState('')
+  const [newJiraIssueBody, setNewJiraIssueBody] = useState('')
+  const [newJiraIssueProjectId, setNewJiraIssueProjectId] = useState<string | null>(null)
+  const [newJiraIssueTypeId, setNewJiraIssueTypeId] = useState<string | null>(null)
+  const [newJiraIssueSubmitting, setNewJiraIssueSubmitting] = useState(false)
+  const [availableJiraIssueTypes, setAvailableJiraIssueTypes] = useState<JiraIssueType[]>([])
+  const [jiraIssueTypesLoading, setJiraIssueTypesLoading] = useState(false)
+  const [jiraConnectOpen, setJiraConnectOpen] = useState(false)
+  const [jiraSiteUrlDraft, setJiraSiteUrlDraft] = useState('')
+  const [jiraEmailDraft, setJiraEmailDraft] = useState('')
+  const [jiraApiTokenDraft, setJiraApiTokenDraft] = useState('')
+  const [jiraConnectState, setJiraConnectState] = useState<'idle' | 'connecting' | 'error'>('idle')
+  const [jiraConnectError, setJiraConnectError] = useState<string | null>(null)
+
+  const newJiraIssueTargetProject = useMemo(
+    () =>
+      availableJiraProjects.find(
+        (project) => getJiraProjectSelectionKey(project) === newJiraIssueProjectId
+      ) ??
+      availableJiraProjects[0] ??
+      null,
+    [availableJiraProjects, newJiraIssueProjectId]
+  )
+
+  const newJiraIssueTargetType = useMemo(
+    () =>
+      availableJiraIssueTypes.find((issueType) => issueType.id === newJiraIssueTypeId) ??
+      availableJiraIssueTypes[0] ??
+      null,
+    [availableJiraIssueTypes, newJiraIssueTypeId]
+  )
+
+  useEffect(() => {
+    if (!newJiraIssueOpen || !newJiraIssueTargetProject) {
+      setAvailableJiraIssueTypes([])
+      setJiraIssueTypesLoading(false)
+      return
+    }
+    let cancelled = false
+    setAvailableJiraIssueTypes([])
+    setJiraIssueTypesLoading(true)
+    void jiraListIssueTypes(
+      settings,
+      newJiraIssueTargetProject.id,
+      newJiraIssueTargetProject.siteId
+    )
+      .then((issueTypes) => {
+        if (cancelled) {
+          return
+        }
+        setAvailableJiraIssueTypes(issueTypes)
+        setNewJiraIssueTypeId(issueTypes[0]?.id ?? null)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          toast.error('Failed to load Jira issue types.')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setJiraIssueTypesLoading(false)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [settings, newJiraIssueOpen, newJiraIssueTargetProject])
 
   // Why: defense-in-depth safety net applied to the current page's items.
   // The active tab scopes requests to issues or PRs, and this keeps stale
@@ -2911,6 +3131,7 @@ export default function TaskPage(): React.JSX.Element {
       dialogWorkItem ||
       newIssueOpen ||
       newLinearIssueOpen ||
+      newJiraIssueOpen ||
       activeModal !== 'none'
     ) {
       return
@@ -2946,7 +3167,15 @@ export default function TaskPage(): React.JSX.Element {
 
     window.addEventListener('keydown', onKeyDown, { capture: true })
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
-  }, [activeModal, dialogWorkItem, githubMode, newIssueOpen, newLinearIssueOpen, taskSource])
+  }, [
+    activeModal,
+    dialogWorkItem,
+    githubMode,
+    newIssueOpen,
+    newLinearIssueOpen,
+    newJiraIssueOpen,
+    taskSource
+  ])
 
   const openComposerForItem = useCallback(
     (item: GitHubWorkItem): void => {
@@ -3123,6 +3352,63 @@ export default function TaskPage(): React.JSX.Element {
     setSelectedLinearIssue
   ])
 
+  const handleCreateNewJiraIssue = useCallback(async (): Promise<void> => {
+    if (!newJiraIssueTargetProject || !newJiraIssueTargetType) {
+      return
+    }
+    const title = newJiraIssueTitle.trim()
+    if (!title || newJiraIssueSubmitting) {
+      return
+    }
+    setNewJiraIssueSubmitting(true)
+    try {
+      const result = await jiraCreateIssue(settings, {
+        siteId: newJiraIssueTargetProject.siteId,
+        projectId: newJiraIssueTargetProject.id,
+        issueTypeId: newJiraIssueTargetType.id,
+        title,
+        description: newJiraIssueBody || undefined
+      })
+      if (!result.ok) {
+        toast.error(result.error || 'Failed to create Jira issue.')
+        return
+      }
+      toast.success(`Created ${result.key}`, {
+        action: result.url
+          ? {
+              label: 'View',
+              onClick: () => window.open(result.url, '_blank')
+            }
+          : undefined
+      })
+      setNewJiraIssueOpen(false)
+      setNewJiraIssueTitle('')
+      setNewJiraIssueBody('')
+      setJiraRefreshNonce((n) => n + 1)
+
+      void jiraGetIssue(settings, result.key, newJiraIssueTargetProject.siteId)
+        .then((full) => {
+          if (full) {
+            // Why: the list cache may still be fresh after create; insert the
+            // new row locally before selecting it so the inspector stays open.
+            setJiraIssues((prev) => [full, ...prev.filter((issue) => issue.key !== full.key)])
+            setSelectedJiraIssue(full)
+          }
+        })
+        .catch(() => {})
+    } finally {
+      setNewJiraIssueSubmitting(false)
+    }
+  }, [
+    newJiraIssueBody,
+    newJiraIssueSubmitting,
+    newJiraIssueTargetProject,
+    newJiraIssueTargetType,
+    newJiraIssueTitle,
+    settings,
+    setSelectedJiraIssue
+  ])
+
   useEffect(() => {
     // Why: when a modal is open, let it own Esc dismissal.
     if (
@@ -3130,6 +3416,7 @@ export default function TaskPage(): React.JSX.Element {
       selectedLinearIssue ||
       newIssueOpen ||
       newLinearIssueOpen ||
+      newJiraIssueOpen ||
       activeModal !== 'none'
     ) {
       return
@@ -3171,6 +3458,7 @@ export default function TaskPage(): React.JSX.Element {
     dialogWorkItem,
     newIssueOpen,
     newLinearIssueOpen,
+    newJiraIssueOpen,
     selectedLinearIssue
   ])
 
@@ -3181,7 +3469,17 @@ export default function TaskPage(): React.JSX.Element {
     if (!linearStatusChecked) {
       void checkLinearConnection()
     }
-  }, [checkLinearConnection, linearStatusChecked, preflightStatusChecked, refreshPreflightStatus])
+    if (!jiraStatusChecked) {
+      void checkJiraConnection()
+    }
+  }, [
+    checkJiraConnection,
+    checkLinearConnection,
+    jiraStatusChecked,
+    linearStatusChecked,
+    preflightStatusChecked,
+    refreshPreflightStatus
+  ])
 
   // Why: debounce the Linear search input so we don't fire a request on every
   // keystroke — matches the 300ms cadence used for GitHub search.
@@ -3324,6 +3622,107 @@ export default function TaskPage(): React.JSX.Element {
     taskSource
   ])
 
+  useEffect(() => {
+    if (!taskResumeApplied) {
+      return
+    }
+    const timeout = window.setTimeout(() => {
+      setAppliedJiraSearch(jiraSearchInput)
+    }, TASK_SEARCH_DEBOUNCE_MS)
+    return () => window.clearTimeout(timeout)
+  }, [jiraSearchInput, taskResumeApplied])
+
+  useEffect(() => {
+    if (!taskResumeApplied) {
+      return
+    }
+    if (!jiraSearchPersistReadyRef.current) {
+      jiraSearchPersistReadyRef.current = true
+      return
+    }
+    setTaskResumeState({ jiraQuery: appliedJiraSearch.trim() })
+  }, [appliedJiraSearch, setTaskResumeState, taskResumeApplied])
+
+  useEffect(() => {
+    if (!taskResumeApplied) {
+      return
+    }
+    if (taskSource !== 'jira') {
+      return
+    }
+    if (!jiraStatus.connected) {
+      return
+    }
+
+    let cancelled = false
+    setJiraLoading(true)
+    setJiraError(null)
+
+    const trimmed = appliedJiraSearch.trim()
+    const request =
+      trimmed.length > 0
+        ? searchJiraIssues(trimmed, JIRA_ITEM_LIMIT)
+        : listJiraIssues(activeJiraPreset, JIRA_ITEM_LIMIT)
+
+    void request
+      .then((issues) => {
+        if (cancelled) {
+          return
+        }
+        setJiraIssues(issues)
+        setJiraLoading(false)
+      })
+      .catch((err) => {
+        if (cancelled) {
+          return
+        }
+        setJiraError(err instanceof Error ? err.message : 'Failed to load Jira issues.')
+        setJiraLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    taskSource,
+    jiraStatus.connected,
+    selectedJiraSiteId,
+    appliedJiraSearch,
+    activeJiraPreset,
+    jiraRefreshNonce,
+    taskResumeApplied
+  ])
+
+  useEffect(() => {
+    if (!taskResumeApplied || taskSource !== 'jira') {
+      return
+    }
+    if (!jiraStatus.connected || displayedJiraIssues.length === 0) {
+      if (selectedJiraIssueKey !== null) {
+        setSelectedJiraIssueKey(null)
+      }
+      if (selectedJiraIssueFallback !== null) {
+        setSelectedJiraIssueFallback(null)
+      }
+      return
+    }
+    if (
+      selectedJiraIssueKey &&
+      !displayedJiraIssues.some((issue) => issue.key === selectedJiraIssueKey)
+    ) {
+      setSelectedJiraIssueKey(null)
+      setSelectedJiraIssueFallback(null)
+    }
+  }, [
+    displayedJiraIssues,
+    jiraStatus.connected,
+    selectedJiraIssueFallback,
+    selectedJiraIssueKey,
+    taskResumeApplied,
+    taskSource
+  ])
+
   // Why: for Linear issues the "Use" flow opens the composer with the issue
   // info adapted to the LinkedWorkItemSummary shape. Linear identifiers are
   // strings (e.g. "ENG-123") so we use 0 as a placeholder number since the
@@ -3357,6 +3756,30 @@ export default function TaskPage(): React.JSX.Element {
     [openComposerForLinearItem]
   )
 
+  const openComposerForJiraItem = useCallback(
+    (issue: JiraIssue): void => {
+      const linkedWorkItem: LinkedWorkItemSummary = {
+        type: 'issue',
+        number: 0,
+        title: `${issue.key} ${issue.title}`,
+        url: issue.url
+      }
+      openModal('new-workspace-composer', {
+        linkedWorkItem,
+        prefilledName: getLinkedWorkItemSuggestedName(issue),
+        telemetrySource: 'sidebar'
+      })
+    },
+    [openModal]
+  )
+
+  const handleUseJiraItem = useCallback(
+    (issue: JiraIssue): void => {
+      openComposerForJiraItem(issue)
+    },
+    [openComposerForJiraItem]
+  )
+
   const handleLinearConnect = useCallback(async (): Promise<void> => {
     const key = linearApiKeyDraft.trim()
     if (!key) {
@@ -3379,6 +3802,33 @@ export default function TaskPage(): React.JSX.Element {
       setLinearConnectError(error instanceof Error ? error.message : 'Connection failed')
     }
   }, [connectLinear, linearApiKeyDraft])
+
+  const handleJiraConnect = useCallback(async (): Promise<void> => {
+    const siteUrl = jiraSiteUrlDraft.trim()
+    const email = jiraEmailDraft.trim()
+    const apiToken = jiraApiTokenDraft.trim()
+    if (!siteUrl || !email || !apiToken) {
+      return
+    }
+    setJiraConnectState('connecting')
+    setJiraConnectError(null)
+    try {
+      const result = await connectJira({ siteUrl, email, apiToken })
+      if (result.ok) {
+        setJiraSiteUrlDraft('')
+        setJiraEmailDraft('')
+        setJiraApiTokenDraft('')
+        setJiraConnectState('idle')
+        setJiraConnectOpen(false)
+      } else {
+        setJiraConnectState('error')
+        setJiraConnectError(result.error)
+      }
+    } catch (error) {
+      setJiraConnectState('error')
+      setJiraConnectError(error instanceof Error ? error.message : 'Connection failed')
+    }
+  }, [connectJira, jiraApiTokenDraft, jiraEmailDraft, jiraSiteUrlDraft])
 
   return (
     <div className="relative flex h-full min-h-0 flex-1 overflow-hidden bg-background text-foreground">
@@ -3499,6 +3949,37 @@ export default function TaskPage(): React.JSX.Element {
                           triggerClassName="h-8 w-full rounded-md border border-border/50 bg-muted/50 px-2 text-xs font-medium shadow-sm transition hover:bg-muted/50 focus:ring-2 focus:ring-ring/20 focus:outline-none"
                         />
                       </div>
+                    </div>
+                  ) : null}
+                  {taskSource === 'jira' && jiraStatus.connected ? (
+                    <div className="flex items-center gap-2">
+                      {jiraSites.length > 1 ? (
+                        <Select
+                          value={selectedJiraSiteId ?? undefined}
+                          onValueChange={(value) => {
+                            setSelectedJiraIssueKey(null)
+                            setSelectedJiraIssueFallback(null)
+                            setJiraIssues([])
+                            setJiraError(null)
+                            setJiraLoading(true)
+                            void selectJiraSite(value).catch(() => {
+                              toast.error('Failed to switch Jira site.')
+                            })
+                          }}
+                        >
+                          <SelectTrigger className="h-8 w-[220px] rounded-md border-border/50 bg-muted/50 text-xs font-medium shadow-sm">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="all">All Jira sites</SelectItem>
+                            {jiraSites.map((site) => (
+                              <SelectItem key={site.id} value={site.id}>
+                                {site.displayName}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
@@ -3868,6 +4349,135 @@ export default function TaskPage(): React.JSX.Element {
                               setAppliedLinearSearch('')
                               setTaskResumeState({ linearQuery: '' })
                               setLinearRefreshNonce((n) => n + 1)
+                            }}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground transition hover:text-foreground"
+                          >
+                            <X className="size-4" />
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                ) : taskSource === 'jira' && jiraStatus.connected ? (
+                  <div className="rounded-md rounded-b-none border border-border/50 bg-muted/50 p-3 shadow-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex flex-wrap gap-2">
+                        {JIRA_PRESETS.map((preset) => {
+                          const active = !jiraSearchInput && activeJiraPreset === preset.id
+                          return (
+                            <button
+                              key={preset.id}
+                              type="button"
+                              onClick={() => {
+                                setJiraSearchInput('')
+                                setAppliedJiraSearch('')
+                                setActiveJiraPreset(preset.id)
+                                setTaskResumeState({ jiraPreset: preset.id, jiraQuery: '' })
+                                setJiraRefreshNonce((n) => n + 1)
+                              }}
+                              className={cn(
+                                'rounded-md border px-2 py-1 text-xs transition',
+                                active
+                                  ? 'border-border/50 bg-foreground/90 text-background backdrop-blur-md'
+                                  : 'border-border/50 bg-transparent text-foreground hover:bg-muted/50'
+                              )}
+                            >
+                              {preset.label}
+                            </button>
+                          )
+                        })}
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              onClick={() => {
+                                setNewJiraIssueTitle('')
+                                setNewJiraIssueBody('')
+                                setNewJiraIssueProjectId(
+                                  availableJiraProjects[0]
+                                    ? getJiraProjectSelectionKey(availableJiraProjects[0])
+                                    : null
+                                )
+                                setNewJiraIssueTypeId(null)
+                                setNewJiraIssueOpen(true)
+                              }}
+                              disabled={availableJiraProjects.length === 0 || jiraProjectsLoading}
+                              aria-label="New Jira issue"
+                              className="border-border/50 bg-transparent hover:bg-muted/50 backdrop-blur-md supports-[backdrop-filter]:bg-transparent"
+                            >
+                              {jiraProjectsLoading ? (
+                                <LoaderCircle className="size-4 animate-spin" />
+                              ) : (
+                                <Plus className="size-4" />
+                              )}
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom" sideOffset={6}>
+                            New Jira issue
+                          </TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              onClick={() => setJiraRefreshNonce((n) => n + 1)}
+                              disabled={jiraLoading}
+                              aria-label="Refresh Jira issues"
+                              className="border-border/50 bg-transparent hover:bg-muted/50 backdrop-blur-md supports-[backdrop-filter]:bg-transparent"
+                            >
+                              {jiraLoading ? (
+                                <LoaderCircle className="size-4 animate-spin" />
+                              ) : (
+                                <RefreshCw className="size-4" />
+                              )}
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom" sideOffset={6}>
+                            Refresh Jira issues
+                          </TooltipContent>
+                        </Tooltip>
+                      </div>
+                    </div>
+                    <div className="mt-3 flex items-center gap-3">
+                      <div className="relative min-w-[320px] flex-1">
+                        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          value={jiraSearchInput}
+                          onChange={(e) => setJiraSearchInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              if (
+                                shouldSuppressEnterSubmit(
+                                  { isComposing: e.nativeEvent.isComposing, shiftKey: e.shiftKey },
+                                  false
+                                )
+                              ) {
+                                return
+                              }
+                              e.preventDefault()
+                              const trimmed = jiraSearchInput.trim()
+                              setJiraSearchInput(trimmed)
+                              setAppliedJiraSearch(trimmed)
+                              setTaskResumeState({ jiraQuery: trimmed })
+                              setJiraRefreshNonce((n) => n + 1)
+                            }
+                          }}
+                          placeholder="Jira JQL, e.g. project = ABC AND statusCategory != Done"
+                          className="h-8 rounded-md border-border/50 bg-background pl-8 pr-8 text-xs"
+                        />
+                        {jiraSearchInput ? (
+                          <button
+                            type="button"
+                            aria-label="Clear search"
+                            onClick={() => {
+                              setJiraSearchInput('')
+                              setAppliedJiraSearch('')
+                              setTaskResumeState({ jiraQuery: '' })
+                              setJiraRefreshNonce((n) => n + 1)
                             }}
                             className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground transition hover:text-foreground"
                           >
@@ -4488,6 +5098,257 @@ export default function TaskPage(): React.JSX.Element {
                 </div>
               </div>
             </div>
+          ) : taskSource === 'jira' ? (
+            !jiraStatusChecked ? (
+              <div className="mt-4 flex items-center justify-center py-14">
+                <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : !jiraStatus.connected ? (
+              <div className="mt-4 flex flex-col items-center justify-center rounded-md border border-border/50 bg-muted/50 px-6 py-14 text-center shadow-sm">
+                <JiraIcon className="mb-4 size-8 text-muted-foreground/60" />
+                <p className="text-base font-medium text-foreground">Connect your Jira site</p>
+                <p className="mt-2 max-w-sm text-sm text-muted-foreground">
+                  Browse, edit, create, and start work from Jira issues directly from here.
+                </p>
+                <Button
+                  className="mt-5"
+                  onClick={() => {
+                    setJiraSiteUrlDraft('')
+                    setJiraEmailDraft('')
+                    setJiraApiTokenDraft('')
+                    setJiraConnectState('idle')
+                    setJiraConnectError(null)
+                    setJiraConnectOpen(true)
+                  }}
+                >
+                  Connect Jira
+                </Button>
+              </div>
+            ) : (
+              <div className="flex min-h-0 max-h-full flex-col overflow-hidden rounded-md rounded-t-none border border-t-0 border-border/50 bg-background shadow-sm">
+                <div className="flex h-10 flex-none items-center justify-between gap-3 border-b border-border/50 bg-muted/35 px-3">
+                  <div className="min-w-0 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                    Jira issues
+                  </div>
+                  <div className="shrink-0 text-[11px] text-muted-foreground">
+                    {displayedJiraIssues.length} shown
+                  </div>
+                </div>
+
+                <div className="grid h-8 flex-none grid-cols-[90px_minmax(0,1fr)_128px_92px_80px] items-center gap-3 border-b border-border/50 bg-muted/25 px-3 text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground max-md:!hidden lg:grid-cols-[96px_minmax(0,1.25fr)_132px_120px_136px_96px_64px] xl:grid-cols-[104px_minmax(0,1.45fr)_144px_132px_160px_128px_72px]">
+                  <span>Key</span>
+                  <span>Issue</span>
+                  <span>Status</span>
+                  <span>Priority</span>
+                  <span className="block max-lg:!hidden">Assignee</span>
+                  <span>Updated</span>
+                  <span />
+                </div>
+
+                <div
+                  className="min-h-0 flex-1 overflow-y-auto scrollbar-sleek"
+                  style={{ scrollbarGutter: 'stable' }}
+                >
+                  {jiraError ? (
+                    <div className="border-b border-border px-4 py-4 text-sm text-destructive">
+                      {jiraError}
+                    </div>
+                  ) : null}
+
+                  {jiraLoading && jiraIssues.length === 0 ? (
+                    <div className="divide-y divide-border/50">
+                      {Array.from({ length: 6 }).map((_, i) => (
+                        <div key={i} className="px-3 py-3">
+                          <div className="h-4 w-4/5 animate-pulse rounded bg-muted/70" />
+                          <div className="mt-2 h-3 w-3/5 animate-pulse rounded bg-muted/60" />
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {!jiraLoading && jiraIssues.length === 0 && !jiraError ? (
+                    <div className="px-4 py-10 text-center">
+                      <p className="text-sm font-medium text-foreground">No Jira issues found</p>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        {jiraSearchInput
+                          ? 'Try a different JQL query.'
+                          : 'No issues match the selected preset.'}
+                      </p>
+                    </div>
+                  ) : null}
+
+                  <div className="divide-y divide-border/50">
+                    {displayedJiraIssues.map((issue) => {
+                      const selected = issue.key === selectedJiraIssueKey
+                      const labels = issue.labels.slice(0, 3)
+                      const contextLabel =
+                        selectedJiraSiteId === 'all' && issue.siteName
+                          ? `${issue.siteName} / ${issue.project.key}`
+                          : issue.project.key
+                      return (
+                        <div
+                          key={`${issue.siteId ?? 'site'}:${issue.key}`}
+                          role="button"
+                          tabIndex={0}
+                          aria-current={selected ? 'true' : undefined}
+                          data-current={selected ? 'true' : undefined}
+                          onClick={() => setSelectedJiraIssue(issue)}
+                          onKeyDown={(e) => {
+                            if (e.target !== e.currentTarget) {
+                              return
+                            }
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault()
+                              setSelectedJiraIssue(issue)
+                            }
+                          }}
+                          className={cn(
+                            'group/row grid min-h-12 cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3 py-2 text-left transition hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring md:grid-cols-[90px_minmax(0,1fr)_128px_92px_80px] lg:grid-cols-[96px_minmax(0,1.25fr)_132px_120px_136px_96px_64px] xl:grid-cols-[104px_minmax(0,1.45fr)_144px_132px_160px_128px_72px]',
+                            selected && 'bg-accent'
+                          )}
+                        >
+                          <span className="block truncate font-mono text-[12px] text-muted-foreground max-md:!hidden">
+                            {issue.key}
+                          </span>
+
+                          <div className="min-w-0">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <span className="shrink-0 font-mono text-[11px] text-muted-foreground md:hidden">
+                                {issue.key}
+                              </span>
+                              <h3 className="min-w-0 truncate text-[13px] font-medium text-foreground">
+                                {issue.title}
+                              </h3>
+                            </div>
+                            <div className="mt-1 flex min-w-0 items-center gap-1.5 md:!hidden">
+                              <span
+                                className={cn(
+                                  'inline-flex min-w-0 items-center rounded-full border px-1.5 py-0.5 text-[11px] font-medium',
+                                  getJiraStatusTone(issue.status.categoryKey)
+                                )}
+                              >
+                                <span className="truncate">{issue.status.name}</span>
+                              </span>
+                              <span className="shrink-0 text-[11px] text-muted-foreground">
+                                {issue.priority?.name ?? 'No priority'}
+                              </span>
+                              <span className="min-w-0 truncate text-[11px] text-muted-foreground">
+                                {issue.assignee?.displayName ?? 'Unassigned'}
+                              </span>
+                            </div>
+                            <div className="mt-1 flex min-w-0 items-center gap-1 max-lg:!hidden">
+                              <span className="max-w-[160px] truncate text-[10px] text-muted-foreground xl:!hidden">
+                                {contextLabel}
+                              </span>
+                              {labels.map((label) => (
+                                <span
+                                  key={label}
+                                  className="max-w-[140px] truncate rounded-full border border-border/50 bg-muted/35 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                                >
+                                  {label}
+                                </span>
+                              ))}
+                              {issue.labels.length > labels.length ? (
+                                <span className="text-[10px] text-muted-foreground">
+                                  +{issue.labels.length - labels.length}
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+
+                          <div className="flex min-w-0 max-md:!hidden">
+                            <span
+                              className={cn(
+                                'inline-flex max-w-full items-center rounded-full border px-2 py-0.5 text-[11px] font-medium',
+                                getJiraStatusTone(issue.status.categoryKey)
+                              )}
+                            >
+                              <span className="truncate">{issue.status.name}</span>
+                            </span>
+                          </div>
+
+                          <span className="block truncate text-[12px] text-muted-foreground max-md:!hidden">
+                            {issue.priority?.name ?? 'No priority'}
+                          </span>
+
+                          <div className="flex min-w-0 items-center gap-2 text-[12px] text-muted-foreground max-lg:!hidden">
+                            {issue.assignee?.avatarUrl ? (
+                              <img
+                                src={issue.assignee.avatarUrl}
+                                alt={issue.assignee.displayName}
+                                className="size-5 shrink-0 rounded-full"
+                              />
+                            ) : (
+                              <span className="flex size-5 shrink-0 items-center justify-center rounded-full border border-border/50 bg-muted/40 text-[10px]">
+                                {issue.assignee?.displayName?.slice(0, 1) ?? '-'}
+                              </span>
+                            )}
+                            <span className="truncate">
+                              {issue.assignee?.displayName ?? 'Unassigned'}
+                            </span>
+                          </div>
+
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <div className="block min-w-0 truncate text-[12px] text-muted-foreground max-md:!hidden">
+                                {formatRelativeTime(issue.updatedAt)}
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom" sideOffset={6}>
+                              {new Date(issue.updatedAt).toLocaleString()}
+                            </TooltipContent>
+                          </Tooltip>
+
+                          <div className="flex shrink-0 items-center justify-end gap-1 md:opacity-0 md:transition-opacity md:group-hover/row:opacity-100 md:group-focus-within/row:opacity-100">
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon-xs"
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    handleUseJiraItem(issue)
+                                  }}
+                                  aria-label={`Start workspace from ${issue.key}`}
+                                >
+                                  <ArrowRight className="size-3.5" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent side="bottom" sideOffset={6}>
+                                Start workspace
+                              </TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon-xs"
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    window.api.shell.openUrl(issue.url)
+                                  }}
+                                  aria-label={`Open ${issue.key} in Jira`}
+                                >
+                                  <ExternalLink className="size-3.5" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent side="bottom" sideOffset={6}>
+                                Open in Jira
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+                <JiraIssueWorkspace
+                  issue={selectedJiraIssue}
+                  onUse={handleUseJiraItem}
+                  onClose={() => setSelectedJiraIssue(null)}
+                />
+              </div>
+            )
           ) : !linearStatusChecked ? (
             <div className="mt-4 flex items-center justify-center py-14">
               <LoaderCircle className="size-5 animate-spin text-muted-foreground" />
@@ -5049,7 +5910,7 @@ export default function TaskPage(): React.JSX.Element {
         <DialogContent
           className="sm:max-w-lg"
           onKeyDown={(event) => {
-            if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+            if (isSubmitShortcut(event)) {
               event.preventDefault()
               void handleCreateNewIssue()
             }
@@ -5179,7 +6040,7 @@ export default function TaskPage(): React.JSX.Element {
                 className="w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 resize-none max-h-60 overflow-y-auto"
               />
             </div>
-            <p className="text-[10px] text-muted-foreground">Cmd/Ctrl+Enter to submit.</p>
+            <p className="text-[10px] text-muted-foreground">{SUBMIT_SHORTCUT_LABEL} to submit.</p>
           </div>
           <DialogFooter>
             <Button
@@ -5217,7 +6078,7 @@ export default function TaskPage(): React.JSX.Element {
         <DialogContent
           className="sm:max-w-lg"
           onKeyDown={(event) => {
-            if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+            if (isSubmitShortcut(event)) {
               event.preventDefault()
               void handleCreateNewLinearIssue()
             }
@@ -5289,7 +6150,7 @@ export default function TaskPage(): React.JSX.Element {
                 className="w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 resize-none max-h-60 overflow-y-auto"
               />
             </div>
-            <p className="text-[10px] text-muted-foreground">Cmd/Ctrl+Enter to submit.</p>
+            <p className="text-[10px] text-muted-foreground">{SUBMIT_SHORTCUT_LABEL} to submit.</p>
           </div>
           <DialogFooter>
             <Button
@@ -5306,6 +6167,153 @@ export default function TaskPage(): React.JSX.Element {
               }
             >
               {newLinearIssueSubmitting ? (
+                <>
+                  <LoaderCircle className="size-4 animate-spin" />
+                  Creating…
+                </>
+              ) : (
+                'Create issue'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={newJiraIssueOpen}
+        onOpenChange={(open) => {
+          if (!newJiraIssueSubmitting) {
+            setNewJiraIssueOpen(open)
+          }
+        }}
+      >
+        <DialogContent
+          className="sm:max-w-lg"
+          onKeyDown={(event) => {
+            if (isSubmitShortcut(event)) {
+              event.preventDefault()
+              void handleCreateNewJiraIssue()
+            }
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>New Jira issue</DialogTitle>
+            <DialogDescription>
+              {newJiraIssueTargetProject
+                ? `Creates a new issue in ${newJiraIssueTargetProject.key}.`
+                : 'Choose a Jira project before creating the issue.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] font-medium text-muted-foreground">Project</label>
+                <Select
+                  value={
+                    newJiraIssueProjectId ??
+                    (newJiraIssueTargetProject
+                      ? getJiraProjectSelectionKey(newJiraIssueTargetProject)
+                      : undefined)
+                  }
+                  onValueChange={(v) => {
+                    setNewJiraIssueProjectId(v)
+                    setNewJiraIssueTypeId(null)
+                  }}
+                  disabled={newJiraIssueSubmitting || availableJiraProjects.length === 0}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Project" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableJiraProjects.map((project) => (
+                      <SelectItem
+                        key={getJiraProjectSelectionKey(project)}
+                        value={getJiraProjectSelectionKey(project)}
+                      >
+                        {selectedJiraSiteId === 'all' && project.siteName
+                          ? `${project.siteName} · `
+                          : ''}
+                        {project.key} — {project.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] font-medium text-muted-foreground">Issue type</label>
+                <Select
+                  value={newJiraIssueTypeId ?? newJiraIssueTargetType?.id ?? undefined}
+                  onValueChange={(v) => setNewJiraIssueTypeId(v)}
+                  disabled={
+                    newJiraIssueSubmitting ||
+                    jiraIssueTypesLoading ||
+                    availableJiraIssueTypes.length === 0
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue
+                      placeholder={jiraIssueTypesLoading ? 'Loading...' : 'Issue type'}
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableJiraIssueTypes.map((issueType) => (
+                      <SelectItem key={issueType.id} value={issueType.id}>
+                        {issueType.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-[11px] font-medium text-muted-foreground">Title</label>
+              <Input
+                autoFocus
+                value={newJiraIssueTitle}
+                onChange={(e) => setNewJiraIssueTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                    e.preventDefault()
+                    void handleCreateNewJiraIssue()
+                  }
+                }}
+                placeholder="Short summary"
+                disabled={newJiraIssueSubmitting}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-[11px] font-medium text-muted-foreground">
+                Description (optional)
+              </label>
+              <textarea
+                value={newJiraIssueBody}
+                onChange={(e) => setNewJiraIssueBody(e.target.value)}
+                placeholder="What's going on?"
+                rows={6}
+                disabled={newJiraIssueSubmitting}
+                className="w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 resize-none max-h-60 overflow-y-auto"
+              />
+            </div>
+            <p className="text-[10px] text-muted-foreground">{SUBMIT_SHORTCUT_LABEL} to submit.</p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setNewJiraIssueOpen(false)}
+              disabled={newJiraIssueSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => void handleCreateNewJiraIssue()}
+              disabled={
+                !newJiraIssueTargetProject ||
+                !newJiraIssueTargetType ||
+                !newJiraIssueTitle.trim() ||
+                newJiraIssueSubmitting
+              }
+            >
+              {newJiraIssueSubmitting ? (
                 <>
                   <LoaderCircle className="size-4 animate-spin" />
                   Creating…
@@ -5427,6 +6435,127 @@ export default function TaskPage(): React.JSX.Element {
               disabled={!linearApiKeyDraft.trim() || linearConnectState === 'connecting'}
             >
               {linearConnectState === 'connecting' ? (
+                <>
+                  <LoaderCircle className="size-4 animate-spin" />
+                  Verifying…
+                </>
+              ) : (
+                'Connect'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={jiraConnectOpen}
+        onOpenChange={(open) => {
+          if (jiraConnectState !== 'connecting') {
+            setJiraConnectOpen(open)
+          }
+        }}
+      >
+        <DialogContent
+          className="sm:max-w-md"
+          onKeyDown={(e) => {
+            if (
+              e.key === 'Enter' &&
+              jiraSiteUrlDraft.trim() &&
+              jiraEmailDraft.trim() &&
+              jiraApiTokenDraft.trim() &&
+              jiraConnectState !== 'connecting'
+            ) {
+              e.preventDefault()
+              void handleJiraConnect()
+            }
+          }}
+        >
+          <DialogHeader className="gap-3">
+            <DialogTitle className="leading-tight">Connect Jira site</DialogTitle>
+            <DialogDescription>
+              Use a Jira Cloud site URL, Atlassian email, and API token to browse issues.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-3">
+            <Input
+              autoFocus
+              placeholder="https://example.atlassian.net"
+              value={jiraSiteUrlDraft}
+              onChange={(e) => {
+                setJiraSiteUrlDraft(e.target.value)
+                if (jiraConnectState === 'error') {
+                  setJiraConnectState('idle')
+                  setJiraConnectError(null)
+                }
+              }}
+              disabled={jiraConnectState === 'connecting'}
+            />
+            <Input
+              type="email"
+              placeholder="you@example.com"
+              value={jiraEmailDraft}
+              onChange={(e) => {
+                setJiraEmailDraft(e.target.value)
+                if (jiraConnectState === 'error') {
+                  setJiraConnectState('idle')
+                  setJiraConnectError(null)
+                }
+              }}
+              disabled={jiraConnectState === 'connecting'}
+            />
+            <Input
+              type="password"
+              placeholder="Atlassian API token"
+              value={jiraApiTokenDraft}
+              onChange={(e) => {
+                setJiraApiTokenDraft(e.target.value)
+                if (jiraConnectState === 'error') {
+                  setJiraConnectState('idle')
+                  setJiraConnectError(null)
+                }
+              }}
+              disabled={jiraConnectState === 'connecting'}
+            />
+            {jiraConnectState === 'error' && jiraConnectError && (
+              <p className="text-xs text-destructive">{jiraConnectError}</p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Create a token in{' '}
+              <button
+                className="text-primary underline-offset-2 hover:underline"
+                onClick={() =>
+                  window.api.shell.openUrl(
+                    'https://id.atlassian.com/manage-profile/security/api-tokens'
+                  )
+                }
+              >
+                Atlassian account settings
+              </button>
+              .
+            </p>
+            <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground/70">
+              <Lock className="size-3 shrink-0" />
+              Your token is encrypted via the OS keychain and stored locally.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setJiraConnectOpen(false)}
+              disabled={jiraConnectState === 'connecting'}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => void handleJiraConnect()}
+              disabled={
+                !jiraSiteUrlDraft.trim() ||
+                !jiraEmailDraft.trim() ||
+                !jiraApiTokenDraft.trim() ||
+                jiraConnectState === 'connecting'
+              }
+            >
+              {jiraConnectState === 'connecting' ? (
                 <>
                   <LoaderCircle className="size-4 animate-spin" />
                   Verifying…
