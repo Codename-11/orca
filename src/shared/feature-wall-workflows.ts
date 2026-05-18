@@ -43,13 +43,13 @@ export type FeatureWallWorkflow = {
 export const FEATURE_WALL_WORKFLOWS: readonly FeatureWallWorkflow[] = [
   {
     id: 'start-work',
-    title: 'Start work',
-    meta: 'Tasks · Worktrees · CLI',
-    lede: 'Pick an issue, create an isolated worktree, and hand it to your preferred agent — without leaving Orca.',
+    title: 'Tasks & worktrees',
+    meta: 'GitHub · Linear · Orca CLI',
+    lede: 'Browse work, spin up isolated worktrees, and let agents drive Orca from the same task surface.',
     bullets: [
+      'GitHub and Linear tasks live in Orca, ready to become worktrees.',
       'One worktree per task — branch, terminal, editor, and browser stay together.',
-      'Launch Claude Code, Codex, Cursor CLI, Gemini, Copilot, OpenCode, or Pi.',
-      'Approve, comment, or merge from the same window.'
+      'Orca CLI lets agents create worktrees, snapshot, click, and fill.'
     ],
     primaryTileId: 'tile-03',
     relatedTileIds: ['tile-01', 'tile-09'],
@@ -58,13 +58,13 @@ export const FEATURE_WALL_WORKFLOWS: readonly FeatureWallWorkflow[] = [
   },
   {
     id: 'coordinate-agents',
-    title: 'Coordinate agents',
-    meta: 'Agent catalog · Usage · Hotkeys',
+    title: 'Agents & orchestration',
+    meta: 'Agents · Usage · Shortcuts',
     lede: 'Run several agents at once. Fan one prompt across Claude, Codex, and Cursor — compare results, merge the winner.',
     bullets: [
       'Preconfigured for Claude Code, Codex, Cursor CLI, Gemini, Copilot, OpenCode, and Pi.',
-      'Configure the supported agent catalog from one settings surface.',
-      'See live usage and rate-limit resets in the titlebar.'
+      'See live usage and rate-limit resets in the titlebar.',
+      'Jump across worktrees, open files, and remap shortcuts without reaching for the mouse.'
     ],
     primaryTileId: 'tile-04',
     relatedTileIds: ['tile-11', 'tile-10'],
@@ -77,7 +77,7 @@ export const FEATURE_WALL_WORKFLOWS: readonly FeatureWallWorkflow[] = [
   },
   {
     id: 'inspect-edit',
-    title: 'Inspect & edit',
+    title: 'Build surface',
     meta: 'Terminal · Editor · Browser',
     lede: 'Understand and modify what agents changed. Each worktree gets its own terminal, Monaco editor, and Chromium window.',
     bullets: [
@@ -92,16 +92,16 @@ export const FEATURE_WALL_WORKFLOWS: readonly FeatureWallWorkflow[] = [
   },
   {
     id: 'review-ship',
-    title: 'Review & ship',
-    meta: 'Inline review · PRs',
-    lede: 'Drop comments on any diff line, batch them, and send them back to the agent. Inspect CI, resolve conflicts, open PRs — all in-app.',
+    title: 'Review & preview',
+    meta: 'Diffs · PRs · Files',
+    lede: 'Review changes, preview repo files, and send focused feedback back to the agent without leaving Orca.',
     bullets: [
       'Inline markdown comments on any diff line.',
       'Batch feedback and ship it back to the agent in one click.',
-      'CI status, conflict resolution, and PRs without leaving Orca.'
+      'Preview PDFs, images, CSV, Markdown, and image diffs next to code review.'
     ],
     primaryTileId: 'tile-08',
-    relatedTileIds: [],
+    relatedTileIds: ['tile-12'],
     // Why: there is no clean store action that opens "review mode" — the
     // SourceControl sidebar surfaces automatically when a worktree has
     // changes. Falling back to docs keeps the CTA honest; the helper text
@@ -115,8 +115,8 @@ export const FEATURE_WALL_WORKFLOWS: readonly FeatureWallWorkflow[] = [
   },
   {
     id: 'work-remotely',
-    title: 'Work remotely',
-    meta: 'SSH worktrees',
+    title: 'Remote development',
+    meta: 'SSH · Port forwarding',
     lede: 'Run agents on a beefy remote box with full file editing, git, and terminals — first-class, not advanced-only.',
     bullets: [
       'Auto-reconnect, port forwarding, and passphrase caching out of the box.',

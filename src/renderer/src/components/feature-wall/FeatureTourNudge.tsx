@@ -8,7 +8,21 @@ import { Card } from '@/components/ui/card'
 
 const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)'
 const NUDGE_VISUAL_COUNT = 3
-const NUDGE_VISUAL_INTERVAL_MS = 2_800
+const NUDGE_VISUAL_INTERVAL_MS = 2_000
+const NUDGE_VISUAL_COPY = [
+  {
+    title: 'Parallel work',
+    caption: 'Fan tasks across isolated worktrees.'
+  },
+  {
+    title: 'One workspace',
+    caption: 'Terminal, browser, editor, and diff stay together.'
+  },
+  {
+    title: 'Review loop',
+    caption: 'Send comments back to agents and ship.'
+  }
+] as const
 
 function usePrefersReducedMotion(): boolean {
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(() => {
@@ -147,10 +161,10 @@ function FeatureTourNudgeVisual(props: {
   reducedMotion: boolean
 }): JSX.Element {
   const { index, onPauseChange, reducedMotion } = props
+  const copy = NUDGE_VISUAL_COPY[index] ?? NUDGE_VISUAL_COPY[0]
   return (
     <div
-      className="relative h-24 overflow-hidden rounded-md border border-border bg-muted/70 p-3"
-      aria-hidden
+      className="relative h-28 overflow-hidden rounded-md border border-border bg-muted/70 p-3"
       data-feature-tour-nudge-visual
       onPointerEnter={() => onPauseChange(true)}
       onPointerLeave={() => onPauseChange(false)}
@@ -168,7 +182,13 @@ function FeatureTourNudgeVisual(props: {
         {index === 1 ? <WorkspaceTogetherVisual reducedMotion={reducedMotion} /> : null}
         {index === 2 ? <ReviewLoopVisual reducedMotion={reducedMotion} /> : null}
       </div>
-      <div className="absolute bottom-2 left-1/2 flex -translate-x-1/2 gap-1">
+      <div className="absolute bottom-3 left-3 right-12 rounded-md bg-background/80 px-2 py-1 shadow-xs">
+        <div className="text-[11px] font-semibold leading-tight text-foreground">{copy.title}</div>
+        <div className="mt-0.5 truncate text-[10px] leading-tight text-muted-foreground">
+          {copy.caption}
+        </div>
+      </div>
+      <div className="absolute bottom-5 right-3 flex gap-1">
         {Array.from({ length: NUDGE_VISUAL_COUNT }, (_, dotIndex) => (
           <span
             key={dotIndex}

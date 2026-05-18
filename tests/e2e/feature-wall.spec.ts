@@ -49,7 +49,7 @@ test.describe('Feature tour modal', () => {
     // Five workflow rows in the rail.
     const rail = orcaPage.getByRole('navigation', { name: 'Workflows' })
     await expect(rail.getByRole('tab')).toHaveCount(5)
-    await expect(rail.getByRole('tab', { name: /Start work/i })).toHaveAttribute(
+    await expect(rail.getByRole('tab', { name: /Tasks & worktrees/i })).toHaveAttribute(
       'aria-selected',
       'true'
     )
@@ -63,14 +63,14 @@ test.describe('Feature tour modal', () => {
       .toBe(true)
 
     // ArrowDown moves selection through the rail.
-    await rail.getByRole('tab', { name: /Start work/i }).focus()
+    await rail.getByRole('tab', { name: /Tasks & worktrees/i }).focus()
     await orcaPage.keyboard.press('ArrowDown')
-    await expect(rail.getByRole('tab', { name: /Coordinate agents/i })).toHaveAttribute(
+    await expect(rail.getByRole('tab', { name: /Agents & orchestration/i })).toHaveAttribute(
       'aria-selected',
       'true'
     )
 
-    // Primary CTA for "Coordinate agents" closes the modal and opens agent settings.
+    // Primary CTA for "Agents & orchestration" closes the modal and opens agent settings.
     await orcaPage.getByRole('button', { name: /Open agent settings/i }).click()
     await expect(orcaPage.getByRole('dialog', { name: 'Get to know Orca' })).toHaveCount(0)
     await expect.poll(async () => getStoreState<string>(orcaPage, 'activeModal')).toBe('none')
@@ -148,6 +148,7 @@ test.describe('Feature tour modal', () => {
     ).toBeVisible()
     await expect(nudge.getByText('Reopen any time from Help > Feature tour.')).toBeVisible()
     await expect(nudge.locator('[data-feature-tour-nudge-visual]')).toBeVisible()
+    await expect(nudge.getByText('Parallel work')).toBeVisible()
     await expect
       .poll(
         () =>
