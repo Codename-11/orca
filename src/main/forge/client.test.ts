@@ -227,7 +227,7 @@ describe('forgeTool transport', () => {
     const result = await forgeTool('issues.list', { limit: 5 })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toBe('https://forge.example/api/mcp/issues.list')
     expect(init.method).toBe('POST')
     expect(init.body).toBe(JSON.stringify({ limit: 5 }))
