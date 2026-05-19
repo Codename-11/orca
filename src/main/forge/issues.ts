@@ -121,12 +121,12 @@ export async function updateIssue(
       await forgeTool('issues.transition', { id, statusId })
     }
     if (labelIds) {
-      await forgeTool('issues.setLabels', { id, labelIds })
+      // Why: Forge MCP uses additive label mutations rather than a `labelIds`
+      // replacement field. The UI currently sends selected label ids as adds.
+      await forgeTool('issues.setLabels', { issueId: id, add: labelIds })
     }
     if (assignedAgentId !== undefined) {
-      await (assignedAgentId === null
-        ? forgeTool('issues.release', { id })
-        : forgeTool('issues.assign', { id, agentId: assignedAgentId }))
+      await forgeTool('issues.assign', { issueId: id, agentId: assignedAgentId })
     }
     return { ok: true }
   } catch (error) {
@@ -147,23 +147,23 @@ export async function createIssue(input: ForgeIssueCreate): Promise<ForgeIssueCr
     if (input.projectId !== undefined && input.projectId !== null) {
       payload.projectId = input.projectId
     }
-    if (input.statusId) {
-      payload.statusId = input.statusId
-    }
     if (input.priority) {
       payload.priority = input.priority
-    }
-    if (input.labelIds && input.labelIds.length > 0) {
-      payload.labelIds = input.labelIds
-    }
-    if (input.assignedAgentId) {
-      payload.assignedAgentId = input.assignedAgentId
     }
 
     const json = await forgeTool('issues.create', payload)
     const issue = normalizeIssue(json) ?? normalizeIssue((json as { issue?: unknown })?.issue)
     if (!issue) {
       return { ok: false, error: 'Forge did not return a created issue' }
+    }
+    if (input.statusId) {
+      await forgeTool('issues.transition', { id: issue.id, statusId: input.statusId })
+    }
+    if (input.labelIds && input.labelIds.length > 0) {
+      await forgeTool('issues.setLabels', { issueId: issue.id, add: input.labelIds })
+    }
+    if (input.assignedAgentId) {
+      await forgeTool('issues.assign', { issueId: issue.id, agentId: input.assignedAgentId })
     }
     return { ok: true, issue }
   } catch (error) {
