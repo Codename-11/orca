@@ -15,6 +15,7 @@ on:
   schedule:
     # Poll shortly after upstream publishes. GitHub may delay schedules, so the
     # checker is idempotent against releases already present in this fork.
+    # Scheduled jobs stay inert until repo variable AXIOM_AUTO_RELEASES=true.
     - cron: '*/15 * * * *'
 
 permissions:
@@ -42,6 +43,7 @@ env:
 jobs:
   sync:
     name: Detect, sync, verify, and tag
+    if: github.event_name == 'workflow_dispatch' || vars.AXIOM_AUTO_RELEASES == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     outputs:
