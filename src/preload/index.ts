@@ -55,6 +55,12 @@ import type {
   WorkspaceSpaceAnalyzeResult,
   WorkspaceSpaceScanProgress
 } from '../shared/workspace-space-types'
+import type {
+  WorkspacePortKillRequest,
+  WorkspacePortKillResult,
+  WorkspacePortScanRequest,
+  WorkspacePortScanResult
+} from '../shared/workspace-ports'
 import type { GhAuthDiagnostic } from '../shared/github-auth-types'
 import type {
   AddIssueCommentBySlugArgs,
@@ -553,6 +559,13 @@ const api = {
     }
   },
 
+  workspacePorts: {
+    scan: (args: WorkspacePortScanRequest): Promise<WorkspacePortScanResult> =>
+      ipcRenderer.invoke('workspacePorts:scan', args),
+    kill: (args: WorkspacePortKillRequest): Promise<WorkspacePortKillResult> =>
+      ipcRenderer.invoke('workspacePorts:kill', args)
+  },
+
   pty: {
     spawn: (opts: {
       cols: number
@@ -825,6 +838,16 @@ const api = {
       prRepo?: { owner: string; repo: string } | null
       noCache?: boolean
     }): Promise<unknown[]> => ipcRenderer.invoke('gh:prChecks', args),
+
+    prCheckDetails: (args: {
+      repoPath: string
+      repoId?: string
+      checkRunId?: number
+      workflowRunId?: number
+      checkName?: string
+      url?: string | null
+      prRepo?: { owner: string; repo: string } | null
+    }): Promise<unknown | null> => ipcRenderer.invoke('gh:prCheckDetails', args),
 
     rerunPRChecks: (args: {
       repoPath: string
