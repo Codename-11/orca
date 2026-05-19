@@ -1115,6 +1115,22 @@ const api = {
       ipcRenderer.invoke('linear:teamMembers', args)
   },
 
+  forge: {
+    status: (): Promise<unknown> => ipcRenderer.invoke('forge:status'),
+    listStatuses: (): Promise<unknown[]> => ipcRenderer.invoke('forge:listStatuses'),
+    searchIssues: (args: { query: string; limit?: number }): Promise<unknown[]> =>
+      ipcRenderer.invoke('forge:searchIssues', args),
+    listIssues: (args?: {
+      filter?: 'active' | 'assigned' | 'created' | 'all' | 'done'
+      limit?: number
+    }): Promise<unknown[]> => ipcRenderer.invoke('forge:listIssues', args),
+    updateIssue: (args: {
+      id: string
+      updates: unknown
+    }): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke('forge:updateIssue', args)
+  },
+
   starNag: {
     onShow: (callback: () => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent): void => callback()

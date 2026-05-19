@@ -220,7 +220,7 @@ describe('Store', () => {
     expect(settings.terminalUseSeparateLightTheme).toBe(true)
     expect(settings.rightSidebarOpenByDefault).toBe(true)
     expect(settings.showTasksButton).toBe(true)
-    expect(settings.visibleTaskProviders).toEqual(['github', 'gitlab', 'linear'])
+    expect(settings.visibleTaskProviders).toEqual(['github', 'gitlab', 'linear', 'forge'])
     expect(settings.openInApplications).toEqual([])
     expect(settings.experimentalActivity).toBe(false)
     expect(settings.experimentalActivityDefaultedOffForAllUsers).toBe(true)
@@ -615,7 +615,12 @@ describe('Store', () => {
     expect(store.getSettings().showGitIgnoredFiles).toBe(true)
     expect(store.getSettings().showTasksButton).toBe(true)
     expect(store.getSettings().combinedDiffFileTreeVisibleByDefault).toBe(false)
-    expect(store.getSettings().visibleTaskProviders).toEqual(['github', 'gitlab', 'linear'])
+    expect(store.getSettings().visibleTaskProviders).toEqual([
+      'github',
+      'gitlab',
+      'linear',
+      'forge'
+    ])
     expect(store.getSettings().experimentalActivity).toBe(false)
     expect(store.getSettings().experimentalActivityDefaultedOffForAllUsers).toBe(true)
     expect(store.getSettings().notifications.customSoundPath).toBeNull()

@@ -14,6 +14,7 @@ import { registerGitHubHandlers } from './github'
 import { registerGitLabHandlers } from './gitlab'
 import { registerHostedReviewHandlers } from './hosted-review'
 import { registerLinearHandlers } from './linear'
+import { registerForgeHandlers } from './forge'
 import { registerFeedbackHandlers } from './feedback'
 import { registerCrashReportingHandlers } from './crash-reporting'
 import { registerExportHandlers } from './export'
@@ -101,6 +102,7 @@ export function registerCoreHandlers(
   registerGitLabHandlers(store)
   registerHostedReviewHandlers(store, stats)
   registerLinearHandlers()
+  registerForgeHandlers()
   registerFeedbackHandlers()
   if (crashReports) {
     registerCrashReportingHandlers(crashReports)

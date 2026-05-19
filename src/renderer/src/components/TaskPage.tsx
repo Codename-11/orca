@@ -8,6 +8,7 @@ import {
   AlertCircle,
   ArrowDownUp,
   ArrowRight,
+  Boxes,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -116,6 +117,8 @@ import type {
   GitHubWorkItem,
   GitLabTodo,
   GitLabWorkItem,
+  ForgeIssue,
+  ForgeIssueStatus,
   LinearIssue,
   LinearTeam,
   LinearWorkflowState,
@@ -131,6 +134,12 @@ import {
   linearTeamStates,
   linearUpdateIssue
 } from '@/runtime/runtime-linear-client'
+import {
+  forgeListIssues,
+  forgeListStatuses,
+  forgeSearchIssues,
+  forgeUpdateIssue
+} from '@/runtime/runtime-forge-client'
 import {
   filterAvailableTaskProviders,
   normalizeVisibleTaskProviders,
@@ -196,6 +205,11 @@ const SOURCE_OPTIONS: SourceOption[] = [
     id: 'linear',
     label: 'Linear',
     Icon: ({ className }) => <LinearIcon className={className} />
+  },
+  {
+    id: 'forge',
+    label: 'Forge',
+    Icon: ({ className }) => <Boxes className={className} />
   }
 ]
 
@@ -222,6 +236,16 @@ const LINEAR_PRESETS: LinearPreset[] = [
 
 const TASK_SEARCH_DEBOUNCE_MS = 300
 const LINEAR_ITEM_LIMIT = 36
+const FORGE_ITEM_LIMIT = 50
+
+type ForgePresetId = 'active' | 'assigned' | 'created' | 'all' | 'done'
+const FORGE_PRESETS: { id: ForgePresetId; label: string }[] = [
+  { id: 'active', label: 'Active' },
+  { id: 'assigned', label: 'Assigned' },
+  { id: 'created', label: 'Created' },
+  { id: 'all', label: 'All' },
+  { id: 'done', label: 'Done' }
+]
 
 const GITHUB_TASK_GRID_CLASS =
   'min-w-[860px] grid-cols-[72px_minmax(260px,2fr)_minmax(130px,0.8fr)_100px_92px_158px]'
@@ -1839,6 +1863,19 @@ export default function TaskPage(): React.JSX.Element {
   const [gitlabTodos, setGitlabTodos] = useState<GitLabTodo[]>([])
   const [gitlabTodosLoading, setGitlabTodosLoading] = useState(false)
 
+  // ── Forge task-source state ───────────────────────────────────────
+  const [forgeIssues, setForgeIssues] = useState<ForgeIssue[]>([])
+  const [forgeLoading, setForgeLoading] = useState(false)
+  const [forgeError, setForgeError] = useState<string | null>(null)
+  const [forgeSearchInput, setForgeSearchInput] = useState('')
+  const [appliedForgeSearch, setAppliedForgeSearch] = useState('')
+  const [activeForgePreset, setActiveForgePreset] = useState<ForgePresetId>('active')
+  const [forgeRefreshNonce, setForgeRefreshNonce] = useState(0)
+  const [forgeStatuses, setForgeStatuses] = useState<ForgeIssueStatus[]>([])
+  const [forgeUpdatingIssueIds, setForgeUpdatingIssueIds] = useState<ReadonlySet<string>>(
+    () => new Set()
+  )
+
   const [taskSearchInput, setTaskSearchInput] = useState(initialTaskQuery)
   const [appliedTaskSearch, setAppliedTaskSearch] = useState(initialTaskQuery)
   const taskSearchInputRef = useRef<HTMLInputElement>(null)
@@ -3259,6 +3296,89 @@ export default function TaskPage(): React.JSX.Element {
     }
   }, [checkLinearConnection, linearStatusChecked, preflightStatusChecked, refreshPreflightStatus])
 
+  useEffect(() => {
+    if (!taskResumeApplied) {
+      return
+    }
+    const timeout = window.setTimeout(() => {
+      setAppliedForgeSearch(forgeSearchInput)
+    }, TASK_SEARCH_DEBOUNCE_MS)
+    return () => window.clearTimeout(timeout)
+  }, [forgeSearchInput, taskResumeApplied])
+
+  useEffect(() => {
+    if (!taskResumeApplied || taskSource !== 'forge') {
+      return
+    }
+    let cancelled = false
+    setForgeLoading(true)
+    setForgeError(null)
+    const trimmed = appliedForgeSearch.trim()
+    const request =
+      trimmed.length > 0
+        ? forgeSearchIssues(settings, trimmed, FORGE_ITEM_LIMIT)
+        : forgeListIssues(settings, activeForgePreset, FORGE_ITEM_LIMIT)
+    void Promise.all([request, forgeListStatuses(settings).catch(() => [] as ForgeIssueStatus[])])
+      .then(([issues, statuses]) => {
+        if (cancelled) {
+          return
+        }
+        setForgeIssues(issues)
+        setForgeStatuses(statuses)
+        setForgeLoading(false)
+      })
+      .catch((err) => {
+        if (cancelled) {
+          return
+        }
+        setForgeError(err instanceof Error ? err.message : 'Failed to load Forge issues.')
+        setForgeLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [
+    activeForgePreset,
+    appliedForgeSearch,
+    forgeRefreshNonce,
+    settings,
+    taskResumeApplied,
+    taskSource
+  ])
+
+  const handleForgeStatusUpdate = useCallback(
+    (issue: ForgeIssue, nextStatus: ForgeIssueStatus) => {
+      setForgeUpdatingIssueIds((current) => new Set(current).add(issue.id))
+      setForgeIssues((current) =>
+        current.map((candidate) =>
+          candidate.id === issue.id ? { ...candidate, status: nextStatus } : candidate
+        )
+      )
+      void forgeUpdateIssue(settings, issue.id, { statusId: nextStatus.id })
+        .then((result) => {
+          if (!result.ok) {
+            throw new Error(result.error)
+          }
+          toast.success(`Moved ${issue.identifier} to ${nextStatus.name}`)
+          setForgeRefreshNonce((current) => current + 1)
+        })
+        .catch((err) => {
+          setForgeIssues((current) =>
+            current.map((candidate) => (candidate.id === issue.id ? issue : candidate))
+          )
+          toast.error(err instanceof Error ? err.message : 'Failed to update Forge issue.')
+        })
+        .finally(() => {
+          setForgeUpdatingIssueIds((current) => {
+            const next = new Set(current)
+            next.delete(issue.id)
+            return next
+          })
+        })
+    },
+    [settings]
+  )
+
   // Why: debounce the Linear search input so we don't fire a request on every
   // keystroke — matches the 300ms cadence used for GitHub search.
   useEffect(() => {
@@ -3431,6 +3551,24 @@ export default function TaskPage(): React.JSX.Element {
       openComposerForLinearItem(issue)
     },
     [openComposerForLinearItem]
+  )
+
+  const handleUseForgeItem = useCallback(
+    (issue: ForgeIssue): void => {
+      const linkedWorkItem: LinkedWorkItemSummary = {
+        type: 'issue',
+        number: 0,
+        title: issue.title,
+        url: issue.url ?? `forge:${issue.identifier}`,
+        linearIdentifier: issue.identifier
+      }
+      openModal('new-workspace-composer', {
+        linkedWorkItem,
+        prefilledName: getLinkedWorkItemSuggestedName(linkedWorkItem),
+        telemetrySource: 'sidebar'
+      })
+    },
+    [openModal]
   )
 
   const handleLinearConnect = useCallback(async (): Promise<void> => {
@@ -3835,6 +3973,99 @@ export default function TaskPage(): React.JSX.Element {
                         </div>
                       )
                     })()}
+                  </div>
+                ) : taskSource === 'forge' ? (
+                  <div className="min-w-0 rounded-md rounded-b-none border border-border/50 bg-muted/50 p-3 shadow-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex flex-wrap gap-2">
+                        {FORGE_PRESETS.map((preset) => {
+                          const active = !forgeSearchInput && activeForgePreset === preset.id
+                          return (
+                            <button
+                              key={preset.id}
+                              type="button"
+                              onClick={() => {
+                                setForgeSearchInput('')
+                                setAppliedForgeSearch('')
+                                setActiveForgePreset(preset.id)
+                                setForgeRefreshNonce((n) => n + 1)
+                              }}
+                              className={cn(
+                                'rounded-md border px-2 py-1 text-xs transition',
+                                active
+                                  ? 'border-border/50 bg-foreground/90 text-background backdrop-blur-md'
+                                  : 'border-border/50 bg-transparent text-foreground hover:bg-muted/50'
+                              )}
+                            >
+                              {preset.label}
+                            </button>
+                          )
+                        })}
+                      </div>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={() => setForgeRefreshNonce((n) => n + 1)}
+                            disabled={forgeLoading}
+                            aria-label="Refresh Forge issues"
+                            className="border-border/50 bg-transparent hover:bg-muted/50 backdrop-blur-md supports-[backdrop-filter]:bg-transparent"
+                          >
+                            {forgeLoading ? (
+                              <LoaderCircle className="size-4 animate-spin" />
+                            ) : (
+                              <RefreshCw className="size-4" />
+                            )}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" sideOffset={6}>
+                          Refresh Forge issues
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                    <div className="mt-3 flex min-w-0 items-center gap-3">
+                      <div className="relative min-w-0 flex-1 basis-64">
+                        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          value={forgeSearchInput}
+                          onChange={(e) => setForgeSearchInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              if (
+                                shouldSuppressEnterSubmit(
+                                  { isComposing: e.nativeEvent.isComposing, shiftKey: e.shiftKey },
+                                  false
+                                )
+                              ) {
+                                return
+                              }
+                              e.preventDefault()
+                              const trimmed = forgeSearchInput.trim()
+                              setForgeSearchInput(trimmed)
+                              setAppliedForgeSearch(trimmed)
+                              setForgeRefreshNonce((n) => n + 1)
+                            }
+                          }}
+                          placeholder="Search Forge issues..."
+                          className="h-8 rounded-md border-border/50 bg-background pl-8 pr-8 text-xs"
+                        />
+                        {forgeSearchInput ? (
+                          <button
+                            type="button"
+                            aria-label="Clear search"
+                            onClick={() => {
+                              setForgeSearchInput('')
+                              setAppliedForgeSearch('')
+                              setForgeRefreshNonce((n) => n + 1)
+                            }}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground transition hover:text-foreground"
+                          >
+                            <X className="size-4" />
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
                   </div>
                 ) : taskSource === 'linear' && linearStatus.connected ? (
                   <div className="min-w-0 rounded-md rounded-b-none border border-border/50 bg-muted/50 p-3 shadow-sm">
@@ -4564,6 +4795,160 @@ export default function TaskPage(): React.JSX.Element {
                       </button>
                     </div>
                   ))}
+                </div>
+              </div>
+            </div>
+          ) : taskSource === 'forge' ? (
+            <div className="flex min-h-0 max-h-full flex-col rounded-md border border-t-0 border-border/50 bg-background overflow-hidden rounded-t-none shadow-sm">
+              <div className="flex h-10 flex-none items-center justify-between gap-3 border-b border-border/50 bg-muted/35 px-3">
+                <div className="min-w-0 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                  Forge issues
+                </div>
+                <div className="text-[11px] text-muted-foreground">{forgeIssues.length} shown</div>
+              </div>
+              <div className="grid h-8 flex-none grid-cols-[96px_minmax(0,3fr)_140px_130px_110px_86px] items-center gap-3 border-b border-border/50 bg-muted/25 px-3 text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground max-lg:hidden">
+                <span>Key</span>
+                <span>Issue</span>
+                <span>Status</span>
+                <span>Priority</span>
+                <span>Project</span>
+                <span />
+              </div>
+              <div
+                className="min-h-0 flex-1 overflow-y-auto scrollbar-sleek"
+                style={{ scrollbarGutter: 'stable' }}
+              >
+                {forgeError ? (
+                  <div className="border-b border-border px-4 py-4 text-sm text-destructive">
+                    {forgeError}
+                  </div>
+                ) : null}
+                {forgeLoading && forgeIssues.length === 0 ? (
+                  <div className="divide-y divide-border/50">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <div key={i} className="px-3 py-3">
+                        <div className="h-4 w-4/5 animate-pulse rounded bg-muted/70" />
+                        <div className="mt-2 h-3 w-3/5 animate-pulse rounded bg-muted/60" />
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {!forgeLoading && forgeIssues.length === 0 && !forgeError ? (
+                  <div className="px-4 py-10 text-center">
+                    <p className="text-sm font-medium text-foreground">No Forge issues found</p>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      {forgeSearchInput
+                        ? 'Try a different search query.'
+                        : 'No Forge issues match this filter.'}
+                    </p>
+                  </div>
+                ) : null}
+                <div className="divide-y divide-border/50">
+                  {forgeIssues.map((issue) => {
+                    const updating = forgeUpdatingIssueIds.has(issue.id)
+                    const otherStatuses = forgeStatuses.filter(
+                      (status) => status.id !== issue.status.id
+                    )
+                    return (
+                      <div
+                        key={issue.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => handleUseForgeItem(issue)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            handleUseForgeItem(issue)
+                          }
+                        }}
+                        className={cn(
+                          'group/row grid min-h-12 cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3 py-2 text-left transition hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring lg:grid-cols-[96px_minmax(0,3fr)_140px_130px_110px_86px]',
+                          updating && 'cursor-wait opacity-70'
+                        )}
+                      >
+                        <span className="hidden truncate font-mono text-[12px] text-muted-foreground lg:block">
+                          {issue.identifier}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="shrink-0 font-mono text-[11px] text-muted-foreground lg:hidden">
+                              {issue.identifier}
+                            </span>
+                            <h3 className="min-w-0 truncate text-[13px] font-medium text-foreground">
+                              {issue.title}
+                            </h3>
+                          </div>
+                          <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground lg:hidden">
+                            <span>{issue.status.name}</span>
+                            <span>{issue.priority}</span>
+                            {issue.project ? (
+                              <span className="truncate">{issue.project.name}</span>
+                            ) : null}
+                          </div>
+                        </div>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="xs"
+                              disabled={updating || otherStatuses.length === 0}
+                              onClick={(event) => event.stopPropagation()}
+                              className="hidden justify-start text-xs lg:inline-flex"
+                            >
+                              {updating ? <LoaderCircle className="size-3 animate-spin" /> : null}
+                              {issue.status.name}
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="start" className="w-48">
+                            <DropdownMenuLabel>Status</DropdownMenuLabel>
+                            {otherStatuses.map((status) => (
+                              <DropdownMenuItem
+                                key={status.id}
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  handleForgeStatusUpdate(issue, status)
+                                }}
+                              >
+                                {status.name}
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                        <span className="hidden truncate text-[12px] text-muted-foreground lg:block">
+                          {issue.priority}
+                        </span>
+                        <span className="hidden truncate text-[12px] text-muted-foreground lg:block">
+                          {issue.project?.name ?? 'No project'}
+                        </span>
+                        <div className="flex shrink-0 items-center justify-end gap-1 md:opacity-0 md:transition-opacity md:group-hover/row:opacity-100 md:group-focus-within/row:opacity-100">
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              handleUseForgeItem(issue)
+                            }}
+                            aria-label={`Start workspace from ${issue.identifier}`}
+                          >
+                            <ArrowRight className="size-3.5" />
+                          </Button>
+                          {issue.url ? (
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                window.api.shell.openUrl(issue.url!)
+                              }}
+                              aria-label={`Open ${issue.identifier} in Forge`}
+                            >
+                              <ExternalLink className="size-3.5" />
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             </div>
