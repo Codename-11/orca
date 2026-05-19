@@ -57,6 +57,51 @@ export type ForgeIssueUpdate = {
   title?: string
   priority?: ForgeIssuePriority
   description?: string | null
+  projectId?: string | null
+  labelIds?: string[]
+  assignedAgentId?: string | null
+}
+
+export type ForgeIssueCreate = {
+  title: string
+  description?: string
+  projectId?: string | null
+  statusId?: string
+  priority?: ForgeIssuePriority
+  labelIds?: string[]
+  assignedAgentId?: string | null
+}
+
+export type ForgeLabel = {
+  id: string
+  name: string
+  color?: string
+  description?: string
+}
+
+export type ForgeComment = {
+  id: string
+  body: string
+  author: ForgeAgentSummary | null
+  createdAt: string
+  updatedAt?: string
 }
 
 export type ForgeMutationResult = { ok: true } | { ok: false; error: string }
+
+export type ForgeIssueCreateResult = { ok: true; issue: ForgeIssue } | { ok: false; error: string }
+
+export type ForgeCommentCreateResult =
+  | { ok: true; comment: ForgeComment }
+  | { ok: false; error: string }
+
+export type ForgeConfigSettings = {
+  baseUrl: string | null
+  hasToken: boolean
+  source: 'config' | 'env' | 'none'
+}
+
+export type ForgeSaveConfigArgs = {
+  baseUrl: string
+  apiKey?: string | null
+}

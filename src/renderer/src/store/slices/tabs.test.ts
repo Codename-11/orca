@@ -110,6 +110,7 @@ import { createSettingsSlice } from './settings'
 import { createGitHubSlice } from './github'
 import { createHostedReviewSlice } from './hosted-review'
 import { createLinearSlice } from './linear'
+import { createForgeSlice } from './forge'
 import { createPreflightSlice } from './preflight'
 import { createEditorSlice } from './editor'
 import { createStatsSlice } from './stats'
@@ -142,6 +143,7 @@ function createTestStore() {
     ...createGitHubSlice(...a),
     ...createHostedReviewSlice(...a),
     ...createLinearSlice(...a),
+    ...createForgeSlice(...a),
     ...createPreflightSlice(...a),
     ...createEditorSlice(...a),
     ...createStatsSlice(...a),

@@ -1117,18 +1117,31 @@ const api = {
 
   forge: {
     status: (): Promise<unknown> => ipcRenderer.invoke('forge:status'),
+    getConfig: (): Promise<unknown> => ipcRenderer.invoke('forge:getConfig'),
+    saveConfig: (args: { baseUrl: string; apiKey?: string | null }): Promise<unknown> =>
+      ipcRenderer.invoke('forge:saveConfig', args),
+    clearConfig: (): Promise<unknown> => ipcRenderer.invoke('forge:clearConfig'),
     listStatuses: (): Promise<unknown[]> => ipcRenderer.invoke('forge:listStatuses'),
+    listProjects: (): Promise<unknown[]> => ipcRenderer.invoke('forge:listProjects'),
+    listLabels: (): Promise<unknown[]> => ipcRenderer.invoke('forge:listLabels'),
+    listAgents: (): Promise<unknown[]> => ipcRenderer.invoke('forge:listAgents'),
     searchIssues: (args: { query: string; limit?: number }): Promise<unknown[]> =>
       ipcRenderer.invoke('forge:searchIssues', args),
     listIssues: (args?: {
       filter?: 'active' | 'assigned' | 'created' | 'all' | 'done'
       limit?: number
     }): Promise<unknown[]> => ipcRenderer.invoke('forge:listIssues', args),
+    listComments: (args: { issueId: string }): Promise<unknown[]> =>
+      ipcRenderer.invoke('forge:listComments', args),
     updateIssue: (args: {
       id: string
       updates: unknown
     }): Promise<{ ok: true } | { ok: false; error: string }> =>
-      ipcRenderer.invoke('forge:updateIssue', args)
+      ipcRenderer.invoke('forge:updateIssue', args),
+    createIssue: (args: { input: unknown }): Promise<unknown> =>
+      ipcRenderer.invoke('forge:createIssue', args),
+    createComment: (args: { issueId: string; body: string }): Promise<unknown> =>
+      ipcRenderer.invoke('forge:createComment', args)
   },
 
   starNag: {
