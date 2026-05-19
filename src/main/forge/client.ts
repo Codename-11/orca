@@ -1,32 +1,23 @@
+/*
+ * Why: Forge transport + DTO normalization in one module. High-level
+ * operations live in ./issues.ts, ./projects.ts, ./labels.ts so the API
+ * surface can be tested without exposing HTTP internals. Tokens never leave
+ * the main process — the config module resolves them from secure storage
+ * or environment.
+ */
 import type {
-  ForgeConnectionStatus,
+  ForgeAgentSummary,
+  ForgeComment,
   ForgeIssue,
   ForgeIssuePriority,
   ForgeIssueStatus,
   ForgeIssueStatusCategory,
-  ForgeIssueUpdate,
-  ForgeListFilter,
-  ForgeMutationResult
+  ForgeLabel,
+  ForgeProjectSummary
 } from '../../shared/types'
+import { getForgeBaseUrl, getForgeToken } from './config'
 
 const DEFAULT_TIMEOUT_MS = 15_000
-
-function envString(name: string): string | null {
-  const value = process.env[name]
-  return typeof value === 'string' && value.trim() ? value.trim() : null
-}
-
-function getForgeBaseUrl(): string | null {
-  const raw =
-    envString('ORCA_FORGE_API_URL') ?? envString('FORGE_API_URL') ?? envString('FORGE_BASE_URL')
-  return raw ? raw.replace(/\/+$/, '') : null
-}
-
-function getForgeToken(): string | null {
-  return (
-    envString('ORCA_FORGE_API_TOKEN') ?? envString('FORGE_API_TOKEN') ?? envString('FORGE_TOKEN')
-  )
-}
 
 function forgeHeaders(): HeadersInit {
   const token = getForgeToken()
@@ -37,7 +28,48 @@ function forgeHeaders(): HeadersInit {
   }
 }
 
-function normalizeStatus(value: unknown): ForgeIssueStatus {
+export class ForgeNotConfiguredError extends Error {
+  constructor() {
+    super('Forge is not configured. Set FORGE_BASE_URL and an API key in settings.')
+    this.name = 'ForgeNotConfiguredError'
+  }
+}
+
+export async function forgeTool(
+  tool: string,
+  input: Record<string, unknown> = {}
+): Promise<unknown> {
+  const baseUrl = getForgeBaseUrl()
+  if (!baseUrl) {
+    throw new ForgeNotConfiguredError()
+  }
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS)
+  try {
+    const res = await fetch(`${baseUrl}/api/mcp/${encodeURIComponent(tool)}`, {
+      method: 'POST',
+      headers: forgeHeaders(),
+      body: JSON.stringify(input),
+      signal: controller.signal
+    })
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      throw new Error(`Forge ${tool} request failed ${res.status}: ${body.slice(0, 200)}`)
+    }
+    if (res.status === 204) {
+      return null
+    }
+    const json = await res.json().catch(() => null)
+    if (json && typeof json === 'object' && 'data' in json) {
+      return (json as { data: unknown }).data
+    }
+    return json
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+export function normalizeStatus(value: unknown): ForgeIssueStatus {
   const obj = value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
   const category = String(obj.category ?? 'TODO').toUpperCase() as ForgeIssueStatusCategory
   return {
@@ -48,7 +80,7 @@ function normalizeStatus(value: unknown): ForgeIssueStatus {
   }
 }
 
-function normalizePriority(value: unknown): ForgeIssuePriority {
+export function normalizePriority(value: unknown): ForgeIssuePriority {
   const priority = String(value ?? 'NONE').toUpperCase()
   if (priority === 'LOW' || priority === 'MEDIUM' || priority === 'HIGH' || priority === 'URGENT') {
     return priority
@@ -56,9 +88,41 @@ function normalizePriority(value: unknown): ForgeIssuePriority {
   return 'NONE'
 }
 
-function issueIdentifier(issue: Record<string, unknown>): string {
+export function normalizeAgent(value: unknown): ForgeAgentSummary | null {
+  if (!value || typeof value !== 'object') {
+    return null
+  }
+  const obj = value as Record<string, unknown>
+  const id = typeof obj.id === 'string' && obj.id.trim() ? obj.id : null
+  if (!id) {
+    return null
+  }
+  return {
+    id,
+    name: typeof obj.name === 'string' ? obj.name : undefined,
+    profileKey: typeof obj.profileKey === 'string' ? obj.profileKey : undefined
+  }
+}
+
+export function normalizeProject(value: unknown): ForgeProjectSummary | null {
+  if (!value || typeof value !== 'object') {
+    return null
+  }
+  const obj = value as Record<string, unknown>
+  const id = typeof obj.id === 'string' && obj.id.trim() ? obj.id : null
+  if (!id) {
+    return null
+  }
+  return {
+    id,
+    key: typeof obj.key === 'string' ? obj.key : undefined,
+    name: String(obj.name ?? obj.key ?? 'Project')
+  }
+}
+
+export function issueIdentifier(issue: Record<string, unknown>): string {
   if (typeof issue.identifier === 'string' && issue.identifier.trim()) {
-    return issue.identifier
+    return issue.identifier.trim()
   }
   const project =
     issue.project && typeof issue.project === 'object'
@@ -69,7 +133,7 @@ function issueIdentifier(issue: Record<string, unknown>): string {
   return number !== undefined && number !== null ? `${key}-${number}` : String(issue.id ?? 'FORGE')
 }
 
-function normalizeIssue(value: unknown): ForgeIssue | null {
+export function normalizeIssue(value: unknown): ForgeIssue | null {
   if (!value || typeof value !== 'object') {
     return null
   }
@@ -79,14 +143,6 @@ function normalizeIssue(value: unknown): ForgeIssue | null {
   if (!id || !title) {
     return null
   }
-  const project =
-    issue.project && typeof issue.project === 'object'
-      ? (issue.project as Record<string, unknown>)
-      : null
-  const assignedAgent =
-    issue.assignedAgent && typeof issue.assignedAgent === 'object'
-      ? (issue.assignedAgent as Record<string, unknown>)
-      : null
   return {
     id,
     identifier: issueIdentifier(issue),
@@ -100,21 +156,8 @@ function normalizeIssue(value: unknown): ForgeIssue | null {
           : undefined,
     status: normalizeStatus(issue.status),
     priority: normalizePriority(issue.priority),
-    project: project
-      ? {
-          id: String(project.id ?? ''),
-          key: typeof project.key === 'string' ? project.key : undefined,
-          name: String(project.name ?? project.key ?? 'Project')
-        }
-      : null,
-    assignedAgent: assignedAgent
-      ? {
-          id: String(assignedAgent.id ?? ''),
-          name: typeof assignedAgent.name === 'string' ? assignedAgent.name : undefined,
-          profileKey:
-            typeof assignedAgent.profileKey === 'string' ? assignedAgent.profileKey : undefined
-        }
-      : null,
+    project: normalizeProject(issue.project),
+    assignedAgent: normalizeAgent(issue.assignedAgent),
     labels: Array.isArray(issue.labels)
       ? issue.labels.map((label) =>
           String(
@@ -130,127 +173,85 @@ function normalizeIssue(value: unknown): ForgeIssue | null {
   }
 }
 
-async function forgeTool(tool: string, input: Record<string, unknown> = {}): Promise<unknown> {
-  const baseUrl = getForgeBaseUrl()
-  if (!baseUrl) {
-    throw new Error('Forge is not configured. Set ORCA_FORGE_API_URL and ORCA_FORGE_API_TOKEN.')
+export function normalizeLabel(value: unknown): ForgeLabel | null {
+  if (!value || typeof value !== 'object') {
+    return null
   }
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS)
-  try {
-    const res = await fetch(`${baseUrl}/api/mcp/${encodeURIComponent(tool)}`, {
-      method: 'POST',
-      headers: forgeHeaders(),
-      body: JSON.stringify(input),
-      signal: controller.signal
-    })
-    if (!res.ok) {
-      const body = await res.text().catch(() => '')
-      throw new Error(`Forge ${tool} request failed ${res.status}: ${body.slice(0, 200)}`)
-    }
-    const json = await res.json()
-    if (json && typeof json === 'object' && 'data' in json) {
-      return (json as { data: unknown }).data
-    }
-    return json
-  } finally {
-    clearTimeout(timeout)
+  const obj = value as Record<string, unknown>
+  const id = typeof obj.id === 'string' && obj.id.trim() ? obj.id : null
+  if (!id) {
+    return null
+  }
+  return {
+    id,
+    name: String(obj.name ?? id),
+    color: typeof obj.color === 'string' ? obj.color : undefined,
+    description: typeof obj.description === 'string' ? obj.description : undefined
   }
 }
 
-function issueArray(json: unknown): ForgeIssue[] {
+export function normalizeComment(value: unknown): ForgeComment | null {
+  if (!value || typeof value !== 'object') {
+    return null
+  }
+  const obj = value as Record<string, unknown>
+  const id = typeof obj.id === 'string' && obj.id.trim() ? obj.id : null
+  if (!id) {
+    return null
+  }
+  const body =
+    typeof obj.body === 'string' ? obj.body : typeof obj.text === 'string' ? obj.text : ''
+  return {
+    id,
+    body,
+    author: normalizeAgent(obj.author),
+    createdAt: typeof obj.createdAt === 'string' ? obj.createdAt : new Date().toISOString(),
+    updatedAt: typeof obj.updatedAt === 'string' ? obj.updatedAt : undefined
+  }
+}
+
+function arrayFrom<T>(json: unknown, keys: string[], mapper: (v: unknown) => T | null): T[] {
+  let raw: unknown[] = []
+  if (Array.isArray(json)) {
+    raw = json
+  } else if (json && typeof json === 'object') {
+    const obj = json as Record<string, unknown>
+    for (const key of keys) {
+      const val = obj[key]
+      if (Array.isArray(val)) {
+        raw = val
+        break
+      }
+    }
+  }
+  return raw.map(mapper).filter((v): v is T => v !== null)
+}
+
+export function issueArray(json: unknown): ForgeIssue[] {
+  return arrayFrom(json, ['issues', 'data', 'results'], normalizeIssue)
+}
+
+export function statusArray(json: unknown): ForgeIssueStatus[] {
   const raw = Array.isArray(json)
     ? json
-    : json && typeof json === 'object' && Array.isArray((json as { issues?: unknown[] }).issues)
-      ? (json as { issues: unknown[] }).issues
-      : json && typeof json === 'object' && Array.isArray((json as { data?: unknown[] }).data)
-        ? (json as { data: unknown[] }).data
-        : []
-  return raw.map(normalizeIssue).filter((issue): issue is ForgeIssue => issue !== null)
+    : json && typeof json === 'object'
+      ? ((json as Record<string, unknown>).statuses ?? (json as Record<string, unknown>).data ?? [])
+      : []
+  return Array.isArray(raw) ? raw.map(normalizeStatus) : []
 }
 
-function statusArray(json: unknown): ForgeIssueStatus[] {
-  const raw = Array.isArray(json)
-    ? json
-    : json && typeof json === 'object' && Array.isArray((json as { statuses?: unknown[] }).statuses)
-      ? (json as { statuses: unknown[] }).statuses
-      : json && typeof json === 'object' && Array.isArray((json as { data?: unknown[] }).data)
-        ? (json as { data: unknown[] }).data
-        : []
-  return raw.map(normalizeStatus)
+export function projectArray(json: unknown): ForgeProjectSummary[] {
+  return arrayFrom(json, ['projects', 'data', 'results'], normalizeProject)
 }
 
-export async function getStatus(): Promise<ForgeConnectionStatus> {
-  const baseUrl = getForgeBaseUrl()
-  if (!baseUrl) {
-    return { connected: false, baseUrl: null, error: 'Forge API URL is not configured' }
-  }
-  try {
-    const json = await forgeTool('workspace.get')
-    const workspace = json && typeof json === 'object' ? (json as Record<string, unknown>) : {}
-    return {
-      connected: true,
-      baseUrl,
-      workspaceName: typeof workspace.name === 'string' ? workspace.name : null
-    }
-  } catch (error) {
-    return {
-      connected: false,
-      baseUrl,
-      error: error instanceof Error ? error.message : String(error)
-    }
-  }
+export function labelArray(json: unknown): ForgeLabel[] {
+  return arrayFrom(json, ['labels', 'data', 'results'], normalizeLabel)
 }
 
-export async function listIssues(
-  filter: ForgeListFilter = 'active',
-  limit = 50
-): Promise<ForgeIssue[]> {
-  if (filter === 'assigned') {
-    const json = await forgeTool('issues.assigned', { limit, includeDone: false })
-    return issueArray(json)
-  }
-
-  const input: Record<string, unknown> = { limit }
-  if (filter === 'done') {
-    input.includeDone = true
-    input.statusCategories = ['DONE']
-  } else if (filter === 'all') {
-    input.includeDone = true
-  } else {
-    // Forge's MCP surface does not expose a "created by me" filter yet. Keep
-    // that tab useful by showing the active queue instead of calling a fake API.
-    input.statusCategories = ['BACKLOG', 'TODO', 'IN_PROGRESS', 'IN_REVIEW']
-  }
-
-  const json = await forgeTool('issues.list', input)
-  return issueArray(json)
+export function commentArray(json: unknown): ForgeComment[] {
+  return arrayFrom(json, ['comments', 'data', 'results'], normalizeComment)
 }
 
-export async function searchIssues(query: string, limit = 50): Promise<ForgeIssue[]> {
-  const json = await forgeTool('issues.list', { query, limit, includeDone: true })
-  return issueArray(json)
-}
-
-export async function listStatuses(): Promise<ForgeIssueStatus[]> {
-  const json = await forgeTool('statuses.list')
-  return statusArray(json)
-}
-
-export async function updateIssue(
-  id: string,
-  updates: ForgeIssueUpdate
-): Promise<ForgeMutationResult> {
-  try {
-    const { statusId, ...patch } = updates
-    if (Object.keys(patch).length > 0) {
-      await forgeTool('issues.update', { id, ...patch })
-    }
-    if (statusId) {
-      await forgeTool('issues.transition', { id, statusId })
-    }
-    return { ok: true }
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) }
-  }
+export function agentArray(json: unknown): ForgeAgentSummary[] {
+  return arrayFrom(json, ['agents', 'members', 'data', 'results'], normalizeAgent)
 }

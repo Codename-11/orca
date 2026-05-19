@@ -921,15 +921,23 @@ export type GitHubOwnerRepo = GitHubRepositoryIdentity
 // upstream feature). Re-exported here so existing call sites
 // (`from '../shared/types'`) keep working without changes.
 export type {
+  ForgeAgentSummary,
+  ForgeComment,
+  ForgeCommentCreateResult,
+  ForgeConfigSettings,
   ForgeConnectionStatus,
   ForgeIssue,
+  ForgeIssueCreate,
+  ForgeIssueCreateResult,
   ForgeIssuePriority,
   ForgeIssueStatus,
   ForgeIssueStatusCategory,
   ForgeIssueUpdate,
+  ForgeLabel,
   ForgeListFilter,
   ForgeMutationResult,
-  ForgeProjectSummary
+  ForgeProjectSummary,
+  ForgeSaveConfigArgs
 } from './forge-types'
 
 export type {

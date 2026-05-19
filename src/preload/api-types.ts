@@ -67,12 +67,21 @@ import type {
   LinearMember,
   LinearProjectSummary,
   LinearTeam,
+  ForgeAgentSummary,
+  ForgeComment,
+  ForgeCommentCreateResult,
+  ForgeConfigSettings,
   ForgeConnectionStatus,
   ForgeIssue,
+  ForgeIssueCreate,
+  ForgeIssueCreateResult,
   ForgeIssueStatus,
   ForgeIssueUpdate,
+  ForgeLabel,
   ForgeListFilter,
   ForgeMutationResult,
+  ForgeProjectSummary,
+  ForgeSaveConfigArgs,
   MarkdownDocument,
   FloatingTerminalCwdRequest,
   GitHubIssueUpdate,
@@ -1116,10 +1125,21 @@ export type PreloadApi = {
   }
   forge: {
     status: () => Promise<ForgeConnectionStatus>
+    getConfig: () => Promise<ForgeConfigSettings>
+    saveConfig: (
+      args: ForgeSaveConfigArgs
+    ) => Promise<{ ok: true; config: ForgeConfigSettings } | { ok: false; error: string }>
+    clearConfig: () => Promise<{ ok: true; config: ForgeConfigSettings }>
     listStatuses: () => Promise<ForgeIssueStatus[]>
+    listProjects: () => Promise<ForgeProjectSummary[]>
+    listLabels: () => Promise<ForgeLabel[]>
+    listAgents: () => Promise<ForgeAgentSummary[]>
     searchIssues: (args: { query: string; limit?: number }) => Promise<ForgeIssue[]>
     listIssues: (args?: { filter?: ForgeListFilter; limit?: number }) => Promise<ForgeIssue[]>
+    listComments: (args: { issueId: string }) => Promise<ForgeComment[]>
     updateIssue: (args: { id: string; updates: ForgeIssueUpdate }) => Promise<ForgeMutationResult>
+    createIssue: (args: { input: ForgeIssueCreate }) => Promise<ForgeIssueCreateResult>
+    createComment: (args: { issueId: string; body: string }) => Promise<ForgeCommentCreateResult>
   }
   starNag: {
     onShow: (callback: () => void) => () => void
