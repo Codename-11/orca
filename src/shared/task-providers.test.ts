@@ -14,7 +14,7 @@ describe('task providers', () => {
   })
 
   it('falls back to all providers when none are visible', () => {
-    expect(normalizeVisibleTaskProviders([])).toEqual(['github', 'gitlab', 'linear'])
+    expect(normalizeVisibleTaskProviders([])).toEqual(['github', 'gitlab', 'linear', 'forge'])
   })
 
   it('resolves hidden preferred providers to the first visible provider', () => {
@@ -23,9 +23,10 @@ describe('task providers', () => {
 
   it('filters runtime-unavailable providers without changing preference normalization', () => {
     expect(
-      filterAvailableTaskProviders(['github', 'gitlab', 'linear'], {
+      filterAvailableTaskProviders(['github', 'gitlab', 'linear', 'forge'], {
         gitlabInstalled: false,
-        linearConnected: true
+        linearConnected: true,
+        forgeConnected: false
       })
     ).toEqual(['github', 'linear'])
   })

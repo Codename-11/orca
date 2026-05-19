@@ -4,24 +4,32 @@ import { pathToFileURL } from 'node:url'
 
 const API_VERSION = '2022-11-28'
 
+function envString(name, fallback) {
+  const value = process.env[name]
+  return typeof value === 'string' && value.trim() ? value.trim() : fallback
+}
+
 export function getRequiredReleaseAssetNames(tag) {
   const version = tag.replace(/^v/i, '')
+  const artifactBaseName = envString('ORCA_ARTIFACT_BASENAME', 'orca')
+  const linuxDebPackageName = envString('ORCA_LINUX_DEB_PACKAGE_NAME', 'orca-ide')
+  const productName = envString('ORCA_PRODUCT_NAME', 'Orca')
   return [
     'latest-linux.yml',
     'latest-mac.yml',
     'latest.yml',
-    'orca-linux.AppImage',
-    `orca-ide_${version}_amd64.deb`,
-    'orca-windows-setup.exe',
-    'orca-windows-setup.exe.blockmap',
-    `Orca-${version}-mac.zip`,
-    `Orca-${version}-mac.zip.blockmap`,
-    `Orca-${version}-arm64-mac.zip`,
-    `Orca-${version}-arm64-mac.zip.blockmap`,
-    'orca-macos-x64.dmg',
-    'orca-macos-x64.dmg.blockmap',
-    'orca-macos-arm64.dmg',
-    'orca-macos-arm64.dmg.blockmap'
+    `${artifactBaseName}-linux.AppImage`,
+    `${linuxDebPackageName}_${version}_amd64.deb`,
+    `${artifactBaseName}-windows-setup.exe`,
+    `${artifactBaseName}-windows-setup.exe.blockmap`,
+    `${productName}-${version}-mac.zip`,
+    `${productName}-${version}-mac.zip.blockmap`,
+    `${productName}-${version}-arm64-mac.zip`,
+    `${productName}-${version}-arm64-mac.zip.blockmap`,
+    `${artifactBaseName}-macos-x64.dmg`,
+    `${artifactBaseName}-macos-x64.dmg.blockmap`,
+    `${artifactBaseName}-macos-arm64.dmg`,
+    `${artifactBaseName}-macos-arm64.dmg.blockmap`
   ]
 }
 
