@@ -6,6 +6,24 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-19 — Axiom updater feed test env fix
+
+Patched `src/main/updater-prerelease-feed.test.ts` so its mocked GitHub atom
+feed and manifest expectations honor `ORCA_UPDATE_OWNER` / `ORCA_UPDATE_REPO`.
+The Axiom release workflow sets those env vars to the fork repo, while the test
+fixtures were still hardcoded to upstream `stablyai/orca`, causing the feed tag
+regex to find no parseable releases in CI.
+
+Verification:
+- `ORCA_UPDATE_OWNER=Codename-11 ORCA_UPDATE_REPO=orca pnpm exec vitest run --config config/vitest.config.ts src/main/updater-prerelease-feed.test.ts --reporter=verbose` — 16 / 16 pass.
+- `pnpm exec vitest run --config config/vitest.config.ts src/main/updater-prerelease-feed.test.ts --reporter=verbose` — 16 / 16 pass.
+- `pnpm exec oxlint src/main/updater-prerelease-feed.test.ts` — 0 errors.
+- `pnpm exec oxfmt --check src/main/updater-prerelease-feed.test.ts` — clean.
+- `pnpm run lint` — 0 errors.
+- `pnpm run typecheck` — clean.
+
+---
+
 ## 2026-05-19 — Forge Connect settings UI
 
 Added a first-pass Forge Connect surface under Settings → Task Sources. The

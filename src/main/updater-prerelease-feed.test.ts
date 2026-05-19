@@ -10,11 +10,23 @@ vi.mock('electron', () => ({
   net: { fetch: netFetchMock }
 }))
 
+function getTestUpdateRepository(): { owner: string; repo: string } {
+  return {
+    owner: process.env.ORCA_UPDATE_OWNER?.trim() || 'stablyai',
+    repo: process.env.ORCA_UPDATE_REPO?.trim() || 'orca'
+  }
+}
+
+function getTestGitHubBaseUrl(): string {
+  const { owner, repo } = getTestUpdateRepository()
+  return `https://github.com/${owner}/${repo}`
+}
+
 function buildAtomFeed(tags: string[]): string {
   const entries = tags
     .map(
       (tag) =>
-        `<entry><link rel="alternate" type="text/html" href="https://github.com/stablyai/orca/releases/tag/${tag}"/><title>${tag}</title></entry>`
+        `<entry><link rel="alternate" type="text/html" href="${getTestGitHubBaseUrl()}/releases/tag/${tag}"/><title>${tag}</title></entry>`
     )
     .join('')
   return `<?xml version="1.0" encoding="UTF-8"?><feed>${entries}</feed>`
@@ -23,7 +35,7 @@ function buildAtomFeed(tags: string[]): string {
 function respondWithAtom(tags: string[], missingManifestTags: string[] = []): void {
   const missingManifests = new Set(missingManifestTags)
   netFetchMock.mockImplementation((url: string) => {
-    if (url === 'https://github.com/stablyai/orca/releases.atom') {
+    if (url === `${getTestGitHubBaseUrl()}/releases.atom`) {
       return Promise.resolve({
         ok: true,
         text: () => Promise.resolve(buildAtomFeed(tags))
@@ -85,7 +97,7 @@ describe('fetchNewerReleaseTag', () => {
       const manifestUrls: string[] = []
 
       netFetchMock.mockImplementation((url: string) => {
-        if (url === 'https://github.com/stablyai/orca/releases.atom') {
+        if (url === `${getTestGitHubBaseUrl()}/releases.atom`) {
           return Promise.resolve({
             ok: true,
             text: () => Promise.resolve(buildAtomFeed(['v1.4.1']))
@@ -103,7 +115,7 @@ describe('fetchNewerReleaseTag', () => {
 
       expect(await fetchNewerReleaseTag('1.4.0')).toBe('v1.4.1')
       expect(manifestUrls).toEqual([
-        `https://github.com/stablyai/orca/releases/download/v1.4.1/${manifestName}`
+        `${getTestGitHubBaseUrl()}/releases/download/v1.4.1/${manifestName}`
       ])
     }
   )
@@ -187,7 +199,7 @@ describe('fetchNewerReleaseTag', () => {
     const manifestResolvers: (() => void)[] = []
 
     netFetchMock.mockImplementation((url: string) => {
-      if (url === 'https://github.com/stablyai/orca/releases.atom') {
+      if (url === `${getTestGitHubBaseUrl()}/releases.atom`) {
         return Promise.resolve({
           ok: true,
           text: () => Promise.resolve(buildAtomFeed(feedTags))
