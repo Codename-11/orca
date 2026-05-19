@@ -107,14 +107,17 @@ async function main() {
   await setOutput('upstream_url', release.html_url || `https://github.com/${upstreamRepo}/releases/tag/${tag}`)
   await setOutput('upstream_prerelease', release.prerelease ? 'true' : 'false')
 
-  if (existing) {
+  if (existing && existing.draft !== true) {
     await setOutput('should_release', 'false')
     await setOutput('reason', `fork_release_exists:${tag}`)
     return
   }
 
   await setOutput('should_release', 'true')
-  await setOutput('reason', `new_upstream_release:${tag}`)
+  await setOutput(
+    'reason',
+    existing?.draft === true ? `fork_draft_release_exists:${tag}` : `new_upstream_release:${tag}`
+  )
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

@@ -22,6 +22,9 @@ const appId = envString('ORCA_APP_ID', 'com.stablyai.orca')
 const productName = envString('ORCA_PRODUCT_NAME', 'Orca')
 const windowsExecutableName = envString('ORCA_WINDOWS_EXECUTABLE_NAME', productName)
 const artifactBaseName = envString('ORCA_ARTIFACT_BASENAME', 'orca')
+const electronBuilderArchMacro = '${arch}'
+const electronBuilderExtMacro = '${ext}'
+const electronBuilderVersionMacro = '${version}'
 const linuxExecutableName = envString('ORCA_LINUX_EXECUTABLE_NAME', 'orca-ide')
 const linuxDebPackageName = envString('ORCA_LINUX_DEB_PACKAGE_NAME', linuxExecutableName)
 const linuxMaintainer = envString('ORCA_LINUX_MAINTAINER', 'stablyai')
@@ -132,7 +135,9 @@ module.exports = {
     ]
   },
   nsis: {
-    artifactName: `${artifactBaseName}-windows-setup.${ext}`,
+    // Why: these names intentionally keep electron-builder's `${ext}` macro as
+    // a literal while still allowing the fork to override the basename.
+    artifactName: `${artifactBaseName}-windows-setup.${electronBuilderExtMacro}`,
     shortcutName: '${productName}',
     uninstallDisplayName: '${productName}',
     createDesktopShortcut: 'always'
@@ -199,7 +204,7 @@ module.exports = {
   // silently downgrading to ad-hoc artifacts that look shippable in CI logs.
   forceCodeSigning: isMacRelease,
   dmg: {
-    artifactName: `${artifactBaseName}-macos-${arch}.${ext}`
+    artifactName: `${artifactBaseName}-macos-${electronBuilderArchMacro}.${electronBuilderExtMacro}`
   },
   linux: {
     // Why: Ubuntu 26 ships GNOME Orca as the `orca` package and /usr/bin/orca.
@@ -229,11 +234,11 @@ module.exports = {
     category: 'Utility'
   },
   appImage: {
-    artifactName: `${artifactBaseName}-linux.${ext}`
+    artifactName: `${artifactBaseName}-linux.${electronBuilderExtMacro}`
   },
   deb: {
     packageName: linuxDebPackageName,
-    artifactName: `${linuxDebPackageName}_${version}_${arch}.${ext}`,
+    artifactName: `${linuxDebPackageName}_${electronBuilderVersionMacro}_${electronBuilderArchMacro}.${electronBuilderExtMacro}`,
     depends: ['python3', 'python3-gi', 'gir1.2-atspi-2.0', 'at-spi2-core', 'xdotool', 'xclip']
   },
   // Why: must be true so that electron-builder rebuilds native modules

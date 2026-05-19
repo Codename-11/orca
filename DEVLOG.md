@@ -6,6 +6,26 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-19 — Electron-builder artifact macro fix
+
+The rerun got through sync and Android started, but the Windows electron-builder
+step failed while loading `config/electron-builder.config.cjs`: the Axiom
+artifact-name templates used JavaScript interpolation for electron-builder
+macros (`${ext}`, `${arch}`, `${version}`), so Node tried to resolve undefined
+variables before electron-builder could see the config. Added literal macro
+constants and kept the fork basename interpolation outside those macros.
+
+The failed rerun had already created a draft `v1.4.9` release shell, so the
+release detector now treats existing draft releases as resumable work and the
+release-shell step edits an existing draft instead of failing on recreate.
+
+Verification:
+- RED: `ORCA_ARTIFACT_BASENAME=axiom-orca node -e "require('./config/electron-builder.config.cjs')"` failed with `ReferenceError: ext is not defined`.
+- GREEN: required `config/electron-builder.config.cjs` and printed `axiom-orca-windows-setup.${ext}`, `axiom-orca-macos-${arch}.${ext}`, `axiom-orca-linux.${ext}`, and `orca-ide_${version}_${arch}.${ext}`.
+- `node --check config/electron-builder.config.cjs`.
+
+---
+
 ## 2026-05-19 — Axiom release sync rerun fixes
 
 The second `Axiom Upstream Sync Release` attempt passed the updater feed tests
