@@ -1875,6 +1875,7 @@ export default function TaskPage(): React.JSX.Element {
   const [forgeUpdatingIssueIds, setForgeUpdatingIssueIds] = useState<ReadonlySet<string>>(
     () => new Set()
   )
+  const [forgeViewMode, setForgeViewMode] = useState<'list' | 'board'>('list')
 
   const [taskSearchInput, setTaskSearchInput] = useState(initialTaskQuery)
   const [appliedTaskSearch, setAppliedTaskSearch] = useState(initialTaskQuery)
@@ -3379,6 +3380,54 @@ export default function TaskPage(): React.JSX.Element {
     [settings]
   )
 
+  // Why: group Forge issues into board columns. statuses.list ordering wins
+  // when available; otherwise fall back to canonical category order so the
+  // board still renders coherently before the metadata fetch resolves.
+  const forgeBoardSections = useMemo(() => {
+    const categoryOrder: ForgeIssueStatus['category'][] = [
+      'BACKLOG',
+      'TODO',
+      'IN_PROGRESS',
+      'IN_REVIEW',
+      'DONE',
+      'CANCELED'
+    ]
+    const orderedStatuses =
+      forgeStatuses.length > 0
+        ? forgeStatuses
+        : (categoryOrder.map((category) => ({
+            id: category.toLowerCase(),
+            name: category.replace('_', ' '),
+            category
+          })) as ForgeIssueStatus[])
+
+    const byId = new Map<string, { status: ForgeIssueStatus; issues: ForgeIssue[] }>()
+    for (const status of orderedStatuses) {
+      byId.set(status.id, { status, issues: [] })
+    }
+    const fallbackByCategory = new Map<ForgeIssueStatus['category'], ForgeIssueStatus>()
+    for (const status of orderedStatuses) {
+      if (!fallbackByCategory.has(status.category)) {
+        fallbackByCategory.set(status.category, status)
+      }
+    }
+    for (const issue of forgeIssues) {
+      let bucket = byId.get(issue.status.id)
+      if (!bucket) {
+        const fallback = fallbackByCategory.get(issue.status.category)
+        if (fallback) {
+          bucket = byId.get(fallback.id)
+        }
+      }
+      if (!bucket) {
+        bucket = { status: issue.status, issues: [] }
+        byId.set(issue.status.id, bucket)
+      }
+      bucket.issues.push(issue)
+    }
+    return Array.from(byId.values()).filter((section) => section.issues.length > 0 || true)
+  }, [forgeIssues, forgeStatuses])
+
   // Why: debounce the Linear search input so we don't fire a request on every
   // keystroke — matches the 300ms cadence used for GitHub search.
   useEffect(() => {
@@ -4002,27 +4051,55 @@ export default function TaskPage(): React.JSX.Element {
                           )
                         })}
                       </div>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            onClick={() => setForgeRefreshNonce((n) => n + 1)}
-                            disabled={forgeLoading}
-                            aria-label="Refresh Forge issues"
-                            className="border-border/50 bg-transparent hover:bg-muted/50 backdrop-blur-md supports-[backdrop-filter]:bg-transparent"
-                          >
-                            {forgeLoading ? (
-                              <LoaderCircle className="size-4 animate-spin" />
-                            ) : (
-                              <RefreshCw className="size-4" />
-                            )}
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="bottom" sideOffset={6}>
-                          Refresh Forge issues
-                        </TooltipContent>
-                      </Tooltip>
+                      <div className="flex items-center gap-2">
+                        <div className="flex rounded-md border border-border/50 bg-transparent p-0.5">
+                          {[
+                            { id: 'list' as const, label: 'List', Icon: List },
+                            { id: 'board' as const, label: 'Board', Icon: LayoutGrid }
+                          ].map(({ id, label, Icon }) => {
+                            const active = forgeViewMode === id
+                            return (
+                              <button
+                                key={id}
+                                type="button"
+                                onClick={() => setForgeViewMode(id)}
+                                aria-pressed={active}
+                                aria-label={`${label} view`}
+                                className={cn(
+                                  'flex items-center gap-1.5 rounded px-2 py-1 text-xs transition',
+                                  active
+                                    ? 'bg-foreground/90 text-background'
+                                    : 'text-foreground hover:bg-muted/50'
+                                )}
+                              >
+                                <Icon className="size-3.5" />
+                                <span className="hidden sm:inline">{label}</span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              onClick={() => setForgeRefreshNonce((n) => n + 1)}
+                              disabled={forgeLoading}
+                              aria-label="Refresh Forge issues"
+                              className="border-border/50 bg-transparent hover:bg-muted/50 backdrop-blur-md supports-[backdrop-filter]:bg-transparent"
+                            >
+                              {forgeLoading ? (
+                                <LoaderCircle className="size-4 animate-spin" />
+                              ) : (
+                                <RefreshCw className="size-4" />
+                              )}
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom" sideOffset={6}>
+                            Refresh Forge issues
+                          </TooltipContent>
+                        </Tooltip>
+                      </div>
                     </div>
                     <div className="mt-3 flex min-w-0 items-center gap-3">
                       <div className="relative min-w-0 flex-1 basis-64">
@@ -4806,16 +4883,156 @@ export default function TaskPage(): React.JSX.Element {
                 </div>
                 <div className="text-[11px] text-muted-foreground">{forgeIssues.length} shown</div>
               </div>
-              <div className="grid h-8 flex-none grid-cols-[96px_minmax(0,3fr)_140px_130px_110px_86px] items-center gap-3 border-b border-border/50 bg-muted/25 px-3 text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground max-lg:hidden">
-                <span>Key</span>
-                <span>Issue</span>
-                <span>Status</span>
-                <span>Priority</span>
-                <span>Project</span>
-                <span />
-              </div>
+              {forgeViewMode === 'list' ? (
+                <div className="grid h-8 flex-none grid-cols-[96px_minmax(0,3fr)_140px_130px_110px_86px] items-center gap-3 border-b border-border/50 bg-muted/25 px-3 text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground max-lg:hidden">
+                  <span>Key</span>
+                  <span>Issue</span>
+                  <span>Status</span>
+                  <span>Priority</span>
+                  <span>Project</span>
+                  <span />
+                </div>
+              ) : null}
+              {forgeViewMode === 'board' ? (
+                <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden">
+                  {forgeError ? (
+                    <div className="border-b border-border px-4 py-4 text-sm text-destructive">
+                      {forgeError}
+                    </div>
+                  ) : null}
+                  {!forgeError && forgeBoardSections.length === 0 ? (
+                    <div className="px-4 py-10 text-center text-sm text-muted-foreground">
+                      No statuses available.
+                    </div>
+                  ) : (
+                    <div className="flex h-full min-w-full gap-3 p-3">
+                      {forgeBoardSections.map(({ status, issues }) => (
+                        <div
+                          key={status.id}
+                          className="flex h-full w-72 min-w-72 flex-col rounded-md border border-border/50 bg-muted/30"
+                        >
+                          <div className="flex flex-none items-center justify-between gap-2 border-b border-border/50 px-3 py-2">
+                            <div className="flex min-w-0 items-center gap-2">
+                              {status.color ? (
+                                <span
+                                  className="size-2 rounded-full"
+                                  style={{ backgroundColor: status.color }}
+                                />
+                              ) : null}
+                              <span className="truncate text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                                {status.name}
+                              </span>
+                            </div>
+                            <span className="text-[11px] text-muted-foreground">
+                              {issues.length}
+                            </span>
+                          </div>
+                          <div className="flex-1 overflow-y-auto p-2 scrollbar-sleek">
+                            {issues.length === 0 ? (
+                              <div className="px-2 py-6 text-center text-[11px] text-muted-foreground/70">
+                                Empty
+                              </div>
+                            ) : (
+                              <div className="flex flex-col gap-2">
+                                {issues.map((issue) => {
+                                  const updating = forgeUpdatingIssueIds.has(issue.id)
+                                  const otherStatuses = forgeStatuses.filter(
+                                    (candidate) => candidate.id !== issue.status.id
+                                  )
+                                  return (
+                                    <div
+                                      key={issue.id}
+                                      role="button"
+                                      tabIndex={0}
+                                      onClick={() => handleUseForgeItem(issue)}
+                                      onKeyDown={(event) => {
+                                        if (event.key === 'Enter' || event.key === ' ') {
+                                          event.preventDefault()
+                                          handleUseForgeItem(issue)
+                                        }
+                                      }}
+                                      className={cn(
+                                        'group/board-card flex cursor-pointer flex-col gap-1.5 rounded-md border border-border/40 bg-background p-2 text-left shadow-sm transition hover:border-border focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                                        updating && 'cursor-wait opacity-70'
+                                      )}
+                                    >
+                                      <div className="flex items-center justify-between gap-2">
+                                        <span className="font-mono text-[10px] text-muted-foreground">
+                                          {issue.identifier}
+                                        </span>
+                                        {issue.url ? (
+                                          <button
+                                            type="button"
+                                            onClick={(event) => {
+                                              event.stopPropagation()
+                                              window.api.shell.openUrl(issue.url!)
+                                            }}
+                                            aria-label={`Open ${issue.identifier} in Forge`}
+                                            className="text-muted-foreground opacity-0 transition group-hover/board-card:opacity-100 hover:text-foreground"
+                                          >
+                                            <ExternalLink className="size-3" />
+                                          </button>
+                                        ) : null}
+                                      </div>
+                                      <h4 className="text-[12px] font-medium leading-tight text-foreground">
+                                        {issue.title}
+                                      </h4>
+                                      <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                                        <span className="truncate">
+                                          {issue.project?.name ?? ''}
+                                        </span>
+                                        <DropdownMenu>
+                                          <DropdownMenuTrigger asChild>
+                                            <button
+                                              type="button"
+                                              onClick={(event) => event.stopPropagation()}
+                                              disabled={updating || otherStatuses.length === 0}
+                                              className="rounded border border-border/40 px-1.5 py-0.5 text-[10px] hover:bg-muted/60 disabled:opacity-50"
+                                            >
+                                              {updating ? (
+                                                <LoaderCircle className="inline size-2.5 animate-spin" />
+                                              ) : (
+                                                issue.priority
+                                              )}
+                                            </button>
+                                          </DropdownMenuTrigger>
+                                          <DropdownMenuContent
+                                            align="end"
+                                            className="w-40"
+                                            onClick={(event) => event.stopPropagation()}
+                                          >
+                                            <DropdownMenuLabel>Move to</DropdownMenuLabel>
+                                            {otherStatuses.map((target) => (
+                                              <DropdownMenuItem
+                                                key={target.id}
+                                                onClick={(event) => {
+                                                  event.stopPropagation()
+                                                  handleForgeStatusUpdate(issue, target)
+                                                }}
+                                              >
+                                                {target.name}
+                                              </DropdownMenuItem>
+                                            ))}
+                                          </DropdownMenuContent>
+                                        </DropdownMenu>
+                                      </div>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : null}
               <div
-                className="min-h-0 flex-1 overflow-y-auto scrollbar-sleek"
+                className={cn(
+                  'min-h-0 flex-1 overflow-y-auto scrollbar-sleek',
+                  forgeViewMode === 'board' && 'hidden'
+                )}
                 style={{ scrollbarGutter: 'stable' }}
               >
                 {forgeError ? (

@@ -26,7 +26,9 @@ export type RuntimeForgeSettings =
 const READ_TIMEOUT_MS = 15_000
 const WRITE_TIMEOUT_MS = 30_000
 
-function remoteTarget(settings: RuntimeForgeSettings): { kind: 'environment'; id: string } | null {
+function remoteTarget(
+  settings: RuntimeForgeSettings
+): { kind: 'environment'; environmentId: string } | null {
   const target = getActiveRuntimeTarget(settings)
   return target.kind === 'environment' ? target : null
 }
