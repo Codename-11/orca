@@ -6,7 +6,7 @@ merges into `axiom/deploy`.
 
 ---
 
-## 2026-05-19 — Axiom release shell target fix
+## 2026-05-19 — Axiom release sync rerun fixes
 
 The second `Axiom Upstream Sync Release` attempt passed the updater feed tests
 but failed while creating the draft GitHub release: `gh release create` sent
@@ -14,8 +14,16 @@ but failed while creating the draft GitHub release: `gh release create` sent
 tag itself as `--target` after already pushing that tag. Removed `--target` so
 GitHub attaches the draft release to the existing tag.
 
+The next rerun then failed earlier in the upstream sync step because the fork
+already had an Axiom `v1.4.9` tag pointing at the deploy merge while upstream's
+`v1.4.9` tag points at the upstream release commit. The sync script only needs
+the upstream branch ref, so it now fetches upstream with `--no-tags` and leaves
+fork release tags to the origin fetch / create-tag step.
+
 Verification:
 - `python3` + PyYAML parsed `.github/workflows/axiom-upstream-sync-release.yml`.
+- `git fetch upstream main --no-tags` succeeds with the conflicting local `v1.4.9` tag present.
+- `git fetch origin axiom/deploy --tags` succeeds.
 - `ORCA_UPDATE_OWNER=Codename-11 ORCA_UPDATE_REPO=orca pnpm vitest run src/main/updater-prerelease-feed.test.ts --reporter=dot` — 16 / 16 pass.
 
 ---

@@ -70,7 +70,9 @@ function main() {
     runInherited('git', ['remote', 'add', 'upstream', upstreamRepo])
   }
   runInherited('git', ['remote', 'set-url', 'upstream', upstreamRepo])
-  runInherited('git', ['fetch', 'upstream', upstreamBranch, '--tags'])
+  // Why: the fork reuses upstream version tags for Axiom releases, so fetching
+  // upstream tags can fail when the same tag points at the fork's deploy merge.
+  runInherited('git', ['fetch', 'upstream', upstreamBranch, '--no-tags'])
   runInherited('git', ['fetch', 'origin', deployBranch, '--tags'])
 
   if (branchExists(`refs/remotes/origin/${deployBranch}`)) {
