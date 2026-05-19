@@ -390,9 +390,11 @@ function inferProtocol(port: number): 'http' | 'https' | 'unknown' {
   return 'unknown'
 }
 
-function isContainerProcess(port: Pick<RawListeningPort, 'processName' | 'commandLine'>): boolean {
+export function isContainerProcess(
+  port: Pick<RawListeningPort, 'processName' | 'commandLine'>
+): boolean {
   const haystack = `${port.processName ?? ''} ${port.commandLine ?? ''}`.toLowerCase()
-  return /\b(docker|containerd|com\.docker|podman|colima)\b/.test(haystack)
+  return /\b(com\.[\w.-]+\.backend|com\.container\w*|container\w*)\b/.test(haystack)
 }
 
 function toOwner(

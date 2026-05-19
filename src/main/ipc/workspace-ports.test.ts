@@ -117,6 +117,28 @@ describe('registerWorkspacePortHandlers', () => {
     await expect(Promise.all([first, second])).resolves.toEqual([EMPTY_SCAN, EMPTY_SCAN])
   })
 
+  it('handles malformed renderer scan input as an unfiltered local scan', async () => {
+    const store = makeStore()
+    registerWorkspacePortHandlers(store as never)
+
+    await handlers.get('workspacePorts:scan')?.(null, undefined)
+
+    expect(scanWorkspacePortsMock).toHaveBeenCalledWith([
+      {
+        id: 'local-repo::/workspace/repo',
+        repoId: 'local-repo',
+        displayName: 'Primary',
+        path: '/workspace/repo'
+      },
+      {
+        id: 'other-repo::/workspace/other',
+        repoId: 'other-repo',
+        displayName: 'Other',
+        path: '/workspace/other'
+      }
+    ])
+  })
+
   it('stops a process only after the current scan proves the pid owns a workspace port', async () => {
     const store = makeStore()
     const port = workspacePort({ pid: 1234, port: 5173 })
@@ -183,6 +205,17 @@ describe('registerWorkspacePortHandlers', () => {
     })
 
     expect(result).toEqual({ ok: false, reason: 'The port is no longer listening.' })
+    expect(processKillMock).not.toHaveBeenCalled()
+  })
+
+  it('refuses malformed renderer kill input without throwing', async () => {
+    const store = makeStore()
+    registerWorkspacePortHandlers(store as never)
+
+    const result = await handlers.get('workspacePorts:kill')?.(null, { pid: '1234', port: 5173 })
+
+    expect(result).toEqual({ ok: false, reason: 'Invalid process or port.' })
+    expect(scanWorkspacePortsMock).not.toHaveBeenCalled()
     expect(processKillMock).not.toHaveBeenCalled()
   })
 })

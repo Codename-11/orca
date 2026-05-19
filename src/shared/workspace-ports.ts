@@ -57,7 +57,7 @@ export type WorkspacePortKillResult =
     }
 
 export type WorkspacePortScanResult = {
-  platform: NodeJS.Platform
+  platform: NodeJS.Platform | 'unknown'
   scannedAt: number
   ports: WorkspacePort[]
   unavailableReason?: string

@@ -19,6 +19,13 @@ import { useAppStore } from '@/store'
 import { useActiveWorktree, useRepoById } from '@/store/selectors'
 import { cn } from '@/lib/utils'
 import {
+  callRuntimeRpc,
+  getActiveRuntimeTarget,
+  RuntimeRpcCallError,
+  type RuntimeClientTarget
+} from '@/runtime/runtime-rpc-client'
+import { activateAndRevealWorktree } from '@/lib/worktree-activation'
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -36,7 +43,11 @@ import {
   ContextMenuTrigger
 } from '@/components/ui/context-menu'
 import type { PortForwardEntry, DetectedPort } from '../../../../shared/ssh-types'
-import type { WorkspacePort, WorkspacePortScanResult } from '../../../../shared/workspace-ports'
+import type {
+  WorkspacePort,
+  WorkspacePortKillResult,
+  WorkspacePortScanResult
+} from '../../../../shared/workspace-ports'
 
 const LOCAL_PORT_SCAN_INTERVAL_MS = 5_000
 const LOCAL_PORT_MENU_CONTENT_CLASS =
@@ -54,7 +65,6 @@ function safeLocalPort(remotePort: number): number {
   return remotePort
 }
 
-const HTTP_PORTS = new Set([80, 443, 3000, 3001, 4200, 5000, 5173, 5174, 8000, 8080, 8443, 8888])
 const HTTPS_PORTS = new Set([443, 8443])
 
 // Why: the scanner reports numeric addresses (127.0.0.1, 0.0.0.0, ::1, ::)
@@ -79,8 +89,105 @@ function addressForPort(port: WorkspacePort): string {
   return `${hostForLocalAction(port.connectHost)}:${port.port}`
 }
 
-function browserUrlForPort(port: WorkspacePort): string {
-  return `${port.protocol}://${addressForPort(port)}`
+export function browserUrlForPort(port: WorkspacePort): string {
+  const protocol = port.protocol === 'https' ? 'https' : 'http'
+  return `${protocol}://${addressForPort(port)}`
+}
+
+type BrowserTabCreator = ReturnType<typeof useAppStore.getState>['createBrowserTab']
+type RemoteBrowserPageHandleSetter = ReturnType<
+  typeof useAppStore.getState
+>['setRemoteBrowserPageHandle']
+
+export async function openWorkspacePortInBrowser(args: {
+  port: WorkspacePort
+  activeWorktreeId?: string | null
+  runtimeTarget: RuntimeClientTarget
+  createBrowserTab: BrowserTabCreator
+  setRemoteBrowserPageHandle: RemoteBrowserPageHandleSetter
+}): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const worktreeId =
+    args.port.kind === 'workspace' ? args.port.owner.worktreeId : args.activeWorktreeId
+  if (!worktreeId) {
+    return { ok: false, reason: 'No workspace selected for the browser.' }
+  }
+  const url = browserUrlForPort(args.port)
+  activateAndRevealWorktree(worktreeId)
+  if (args.runtimeTarget.kind === 'environment') {
+    try {
+      const remotePage = await callRuntimeRpc<{ browserPageId: string }>(
+        args.runtimeTarget,
+        'browser.tabCreate',
+        { worktree: `id:${worktreeId}`, url },
+        { timeoutMs: 30_000 }
+      )
+      const tab = args.createBrowserTab(worktreeId, url, { activate: true })
+      if (!tab.activePageId) {
+        return { ok: false, reason: 'Failed to create a browser page.' }
+      }
+      args.setRemoteBrowserPageHandle(tab.activePageId, {
+        environmentId: args.runtimeTarget.environmentId,
+        remotePageId: remotePage.browserPageId
+      })
+      return { ok: true }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return { ok: false, reason: message || 'Failed to open remote browser.' }
+    }
+  }
+  args.createBrowserTab(worktreeId, url, { activate: true })
+  return { ok: true }
+}
+
+function runtimeTargetKey(target: RuntimeClientTarget): string {
+  return target.kind === 'local' ? 'local' : `environment:${target.environmentId}`
+}
+
+export async function scanWorkspacePortsForTarget(
+  target: RuntimeClientTarget,
+  repoId: string
+): Promise<WorkspacePortScanResult> {
+  const params = { repoId }
+  if (target.kind === 'local') {
+    return window.api.workspacePorts.scan(params)
+  }
+  try {
+    return await callRuntimeRpc<WorkspacePortScanResult>(target, 'workspacePorts.scan', params, {
+      timeoutMs: 15_000
+    })
+  } catch (error) {
+    if (error instanceof RuntimeRpcCallError && error.code === 'method_not_found') {
+      return {
+        platform: 'unknown',
+        scannedAt: Date.now(),
+        ports: [],
+        unavailableReason: 'The connected runtime does not support workspace port management yet.'
+      }
+    }
+    throw error
+  }
+}
+
+export async function killWorkspacePortForTarget(
+  target: RuntimeClientTarget,
+  args: { repoId: string; pid: number; port: number }
+): Promise<WorkspacePortKillResult> {
+  if (target.kind === 'local') {
+    return window.api.workspacePorts.kill(args)
+  }
+  try {
+    return await callRuntimeRpc<WorkspacePortKillResult>(target, 'workspacePorts.kill', args, {
+      timeoutMs: 15_000
+    })
+  } catch (error) {
+    if (error instanceof RuntimeRpcCallError && error.code === 'method_not_found') {
+      return {
+        ok: false,
+        reason: 'The connected runtime does not support workspace port management yet.'
+      }
+    }
+    throw error
+  }
 }
 
 type PortForwardDialogState =
@@ -105,6 +212,9 @@ export default function PortsPanel({ isVisible }: { isVisible: boolean }): React
 function LocalWorkspacePortsPanel({ isVisible }: { isVisible: boolean }): React.JSX.Element {
   const activeWorktree = useActiveWorktree()
   const activeRepo = useRepoById(activeWorktree?.repoId ?? null)
+  const settings = useAppStore((s) => s.settings)
+  const createBrowserTab = useAppStore((s) => s.createBrowserTab)
+  const setRemoteBrowserPageHandle = useAppStore((s) => s.setRemoteBrowserPageHandle)
   const [scan, setScan] = useState<{ key: string; result: WorkspacePortScanResult } | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [detailsPort, setDetailsPort] = useState<WorkspacePort | null>(null)
@@ -116,7 +226,8 @@ function LocalWorkspacePortsPanel({ isVisible }: { isVisible: boolean }): React.
   const inFlightScanKeyRef = useRef<string | null>(null)
   const scanGenerationRef = useRef(0)
 
-  const scanKey = activeRepo?.id ?? ''
+  const runtimeTarget = useMemo(() => getActiveRuntimeTarget(settings), [settings])
+  const scanKey = `${runtimeTargetKey(runtimeTarget)}:${activeRepo?.id ?? ''}`
 
   const refresh = useCallback(() => {
     if (!activeRepo) {
@@ -128,8 +239,7 @@ function LocalWorkspacePortsPanel({ isVisible }: { isVisible: boolean }): React.
     }
     const generation = scanGenerationRef.current
     setRefreshing(true)
-    const promise = window.api.workspacePorts
-      .scan({ repoId: activeRepo.id })
+    const promise = scanWorkspacePortsForTarget(runtimeTarget, activeRepo.id)
       .then((nextScan) => {
         if (generation === scanGenerationRef.current) {
           setScan({ key: scanKey, result: nextScan })
@@ -147,7 +257,7 @@ function LocalWorkspacePortsPanel({ isVisible }: { isVisible: boolean }): React.
     inFlightScanRef.current = promise
     inFlightScanKeyRef.current = scanKey
     return promise
-  }, [activeRepo, scanKey])
+  }, [activeRepo, runtimeTarget, scanKey])
 
   useEffect(() => {
     let cancelled = false
@@ -196,7 +306,7 @@ function LocalWorkspacePortsPanel({ isVisible }: { isVisible: boolean }): React.
       if (!activeRepo || !port.pid) {
         return
       }
-      const result = await window.api.workspacePorts.kill({
+      const result = await killWorkspacePortForTarget(runtimeTarget, {
         repoId: activeRepo.id,
         pid: port.pid,
         port: port.port
@@ -208,7 +318,23 @@ function LocalWorkspacePortsPanel({ isVisible }: { isVisible: boolean }): React.
       toast.success(`Stopped process on :${port.port}`)
       await refresh()
     },
-    [activeRepo, refresh]
+    [activeRepo, refresh, runtimeTarget]
+  )
+
+  const handleOpenPortInBrowser = useCallback(
+    async (port: WorkspacePort) => {
+      const result = await openWorkspacePortInBrowser({
+        port,
+        activeWorktreeId: activeWorktree?.id,
+        runtimeTarget,
+        createBrowserTab,
+        setRemoteBrowserPageHandle
+      })
+      if (!result.ok) {
+        toast.error('Failed to open browser', { description: result.reason })
+      }
+    },
+    [activeWorktree?.id, createBrowserTab, runtimeTarget, setRemoteBrowserPageHandle]
   )
 
   const activePorts = useMemo(
@@ -271,34 +397,41 @@ function LocalWorkspacePortsPanel({ isVisible }: { isVisible: boolean }): React.
         </div>
       )}
 
-      <LocalPortSection
-        id="active"
-        title="Active Workspace"
-        ports={activePorts}
-        emptyText={refreshing && !displayScan ? 'Scanning...' : 'No ports detected'}
-        collapsed={collapsedSections.active ?? false}
-        onToggle={() => toggleSection('active')}
-        onStopPort={(port) => void handleStopPort(port)}
-        onShowDetails={setDetailsPort}
-      />
-      <LocalPortSection
-        id="other"
-        title="Other Workspaces"
-        ports={otherWorkspacePorts}
-        collapsed={collapsedSections.other ?? false}
-        onToggle={() => toggleSection('other')}
-        onStopPort={(port) => void handleStopPort(port)}
-        onShowDetails={setDetailsPort}
-      />
-      <LocalPortSection
-        id="external"
-        title="External"
-        ports={externalPorts}
-        collapsed={collapsedSections.external ?? false}
-        onToggle={() => toggleSection('external')}
-        onStopPort={(port) => void handleStopPort(port)}
-        onShowDetails={setDetailsPort}
-      />
+      {!displayScan?.unavailableReason && (
+        <>
+          <LocalPortSection
+            id="active"
+            title="Active Workspace"
+            ports={activePorts}
+            emptyText={refreshing && !displayScan ? 'Scanning...' : 'No ports detected'}
+            collapsed={collapsedSections.active ?? false}
+            onToggle={() => toggleSection('active')}
+            onStopPort={(port) => void handleStopPort(port)}
+            onShowDetails={setDetailsPort}
+            onOpenInBrowser={handleOpenPortInBrowser}
+          />
+          <LocalPortSection
+            id="other"
+            title="Other Workspaces"
+            ports={otherWorkspacePorts}
+            collapsed={collapsedSections.other ?? false}
+            onToggle={() => toggleSection('other')}
+            onStopPort={(port) => void handleStopPort(port)}
+            onShowDetails={setDetailsPort}
+            onOpenInBrowser={handleOpenPortInBrowser}
+          />
+          <LocalPortSection
+            id="external"
+            title="External"
+            ports={externalPorts}
+            collapsed={collapsedSections.external ?? false}
+            onToggle={() => toggleSection('external')}
+            onStopPort={(port) => void handleStopPort(port)}
+            onShowDetails={setDetailsPort}
+            onOpenInBrowser={handleOpenPortInBrowser}
+          />
+        </>
+      )}
 
       {!displayScan?.unavailableReason &&
         displayScan &&
@@ -324,7 +457,8 @@ function LocalPortSection({
   collapsed,
   onToggle,
   onStopPort,
-  onShowDetails
+  onShowDetails,
+  onOpenInBrowser
 }: {
   id: string
   title: string
@@ -334,6 +468,7 @@ function LocalPortSection({
   onToggle: () => void
   onStopPort: (port: WorkspacePort) => void
   onShowDetails: (port: WorkspacePort) => void
+  onOpenInBrowser: (port: WorkspacePort) => void
 }): React.JSX.Element | null {
   if (ports.length === 0 && !emptyText) {
     return null
@@ -368,6 +503,7 @@ function LocalPortSection({
                   port={port}
                   onStop={onStopPort}
                   onShowDetails={onShowDetails}
+                  onOpenInBrowser={onOpenInBrowser}
                 />
               ))
             : emptyText && <div className="py-1 text-xs text-muted-foreground">{emptyText}</div>}
@@ -380,19 +516,21 @@ function LocalPortSection({
 function LocalPortRow({
   port,
   onStop,
-  onShowDetails
+  onShowDetails,
+  onOpenInBrowser
 }: {
   port: WorkspacePort
   onStop: (port: WorkspacePort) => void
   onShowDetails: (port: WorkspacePort) => void
+  onOpenInBrowser: (port: WorkspacePort) => void
 }): React.JSX.Element {
   const handleCopy = useCallback(() => {
     void window.api.ui.writeClipboardText(addressForPort(port))
   }, [port])
 
   const handleOpenBrowser = useCallback(() => {
-    void window.api.shell.openUrl(browserUrlForPort(port))
-  }, [port])
+    void onOpenInBrowser(port)
+  }, [onOpenInBrowser, port])
 
   const handleCopyButtonClick = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -433,100 +571,101 @@ function LocalPortRow({
         : 'Unassigned'
   const confidenceLabel =
     port.kind === 'workspace' ? (port.owner.confidence === 'cwd' ? 'cwd' : 'command') : null
-  const canOpenInBrowser = port.protocol !== 'unknown'
   const canStopProcess =
     port.kind === 'workspace' && Boolean(port.pid) && port.processName !== 'Electron'
 
   return (
     <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <div className="group flex items-center gap-2 py-1 px-1 -mx-1 rounded hover:bg-accent/50 transition-colors">
-          <div className="flex size-5 shrink-0 items-center justify-center text-muted-foreground">
-            {port.kind === 'container' ? <Box size={13} /> : <Server size={13} />}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex min-w-0 items-center gap-1.5">
-              <span className="text-xs font-medium text-foreground">:{port.port}</span>
-              <span className="truncate text-xs text-muted-foreground">{processLabel}</span>
+      <div className="group flex items-center gap-2 py-1 px-1 -mx-1 rounded hover:bg-accent/50 transition-colors">
+        <ContextMenuTrigger asChild>
+          <div
+            className="flex min-w-0 flex-1 items-center gap-2 rounded focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            tabIndex={0}
+            aria-label={`Port ${port.port} menu`}
+          >
+            <div className="flex size-5 shrink-0 items-center justify-center text-muted-foreground">
+              {port.kind === 'container' ? <Box size={13} /> : <Server size={13} />}
             </div>
-            <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
-              <span className="truncate">{ownerLabel}</span>
-              {confidenceLabel && (
-                <span className="shrink-0 text-muted-foreground/70">{confidenceLabel}</span>
-              )}
+            <div className="min-w-0 flex-1">
+              <div className="flex min-w-0 items-center gap-1.5">
+                <span className="text-xs font-medium text-foreground">:{port.port}</span>
+                <span className="truncate text-xs text-muted-foreground">{processLabel}</span>
+              </div>
+              <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+                <span className="truncate">{ownerLabel}</span>
+                {confidenceLabel && (
+                  <span className="shrink-0 text-muted-foreground/70">{confidenceLabel}</span>
+                )}
+              </div>
             </div>
           </div>
-          <TooltipProvider delayDuration={400}>
-            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
-              {canOpenInBrowser && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-xs"
-                      className="text-muted-foreground hover:text-foreground"
-                      onClick={handleOpenBrowserButtonClick}
-                      aria-label="Open in Browser"
-                    >
-                      <ExternalLink size={13} />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top" sideOffset={4}>
-                    Open in Browser
-                  </TooltipContent>
-                </Tooltip>
-              )}
+        </ContextMenuTrigger>
+        <TooltipProvider delayDuration={400}>
+          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="text-muted-foreground hover:text-foreground"
+                  onClick={handleOpenBrowserButtonClick}
+                  aria-label="Open in Orca Browser"
+                >
+                  <ExternalLink size={13} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top" sideOffset={4}>
+                Open in Orca Browser
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="text-muted-foreground hover:text-foreground"
+                  onClick={handleCopyButtonClick}
+                  aria-label="Copy Address"
+                >
+                  <Copy size={13} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top" sideOffset={4}>
+                Copy Address
+              </TooltipContent>
+            </Tooltip>
+            {canStopProcess && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon-xs"
-                    className="text-muted-foreground hover:text-foreground"
-                    onClick={handleCopyButtonClick}
-                    aria-label="Copy Address"
+                    className="text-muted-foreground hover:text-destructive"
+                    onClick={handleStopButtonClick}
+                    aria-label="Stop Process"
                   >
-                    <Copy size={13} />
+                    <Trash2 size={13} />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="top" sideOffset={4}>
-                  Copy Address
+                  Stop Process
                 </TooltipContent>
               </Tooltip>
-              {canStopProcess && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-xs"
-                      className="text-muted-foreground hover:text-destructive"
-                      onClick={handleStopButtonClick}
-                      aria-label="Stop Process"
-                    >
-                      <Trash2 size={13} />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top" sideOffset={4}>
-                    Stop Process
-                  </TooltipContent>
-                </Tooltip>
-              )}
-            </div>
-          </TooltipProvider>
-        </div>
-      </ContextMenuTrigger>
+            )}
+          </div>
+        </TooltipProvider>
+      </div>
       <ContextMenuContent className={LOCAL_PORT_MENU_CONTENT_CLASS}>
         <ContextMenuLabel
           className={LOCAL_PORT_MENU_LABEL_CLASS}
         >{`:${port.port}`}</ContextMenuLabel>
-        {canOpenInBrowser && (
-          <ContextMenuItem className={LOCAL_PORT_MENU_ITEM_CLASS} onSelect={handleOpenBrowser}>
-            <ExternalLink size={13} />
-            Open in Browser
-          </ContextMenuItem>
-        )}
+        <ContextMenuItem className={LOCAL_PORT_MENU_ITEM_CLASS} onSelect={handleOpenBrowser}>
+          <ExternalLink size={13} />
+          Open in Orca Browser
+        </ContextMenuItem>
         <ContextMenuItem className={LOCAL_PORT_MENU_ITEM_CLASS} onSelect={handleCopy}>
           <Copy size={13} />
           Copy Address
@@ -611,6 +750,7 @@ function SshPortsPanel(): React.JSX.Element {
   const portForwardsByConnection = useAppStore((s) => s.portForwardsByConnection)
   const detectedPortsByConnection = useAppStore((s) => s.detectedPortsByConnection)
   const sshConnectionStates = useAppStore((s) => s.sshConnectionStates)
+  const createBrowserTab = useAppStore((s) => s.createBrowserTab)
   // Why: scope the panel to the active worktree's SSH connection so
   // actions target the correct machine and the disconnected state
   // reflects the active worktree, not some other SSH session.
@@ -668,6 +808,22 @@ function SshPortsPanel(): React.JSX.Element {
     setDialogState({ mode: 'edit', entry })
   }, [])
 
+  const handleOpenForwardInBrowser = useCallback(
+    (entry: PortForwardEntry) => {
+      if (!activeWorktree?.id) {
+        toast.error('No workspace selected for the browser.')
+        return
+      }
+      // Why: the protocol hint comes from the remote port (the actual service),
+      // not the local port which may be an arbitrary remap.
+      const protocol = HTTPS_PORTS.has(entry.remotePort) ? 'https' : 'http'
+      createBrowserTab(activeWorktree.id, `${protocol}://127.0.0.1:${entry.localPort}`, {
+        activate: true
+      })
+    },
+    [activeWorktree?.id, createBrowserTab]
+  )
+
   const handleDialogClose = useCallback(() => {
     setDialogState({ mode: 'closed' })
   }, [])
@@ -723,7 +879,12 @@ function SshPortsPanel(): React.JSX.Element {
           </button>
           {!forwardedCollapsed &&
             allForwards.map((entry) => (
-              <ForwardedPortRow key={entry.id} entry={entry} onEdit={() => handleEdit(entry)} />
+              <ForwardedPortRow
+                key={entry.id}
+                entry={entry}
+                onEdit={() => handleEdit(entry)}
+                onOpenInBrowser={() => handleOpenForwardInBrowser(entry)}
+              />
             ))}
         </div>
       )}
@@ -792,10 +953,12 @@ function SshPortsPanel(): React.JSX.Element {
 
 function ForwardedPortRow({
   entry,
-  onEdit
+  onEdit,
+  onOpenInBrowser
 }: {
   entry: PortForwardEntry
   onEdit: () => void
+  onOpenInBrowser: () => void
 }): React.JSX.Element {
   const [removing, setRemoving] = useState(false)
 
@@ -817,13 +980,48 @@ function ForwardedPortRow({
   }, [entry.localPort])
 
   const handleOpenBrowser = useCallback(() => {
-    // Why: the protocol hint comes from the remote port (the actual service),
-    // not the local port which may be an arbitrary remap.
-    const protocol = HTTPS_PORTS.has(entry.remotePort) ? 'https' : 'http'
-    void window.api.shell.openUrl(`${protocol}://127.0.0.1:${entry.localPort}`)
-  }, [entry.localPort, entry.remotePort])
+    onOpenInBrowser()
+  }, [onOpenInBrowser])
 
-  const isHttpPort = HTTP_PORTS.has(entry.remotePort)
+  const handleCopyButtonClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      handleCopy()
+      if (event.detail > 0) {
+        event.currentTarget.blur()
+      }
+    },
+    [handleCopy]
+  )
+
+  const handleOpenBrowserButtonClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      handleOpenBrowser()
+      if (event.detail > 0) {
+        event.currentTarget.blur()
+      }
+    },
+    [handleOpenBrowser]
+  )
+
+  const handleEditButtonClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      onEdit()
+      if (event.detail > 0) {
+        event.currentTarget.blur()
+      }
+    },
+    [onEdit]
+  )
+
+  const handleRemoveButtonClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      void handleRemove()
+      if (event.detail > 0) {
+        event.currentTarget.blur()
+      }
+    },
+    [handleRemove]
+  )
 
   return (
     <div className="group flex items-center gap-2 py-1 px-1 -mx-1 rounded hover:bg-accent/50 transition-colors">
@@ -842,21 +1040,19 @@ function ForwardedPortRow({
           </span>
         </div>
       </div>
-      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-        {isHttpPort && (
-          <button
-            type="button"
-            className="p-1 rounded hover:bg-accent transition-colors text-muted-foreground hover:text-foreground"
-            onClick={handleOpenBrowser}
-            title="Open in Browser"
-          >
-            <ExternalLink size={13} />
-          </button>
-        )}
+      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
         <button
           type="button"
           className="p-1 rounded hover:bg-accent transition-colors text-muted-foreground hover:text-foreground"
-          onClick={handleCopy}
+          onClick={handleOpenBrowserButtonClick}
+          title="Open in Orca Browser"
+        >
+          <ExternalLink size={13} />
+        </button>
+        <button
+          type="button"
+          className="p-1 rounded hover:bg-accent transition-colors text-muted-foreground hover:text-foreground"
+          onClick={handleCopyButtonClick}
           title="Copy Address"
         >
           <Copy size={13} />
@@ -864,7 +1060,7 @@ function ForwardedPortRow({
         <button
           type="button"
           className="p-1 rounded hover:bg-accent transition-colors text-muted-foreground hover:text-foreground"
-          onClick={onEdit}
+          onClick={handleEditButtonClick}
           title="Edit"
         >
           <Pencil size={13} />
@@ -875,7 +1071,7 @@ function ForwardedPortRow({
             'p-1 rounded hover:bg-accent transition-colors text-muted-foreground hover:text-foreground',
             removing && 'opacity-50'
           )}
-          onClick={handleRemove}
+          onClick={handleRemoveButtonClick}
           disabled={removing}
           title="Remove"
         >

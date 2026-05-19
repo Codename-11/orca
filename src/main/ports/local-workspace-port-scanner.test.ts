@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   attributePortToWorkspace,
+  isContainerProcess,
   parseLsofListeningOutput,
   parseNetstatListeningOutput,
   parseProcNetTcp
@@ -117,8 +118,19 @@ describe('attributePortToWorkspace', () => {
   })
 
   it('does not guess when there is no worktree evidence', () => {
-    const owner = attributePortToWorkspace({ cwd: '/Applications/Docker.app' }, worktrees)
+    const owner = attributePortToWorkspace({ cwd: '/Applications/ContainerRuntime.app' }, worktrees)
 
     expect(owner).toBeUndefined()
+  })
+})
+
+describe('container process classification', () => {
+  it('detects common container listener owners without workspace attribution', () => {
+    expect(isContainerProcess({ processName: 'com.container.backend' })).toBe(true)
+    expect(isContainerProcess({ processName: 'com.vendor.backend' })).toBe(true)
+    expect(isContainerProcess({ commandLine: '/usr/bin/container-runtime port-forward' })).toBe(
+      true
+    )
+    expect(isContainerProcess({ processName: 'node', commandLine: 'node server.js' })).toBe(false)
   })
 })
