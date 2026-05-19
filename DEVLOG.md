@@ -6,6 +6,19 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-19 — Android package identity split
+
+Changed the Axiom Android APK package ID from upstream
+`com.stably.orca.mobile` to `com.axiomlabs.orca.mobile` so future Axiom APKs can
+install side-by-side with the upstream Orca mobile app instead of replacing it.
+This only updates source config; no rebuild, release upload, or repush was run.
+
+Verification:
+- Parsed `mobile/app.json` with Node and asserted `expo.android.package === "com.axiomlabs.orca.mobile"`.
+- `git diff --check`.
+
+---
+
 ## 2026-05-19 — Electron-builder artifact macro fix
 
 The rerun got through sync and Android started, but the Windows electron-builder
