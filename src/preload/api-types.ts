@@ -67,6 +67,12 @@ import type {
   LinearMember,
   LinearProjectSummary,
   LinearTeam,
+  ForgeConnectionStatus,
+  ForgeIssue,
+  ForgeIssueStatus,
+  ForgeIssueUpdate,
+  ForgeListFilter,
+  ForgeMutationResult,
   MarkdownDocument,
   FloatingTerminalCwdRequest,
   GitHubIssueUpdate,
@@ -1107,6 +1113,13 @@ export type PreloadApi = {
     teamStates: (args: { teamId: string; workspaceId?: string }) => Promise<LinearWorkflowState[]>
     teamLabels: (args: { teamId: string; workspaceId?: string }) => Promise<LinearLabel[]>
     teamMembers: (args: { teamId: string; workspaceId?: string }) => Promise<LinearMember[]>
+  }
+  forge: {
+    status: () => Promise<ForgeConnectionStatus>
+    listStatuses: () => Promise<ForgeIssueStatus[]>
+    searchIssues: (args: { query: string; limit?: number }) => Promise<ForgeIssue[]>
+    listIssues: (args?: { filter?: ForgeListFilter; limit?: number }) => Promise<ForgeIssue[]>
+    updateIssue: (args: { id: string; updates: ForgeIssueUpdate }) => Promise<ForgeMutationResult>
   }
   starNag: {
     onShow: (callback: () => void) => () => void

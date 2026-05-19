@@ -1,0 +1,213 @@
+name: Axiom Upstream Sync Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: Optional upstream Orca release tag to force, e.g. v1.4.9
+        required: false
+        type: string
+      dry_run:
+        description: Sync and verify without pushing tags/releases
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    # Poll shortly after upstream publishes. GitHub may delay schedules, so the
+    # checker is idempotent against releases already present in this fork.
+    - cron: '*/15 * * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: axiom-upstream-sync-release
+  cancel-in-progress: false
+
+env:
+  AXIOM_DEPLOY_BRANCH: axiom/deploy
+  AXIOM_UPSTREAM_BRANCH: main
+  AXIOM_UPSTREAM_REPOSITORY: stablyai/orca
+  AXIOM_UPSTREAM_REPOSITORY_URL: https://github.com/stablyai/orca.git
+  ORCA_APP_ID: com.axiom-labs.orca
+  ORCA_PRODUCT_NAME: Axiom Orca
+  ORCA_ARTIFACT_BASENAME: axiom-orca
+  ORCA_LINUX_EXECUTABLE_NAME: axiom-orca
+  ORCA_LINUX_DEB_PACKAGE_NAME: axiom-orca
+  ORCA_LINUX_MAINTAINER: Axiom Labs
+  ORCA_PUBLISH_REPOSITORY: ${{ github.repository }}
+  ORCA_UPDATE_OWNER: ${{ github.repository_owner }}
+  ORCA_UPDATE_REPO: ${{ github.event.repository.name }}
+
+jobs:
+  sync:
+    name: Detect, sync, verify, and tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      should_release: ${{ steps.check.outputs.should_release }}
+      tag: ${{ steps.check.outputs.upstream_tag }}
+      release_notes: axiom-release-notes.md
+    steps:
+      - name: Checkout Axiom deploy branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.AXIOM_DEPLOY_BRANCH }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: package.json
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Configure git author
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Detect new upstream release
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          args=()
+          if [[ -n "${{ inputs.upstream_tag || '' }}" ]]; then
+            args+=(--upstream-tag "${{ inputs.upstream_tag }}")
+          fi
+          node config/scripts/axiom-check-upstream-release.mjs "${args[@]}"
+
+      - name: Stop when already published
+        if: steps.check.outputs.should_release != 'true'
+        run: |
+          echo "No Axiom release needed: ${{ steps.check.outputs.reason }}"
+
+      - name: Merge upstream into isolated deploy branch
+        if: steps.check.outputs.should_release == 'true'
+        run: node config/scripts/axiom-sync-upstream-release.mjs --upstream-tag "${{ steps.check.outputs.upstream_tag }}"
+
+      - name: Install dependencies
+        if: steps.check.outputs.should_release == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify combined fork
+        if: steps.check.outputs.should_release == 'true'
+        run: |
+          pnpm run typecheck:node
+          pnpm exec vitest run --config config/vitest.config.ts \
+            src/shared/task-providers.test.ts \
+            src/main/updater-prerelease-feed.test.ts \
+            src/main/updater-nudge.test.ts \
+            src/main/updater-changelog.test.ts
+
+      - name: Generate release notes
+        if: steps.check.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node config/scripts/axiom-generate-release-notes.mjs "${{ steps.check.outputs.upstream_tag }}" --output axiom-release-notes.md
+
+      - name: Create release tag
+        if: steps.check.outputs.should_release == 'true' && !inputs.dry_run
+        run: |
+          tag="${{ steps.check.outputs.upstream_tag }}"
+          git tag -f "$tag"
+          git push origin "HEAD:${AXIOM_DEPLOY_BRANCH}"
+          git push origin "refs/tags/$tag" --force
+
+      - name: Create draft release shell
+        if: steps.check.outputs.should_release == 'true' && !inputs.dry_run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${{ steps.check.outputs.upstream_tag }}"
+          gh release create "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$tag" \
+            --title "Axiom Orca $tag" \
+            --notes-file axiom-release-notes.md \
+            --draft
+
+      - name: Upload release notes artifact
+        if: steps.check.outputs.should_release == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: axiom-release-notes
+          path: axiom-release-notes.md
+
+  build:
+    name: Build and publish ${{ matrix.os }}
+    needs: sync
+    if: needs.sync.outputs.should_release == 'true' && !inputs.dry_run
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            build_cmd: pnpm run build:release && pnpm exec electron-builder --config config/electron-builder.config.cjs --linux --publish always
+          - os: windows-latest
+            build_cmd: pnpm run build:release && pnpm exec electron-builder --config config/electron-builder.config.cjs --win --publish always
+          - os: macos-15
+            build_cmd: pnpm run build:release && ORCA_MAC_RELEASE=1 pnpm exec electron-builder --config config/electron-builder.config.cjs --mac --publish always
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.sync.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: package.json
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build and publish to Axiom GitHub Releases feed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        shell: bash
+        run: ${{ matrix.build_cmd }}
+
+  publish:
+    name: Verify assets and publish release
+    needs: [sync, build]
+    if: needs.sync.outputs.should_release == 'true' && !inputs.dry_run
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.sync.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: package.json
+
+      - name: Verify required release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: node config/scripts/verify-release-required-assets.mjs "${{ needs.sync.outputs.tag }}"
+
+      - name: Publish draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${{ needs.sync.outputs.tag }}" --repo "$GITHUB_REPOSITORY" --draft=false

@@ -1,20 +1,17 @@
 import { net } from 'electron'
 import { compareVersions, isPrereleaseVersion, isValidVersion } from './updater-fallback'
+import {
+  getReleasesAtomUrl,
+  getReleaseDownloadUrl,
+  getReleaseTagHrefPattern
+} from './updater-endpoints'
 
-const ATOM_FEED_URL = 'https://github.com/stablyai/orca/releases.atom'
-const RELEASES_DOWNLOAD_BASE = 'https://github.com/stablyai/orca/releases/download'
 const FETCH_TIMEOUT_MS = 5000
 const MAX_MANIFEST_PROBE_CANDIDATES = 6
 
 // Why: GitHub's atom feed lists every release (prerelease or stable) in a
 // single flat list. Each entry has a /releases/tag/<tag> URL we can mine
 // without any channel filtering.
-const TAG_HREF_RE = /href="https:\/\/github\.com\/stablyai\/orca\/releases\/tag\/([^"]+)"/g
-
-export function getReleaseDownloadUrl(tag: string): string {
-  return `${RELEASES_DOWNLOAD_BASE}/${encodeURIComponent(tag)}`
-}
-
 function getPlatformManifestName(): string {
   if (process.platform === 'darwin') {
     return 'latest-mac.yml'
@@ -43,14 +40,14 @@ async function fetchReleaseFeedTags(): Promise<ReleaseFeedTag[] | null> {
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
 
   try {
-    const res = await net.fetch(ATOM_FEED_URL, { signal: controller.signal })
+    const res = await net.fetch(getReleasesAtomUrl(), { signal: controller.signal })
     if (!res.ok) {
       return null
     }
     const body = await res.text()
     const tags: ReleaseFeedTag[] = []
 
-    for (const match of body.matchAll(TAG_HREF_RE)) {
+    for (const match of body.matchAll(getReleaseTagHrefPattern())) {
       const tag = match[1]
       const version = normalizeTagToVersion(tag)
       if (isValidVersion(version)) {

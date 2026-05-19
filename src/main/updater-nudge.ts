@@ -1,5 +1,6 @@
 import { net } from 'electron'
 import { compareVersions, isValidVersion } from './updater-fallback'
+import { getNudgeUrl } from './updater-endpoints'
 
 export type NudgeConfig = {
   id: string
@@ -12,7 +13,11 @@ export async function fetchNudge(): Promise<NudgeConfig | null> {
   const timeout = setTimeout(() => controller.abort(), 5000)
 
   try {
-    const res = await net.fetch('https://onorca.dev/whats-new/nudge.json', {
+    const nudgeUrl = getNudgeUrl()
+    if (!nudgeUrl) {
+      return null
+    }
+    const res = await net.fetch(nudgeUrl, {
       signal: controller.signal
     })
     if (!res.ok) {
@@ -33,10 +38,18 @@ export async function fetchNudge(): Promise<NudgeConfig | null> {
       return null
     }
 
-    if (minVersion !== undefined && typeof minVersion !== 'string') {return null}
-    if (maxVersion !== undefined && typeof maxVersion !== 'string') {return null}
-    if (minVersion !== undefined && !isValidVersion(minVersion)) {return null}
-    if (maxVersion !== undefined && !isValidVersion(maxVersion)) {return null}
+    if (minVersion !== undefined && typeof minVersion !== 'string') {
+      return null
+    }
+    if (maxVersion !== undefined && typeof maxVersion !== 'string') {
+      return null
+    }
+    if (minVersion !== undefined && !isValidVersion(minVersion)) {
+      return null
+    }
+    if (maxVersion !== undefined && !isValidVersion(maxVersion)) {
+      return null
+    }
     if (
       minVersion !== undefined &&
       maxVersion !== undefined &&
