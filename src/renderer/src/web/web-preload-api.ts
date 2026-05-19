@@ -82,6 +82,7 @@ function createWebPreloadApi(): Partial<PreloadApi> {
         }),
       getFeatureWallAssetBaseUrl: () => Promise.resolve('/'),
       relaunch: () => Promise.resolve(window.location.reload()),
+      reload: () => Promise.resolve(window.location.reload()),
       getKeyboardInputSourceId: () => Promise.resolve(null),
       setUnreadDockBadgeCount: () => Promise.resolve(),
       getFloatingTerminalCwd: () => Promise.resolve('~')
@@ -190,6 +191,7 @@ function createWebPreloadApi(): Partial<PreloadApi> {
     agentStatus: {
       onSet: () => noopUnsubscribe,
       getSnapshot: () => Promise.resolve([]),
+      inferInterrupt: () => Promise.resolve(false),
       onMigrationUnsupported: () => noopUnsubscribe,
       onMigrationUnsupportedClear: () => noopUnsubscribe,
       getMigrationUnsupportedSnapshot: () => Promise.resolve([]),
@@ -686,6 +688,20 @@ function createGitHubApi(): NonNullable<Partial<PreloadApi>['gh']> {
     viewer: () => Promise.resolve(null),
     repoSlug: direct('github.repoSlug'),
     prForBranch: direct('github.prForBranch'),
+    refreshPRNow: async ({ candidate }) => {
+      const pr = await callRuntimeResult('github.prForBranch', {
+        repo: candidate.repoId || candidate.repoPath,
+        repoPath: candidate.repoPath,
+        branch: candidate.branch,
+        linkedPRNumber: candidate.linkedPRNumber ?? null
+      })
+      return pr
+        ? { kind: 'found', pr, fetchedAt: Date.now() }
+        : { kind: 'no-pr', fetchedAt: Date.now() }
+    },
+    enqueuePRRefresh: () => Promise.resolve(false),
+    reportVisiblePRRefreshCandidates: () => Promise.resolve(false),
+    onPRRefreshEvent: () => noopUnsubscribe,
     issue: direct('github.issue'),
     workItem: direct('github.workItem'),
     workItemByOwnerRepo: direct('github.workItemByOwnerRepo'),
@@ -1079,6 +1095,7 @@ function createPtyApi(): NonNullable<Partial<PreloadApi>['pty']> {
   return {
     spawn: () => Promise.reject(new Error('Local PTYs are unavailable in the web client.')),
     write: () => {},
+    writeAccepted: () => Promise.resolve(false),
     resize: () => {},
     reportGeometry: () => {},
     signal: () => {},

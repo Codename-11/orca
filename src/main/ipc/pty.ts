@@ -313,6 +313,9 @@ export function buildPtyHostEnv(
   // must inject the loopback receiver coordinates before the agent starts.
   // Without these env vars the global hook config cannot map callbacks back
   // to the correct Orca pane.
+  // Why: nested Orca terminals can inherit another process's hook endpoint or
+  // token. Strip all hook runtime coordinates before injecting this PTY's fresh
+  // server values so callbacks route to the owning app/runtime.
   for (const key of AGENT_HOOK_RUNTIME_ENV_KEYS) {
     delete baseEnv[key]
   }
@@ -583,6 +586,7 @@ export function registerPtyHandlers(
   ipcMain.removeHandler('pty:declarePendingPaneSerializer')
   ipcMain.removeHandler('pty:settlePaneSerializer')
   ipcMain.removeHandler('pty:clearPendingPaneSerializer')
+  ipcMain.removeHandler('pty:writeAccepted')
   ipcMain.removeAllListeners('pty:write')
   ipcMain.removeAllListeners('pty:ackColdRestore')
   ipcMain.removeAllListeners('pty:serializeBuffer:response')
@@ -646,6 +650,12 @@ export function registerPtyHandlers(
   // large output and non-interactive output must still use the batcher.
   const INTERACTIVE_OUTPUT_WINDOW_MS = 100
   const INTERACTIVE_OUTPUT_MAX_CHARS = 1024
+  const PTY_IPC_CHUNK_CHARS = 64 * 1024
+  const PTY_MAX_IPC_CHUNKS_PER_FLUSH = 8
+
+  const sendPtyData = (id: string, data: string): void => {
+    mainWindow.webContents.send('pty:data', { id, data })
+  }
 
   const flushPendingData = (): void => {
     flushTimer = null
@@ -653,10 +663,30 @@ export function registerPtyHandlers(
       pendingData.clear()
       return
     }
-    for (const [id, data] of pendingData) {
-      mainWindow.webContents.send('pty:data', { id, data })
+
+    let sentChunks = 0
+    while (pendingData.size > 0 && sentChunks < PTY_MAX_IPC_CHUNKS_PER_FLUSH) {
+      const entry = pendingData.entries().next().value
+      if (!entry) {
+        break
+      }
+      const [id, data] = entry
+      pendingData.delete(id)
+      if (data.length <= PTY_IPC_CHUNK_CHARS) {
+        sendPtyData(id, data)
+      } else {
+        sendPtyData(id, data.slice(0, PTY_IPC_CHUNK_CHARS))
+        // Why: a single noisy PTY can otherwise serialize megabytes of IPC in
+        // one main-process turn. Requeue the remainder behind other PTYs so
+        // active terminal redraws and control IPC keep getting turns.
+        pendingData.set(id, data.slice(PTY_IPC_CHUNK_CHARS))
+      }
+      sentChunks++
     }
-    pendingData.clear()
+
+    if (pendingData.size > 0) {
+      flushTimer = setTimeout(flushPendingData, PTY_BATCH_INTERVAL_MS)
+    }
   }
 
   const clearFlushTimerIfIdle = (): void => {
@@ -710,10 +740,7 @@ export function registerPtyHandlers(
         clearFlushTimerIfIdle()
         // Why: agent TUIs redraw small prompt regions after every keystroke.
         // Waiting for the throughput batch timer adds visible input latency.
-        mainWindow.webContents.send('pty:data', {
-          id: payload.id,
-          data: nextData
-        })
+        sendPtyData(payload.id, nextData)
         return
       }
       pendingData.set(payload.id, nextData)
@@ -734,7 +761,7 @@ export function registerPtyHandlers(
         // tears down the terminal on pty:exit before the batch timer fires.
         const remaining = pendingData.get(payload.id)
         if (remaining) {
-          mainWindow.webContents.send('pty:data', { id: payload.id, data: remaining })
+          sendPtyData(payload.id, remaining)
           pendingData.delete(payload.id)
         }
         lastInputAtByPty.delete(payload.id)
@@ -1584,7 +1611,7 @@ export function registerPtyHandlers(
     }
   )
 
-  ipcMain.on('pty:write', (_event, args: { id: string; data: string }) => {
+  const writePtyInput = (args: { id: string; data: string }): boolean => {
     // Why: defense-in-depth for the mobile-presence lock. The renderer's
     // xterm.onData guard already drops desktop keystrokes when mobile is
     // driving, but a stale view between the main-side state flip and the
@@ -1592,14 +1619,50 @@ export function registerPtyHandlers(
     // This server-side check catches it. See
     // docs/mobile-presence-lock.md.
     if (runtime?.getDriver(args.id).kind === 'mobile') {
-      return
+      return false
     }
     const provider = ptyOwnership.has(args.id) ? tryGetProviderForPty(args.id) : undefined
     if (!provider) {
-      return
+      return false
     }
-    lastInputAtByPty.set(args.id, performance.now())
-    provider.write(args.id, args.data)
+    try {
+      lastInputAtByPty.set(args.id, performance.now())
+      provider.write(args.id, args.data)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  const writePtyInputAccepted = (args: { id: string; data: string }): boolean => {
+    if (runtime?.getDriver(args.id).kind === 'mobile') {
+      return false
+    }
+    // Why: the acknowledgement is used to infer Ctrl+C/Escape actually reached
+    // the local PTY. SSH providers are fire-and-forget relay notifications, so
+    // they cannot truthfully acknowledge until the relay protocol grows a write
+    // request/response.
+    if (ptyOwnership.get(args.id) !== null) {
+      return false
+    }
+    const provider = tryGetProviderForPty(args.id)
+    if (!provider?.hasPty?.(args.id)) {
+      return false
+    }
+    try {
+      lastInputAtByPty.set(args.id, performance.now())
+      provider.write(args.id, args.data)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  ipcMain.on('pty:write', (_event, args: { id: string; data: string }) => {
+    writePtyInput(args)
+  })
+  ipcMain.handle('pty:writeAccepted', (_event, args: { id: string; data: string }): boolean => {
+    return writePtyInputAccepted(args)
   })
 
   // Why: resize is fire-and-forget — the renderer doesn't need a reply.

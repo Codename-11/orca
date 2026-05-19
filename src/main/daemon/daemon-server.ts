@@ -41,7 +41,12 @@ export class DaemonServer {
   private tokenPath: string
 
   private clients = new Map<string, ConnectedClient>()
-  private streamDataBatcher = new DaemonStreamDataBatcher((clientId) => this.clients.get(clientId))
+  private streamDataBatcher = new DaemonStreamDataBatcher(
+    (clientId) => this.clients.get(clientId),
+    {
+      onStreamFailure: (clientId) => this.disconnectClient(clientId)
+    }
+  )
 
   constructor(opts: DaemonServerOptions) {
     this.socketPath = opts.socketPath
@@ -134,6 +139,7 @@ export class DaemonServer {
     socket.write(encodeNdjson({ type: 'hello', ok: true }))
 
     if (hello.role === 'control') {
+      this.disconnectClient(hello.clientId)
       const client: ConnectedClient = {
         clientId: hello.clientId,
         controlSocket: socket,
@@ -144,6 +150,8 @@ export class DaemonServer {
     } else if (hello.role === 'stream') {
       const client = this.clients.get(hello.clientId)
       if (client) {
+        this.streamDataBatcher.clear(hello.clientId)
+        client.streamSocket?.destroy()
         client.streamSocket = socket
       }
       // Stream socket is receive-only from daemon's perspective (for events)
@@ -161,8 +169,10 @@ export class DaemonServer {
     socket.on('data', (chunk) => parser.feed(chunk.toString()))
 
     socket.on('close', () => {
-      this.streamDataBatcher.clear(clientId)
-      this.clients.delete(clientId)
+      const client = this.clients.get(clientId)
+      if (client?.controlSocket === socket) {
+        this.disconnectClient(clientId, client)
+      }
     })
   }
 
@@ -212,19 +222,11 @@ export class DaemonServer {
               this.streamDataBatcher.enqueue(clientId, p.sessionId, data)
             },
             onExit: (code) => {
-              // Why: exit tears down renderer handlers; flush final output first
-              // so the last few milliseconds of PTY data are not stranded.
-              this.streamDataBatcher.flush(clientId)
-              if (client?.streamSocket) {
-                client.streamSocket.write(
-                  encodeNdjson({
-                    type: 'event',
-                    event: 'exit',
-                    sessionId: p.sessionId,
-                    payload: { code }
-                  })
-                )
-              }
+              // Why: exit tears down renderer handlers; queue it behind any
+              // pending data so the final PTY bytes cannot be overtaken under
+              // stream backpressure.
+              this.streamDataBatcher.enqueueExit(clientId, p.sessionId, code)
+              this.streamDataBatcher.clearSessionInput(clientId, p.sessionId)
             }
           }
         })
@@ -238,8 +240,10 @@ export class DaemonServer {
 
       case 'write':
         try {
+          this.streamDataBatcher.markInput(clientId, request.payload.sessionId)
           this.host.write(request.payload.sessionId, request.payload.data)
         } catch (err) {
+          this.streamDataBatcher.clearSessionInput(clientId, request.payload.sessionId)
           if (err instanceof SessionNotFoundError) {
             this.sendExitEvent(client, request.payload.sessionId, -1)
           }
@@ -304,19 +308,23 @@ export class DaemonServer {
     sessionId: string,
     code: number
   ): void {
-    if (!client?.streamSocket) {
+    if (!client) {
       return
     }
     // Why: write/resize are notification-heavy and intentionally do not wait
     // for replies. If their target session is gone, this synthetic exit is the
     // only signal the renderer gets to clear stale terminal pane bindings.
-    client.streamSocket.write(
-      encodeNdjson({
-        type: 'event',
-        event: 'exit',
-        sessionId,
-        payload: { code }
-      })
-    )
+    this.streamDataBatcher.enqueueExit(client.clientId, sessionId, code)
+  }
+
+  private disconnectClient(clientId: string, expectedClient?: ConnectedClient): void {
+    const client = this.clients.get(clientId)
+    if (expectedClient && client !== expectedClient) {
+      return
+    }
+    this.streamDataBatcher.clear(clientId)
+    this.clients.delete(clientId)
+    client?.streamSocket?.destroy()
+    client?.controlSocket.destroy()
   }
 }
