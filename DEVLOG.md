@@ -6,6 +6,29 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-19 — Windows side-by-side installer identity fix
+
+The first Axiom Windows installer still tried to close/replace an installed
+upstream Orca instance. The fork had build-time product/app overrides, but the
+main-process runtime identity still hardcoded upstream `Orca` /
+`com.stablyai.orca`, and the NSIS installer did not have an explicit fork-owned
+GUID. Added build-time app-name/app-user-model constants and a stable Axiom NSIS
+GUID (`b6c06723-a52f-5004-ad9f-f39666f5e928`) so future Windows builds have a
+separate installer/update/runtime identity from upstream.
+
+This only updates source config; no rebuild, release upload, or repush was run.
+
+Verification:
+- `pnpm exec vitest run --config config/vitest.config.ts src/main/startup --reporter=dot` — 40 / 40 pass.
+- Required `config/electron-builder.config.cjs` with Axiom env and asserted
+  `appId`, `productName`, `win.executableName`, and `nsis.guid`.
+- `pnpm run typecheck:node`.
+- `pnpm exec oxlint config/electron-builder.config.cjs electron.vite.config.ts src/main/startup/dev-instance-identity.ts src/main/startup/dev-instance-identity.test.ts`.
+- `pnpm exec oxfmt --check config/electron-builder.config.cjs electron.vite.config.ts src/main/startup/dev-instance-identity.ts src/main/startup/dev-instance-identity.test.ts`.
+- `git diff --check`.
+
+---
+
 ## 2026-05-19 — Android package identity split
 
 Changed the Axiom Android APK package ID from upstream

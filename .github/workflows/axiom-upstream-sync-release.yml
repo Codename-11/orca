@@ -35,8 +35,12 @@ env:
   AXIOM_UPSTREAM_BRANCH: main
   AXIOM_UPSTREAM_REPOSITORY: stablyai/orca
   AXIOM_UPSTREAM_REPOSITORY_URL: https://github.com/stablyai/orca.git
-  ORCA_APP_ID: com.axiom-labs.orca
+  ORCA_APP_ID: com.axiomlabs.orca
+  ORCA_APP_USER_MODEL_ID: com.axiomlabs.orca
   ORCA_PRODUCT_NAME: Axiom Orca
+  ORCA_APP_NAME: Axiom Orca
+  ORCA_WINDOWS_EXECUTABLE_NAME: Axiom Orca
+  ORCA_NSIS_GUID: b6c06723-a52f-5004-ad9f-f39666f5e928
   ORCA_ARTIFACT_BASENAME: axiom-orca
   # Axiom currently publishes Windows desktop builds from this fork. Mobile
   # remains on Orca's upstream-style Mobile Release workflow and only runs on

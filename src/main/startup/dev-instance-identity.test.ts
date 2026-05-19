@@ -12,6 +12,21 @@ describe('dev-instance-identity', () => {
     })
   })
 
+  it('allows forked packaged builds to use their own runtime identity', () => {
+    expect(
+      getDevInstanceIdentity(false, {
+        ORCA_APP_NAME: 'Axiom Orca',
+        ORCA_APP_USER_MODEL_ID: 'com.axiomlabs.orca'
+      })
+    ).toMatchObject({
+      name: 'Axiom Orca',
+      isDev: false,
+      devLabel: null,
+      dockBadgeLabel: null,
+      appUserModelId: 'com.axiomlabs.orca'
+    })
+  })
+
   it('derives a readable dev label from worktree and branch env', () => {
     const identity = getDevInstanceIdentity(true, {
       ORCA_DEV_REPO_ROOT: '/repo/worktrees/dev-indicator',
@@ -53,5 +68,18 @@ describe('dev-instance-identity', () => {
     expect(identity.devLabel).toBe('manual label')
     expect(identity.name).toBe('Orca: feature/other')
     expect(identity.dockBadgeLabel).toBeNull()
+  })
+
+  it('derives dev app user model IDs from the fork base identity', () => {
+    const identity = getDevInstanceIdentity(true, {
+      ORCA_APP_NAME: 'Axiom Orca',
+      ORCA_APP_USER_MODEL_ID: 'com.axiomlabs.orca',
+      ORCA_DEV_REPO_ROOT: '/repo/worktrees/forge-provider',
+      ORCA_DEV_WORKTREE_NAME: 'forge-provider',
+      ORCA_DEV_BRANCH: 'feat/forge-provider'
+    })
+
+    expect(identity.name).toBe('Axiom Orca: feat/forge-provider')
+    expect(identity.appUserModelId).toMatch(/^com\.axiomlabs\.orca\.dev\.[a-f0-9]{10}$/)
   })
 })

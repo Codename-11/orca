@@ -41,6 +41,12 @@ const ORCA_UPDATE_CHANGELOG_URL_LITERAL = optionalBuildString(process.env.ORCA_U
 const ORCA_UPDATE_CHANGELOG_JSON_URL_LITERAL = optionalBuildString(
   process.env.ORCA_UPDATE_CHANGELOG_JSON_URL
 )
+const ORCA_APP_NAME_LITERAL = optionalBuildString(
+  process.env.ORCA_APP_NAME ?? process.env.ORCA_PRODUCT_NAME
+)
+const ORCA_APP_USER_MODEL_ID_LITERAL = optionalBuildString(
+  process.env.ORCA_APP_USER_MODEL_ID ?? process.env.ORCA_APP_ID
+)
 
 export default defineConfig({
   main: {
@@ -70,7 +76,9 @@ export default defineConfig({
       ORCA_UPDATE_REPO: ORCA_UPDATE_REPO_LITERAL,
       ORCA_UPDATE_NUDGE_URL: ORCA_UPDATE_NUDGE_URL_LITERAL,
       ORCA_UPDATE_CHANGELOG_URL: ORCA_UPDATE_CHANGELOG_URL_LITERAL,
-      ORCA_UPDATE_CHANGELOG_JSON_URL: ORCA_UPDATE_CHANGELOG_JSON_URL_LITERAL
+      ORCA_UPDATE_CHANGELOG_JSON_URL: ORCA_UPDATE_CHANGELOG_JSON_URL_LITERAL,
+      ORCA_APP_NAME: ORCA_APP_NAME_LITERAL,
+      ORCA_APP_USER_MODEL_ID: ORCA_APP_USER_MODEL_ID_LITERAL
     },
     // Why: @xterm/headless declares "exports": null in package.json, which
     // prevents Vite's default resolver from finding the CJS entry. Point

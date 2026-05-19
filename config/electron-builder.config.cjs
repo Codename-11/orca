@@ -9,12 +9,20 @@ function envString(name, fallback) {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback
 }
 
+function optionalEnvString(name) {
+  const value = process.env[name]
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
 function envRepository() {
   const raw = envString(
     'ORCA_PUBLISH_REPOSITORY',
     envString('ORCA_UPDATE_REPOSITORY', envString('GITHUB_REPOSITORY', 'stablyai/orca'))
   )
-  const [owner, repo] = raw.split('/').map((part) => part.trim()).filter(Boolean)
+  const [owner, repo] = raw
+    .split('/')
+    .map((part) => part.trim())
+    .filter(Boolean)
   return { owner: owner || 'stablyai', repo: repo || 'orca' }
 }
 
@@ -22,6 +30,7 @@ const appId = envString('ORCA_APP_ID', 'com.stablyai.orca')
 const productName = envString('ORCA_PRODUCT_NAME', 'Orca')
 const windowsExecutableName = envString('ORCA_WINDOWS_EXECUTABLE_NAME', productName)
 const artifactBaseName = envString('ORCA_ARTIFACT_BASENAME', 'orca')
+const nsisGuid = optionalEnvString('ORCA_NSIS_GUID')
 const electronBuilderArchMacro = '${arch}'
 const electronBuilderExtMacro = '${ext}'
 const electronBuilderVersionMacro = '${version}'
@@ -135,6 +144,10 @@ module.exports = {
     ]
   },
   nsis: {
+    // Why: appId/productName changes are not enough for Windows upgrade
+    // isolation in forked builds. A fork-owned NSIS GUID prevents the Axiom
+    // installer from treating upstream Orca as the app to replace/close.
+    ...(nsisGuid ? { guid: nsisGuid } : {}),
     // Why: these names intentionally keep electron-builder's `${ext}` macro as
     // a literal while still allowing the fork to override the basename.
     artifactName: `${artifactBaseName}-windows-setup.${electronBuilderExtMacro}`,

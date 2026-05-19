@@ -11,3 +11,5 @@
 
 declare const ORCA_BUILD_IDENTITY: 'stable' | 'rc' | null
 declare const ORCA_POSTHOG_WRITE_KEY: string | null
+declare const ORCA_APP_NAME: string | null
+declare const ORCA_APP_USER_MODEL_ID: string | null

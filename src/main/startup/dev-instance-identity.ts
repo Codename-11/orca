@@ -20,6 +20,27 @@ function cleanEnvValue(value: string | undefined): string | null {
     : trimmed
 }
 
+function cleanBuildValue(value: string | null | undefined): string | null {
+  return cleanEnvValue(value ?? undefined)
+}
+
+function readBuildIdentityConstant(
+  name: 'ORCA_APP_NAME' | 'ORCA_APP_USER_MODEL_ID'
+): string | null {
+  switch (name) {
+    case 'ORCA_APP_NAME':
+      return typeof ORCA_APP_NAME !== 'undefined'
+        ? cleanBuildValue(ORCA_APP_NAME)
+        : cleanBuildValue((globalThis as { ORCA_APP_NAME?: string | null }).ORCA_APP_NAME)
+    case 'ORCA_APP_USER_MODEL_ID':
+      return typeof ORCA_APP_USER_MODEL_ID !== 'undefined'
+        ? cleanBuildValue(ORCA_APP_USER_MODEL_ID)
+        : cleanBuildValue(
+            (globalThis as { ORCA_APP_USER_MODEL_ID?: string | null }).ORCA_APP_USER_MODEL_ID
+          )
+  }
+}
+
 function lastPathSegment(value: string): string {
   const normalized = value.replace(/\\/g, '/')
   return normalized.split('/').filter(Boolean).at(-1) ?? value
@@ -35,28 +56,35 @@ function formatLabel(branch: string | null, worktreeName: string | null): string
   return branch ?? worktreeName
 }
 
-function createDevAppUserModelId(identityKey: string | null): string {
+function createDevAppUserModelId(baseAppUserModelId: string, identityKey: string | null): string {
   if (!identityKey) {
-    return BASE_APP_USER_MODEL_ID
+    return baseAppUserModelId
   }
   const hash = createHash('sha1').update(identityKey).digest('hex').slice(0, 10)
-  return `${BASE_APP_USER_MODEL_ID}.dev.${hash}`
+  return `${baseAppUserModelId}.dev.${hash}`
 }
 
 export function getDevInstanceIdentity(
   isDev: boolean,
   env: NodeJS.ProcessEnv = process.env
 ): DevInstanceIdentity {
+  const baseAppName =
+    cleanEnvValue(env.ORCA_APP_NAME) ?? readBuildIdentityConstant('ORCA_APP_NAME') ?? BASE_APP_NAME
+  const baseAppUserModelId =
+    cleanEnvValue(env.ORCA_APP_USER_MODEL_ID) ??
+    readBuildIdentityConstant('ORCA_APP_USER_MODEL_ID') ??
+    BASE_APP_USER_MODEL_ID
+
   if (!isDev) {
     return {
-      name: BASE_APP_NAME,
+      name: baseAppName,
       isDev: false,
       devLabel: null,
       devBranch: null,
       devWorktreeName: null,
       devRepoRoot: null,
       dockBadgeLabel: null,
-      appUserModelId: BASE_APP_USER_MODEL_ID
+      appUserModelId: baseAppUserModelId
     }
   }
 
@@ -67,7 +95,7 @@ export function getDevInstanceIdentity(
     cleanEnvValue(path.basename(repoRoot ?? process.cwd()))
   const devLabel = cleanEnvValue(env.ORCA_DEV_INSTANCE_LABEL) ?? formatLabel(branch, worktreeName)
   const dockTitle =
-    cleanEnvValue(env.ORCA_DEV_DOCK_TITLE) ?? `${BASE_APP_NAME}: ${branch ?? devLabel ?? 'dev'}`
+    cleanEnvValue(env.ORCA_DEV_DOCK_TITLE) ?? `${baseAppName}: ${branch ?? devLabel ?? 'dev'}`
 
   return {
     name: dockTitle,
@@ -77,6 +105,6 @@ export function getDevInstanceIdentity(
     devWorktreeName: worktreeName,
     devRepoRoot: repoRoot,
     dockBadgeLabel: null,
-    appUserModelId: createDevAppUserModelId(repoRoot ?? devLabel)
+    appUserModelId: createDevAppUserModelId(baseAppUserModelId, repoRoot ?? devLabel)
   }
 }
