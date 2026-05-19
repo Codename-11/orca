@@ -6,6 +6,27 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-19 — Forge Connect settings UI
+
+Added a first-pass Forge Connect surface under Settings → Task Sources. The
+pane now includes Forge in the provider visibility checklist, plus a base URL /
+API key form that calls the existing main-process Forge config IPC through the
+runtime-aware Forge client. The form can save config, test the current saved
+connection, and clear URL/token state without storing token material in
+renderer settings; blank API key saves preserve an existing main-side token.
+
+Verification:
+- RED/GREEN helper test for URL normalization, blank-token preservation, save
+  gating, and sanitized config descriptions.
+- `pnpm exec vitest run --config config/vitest.config.ts src/main/forge src/renderer/src/components/settings/forge-connect-form.test.ts` — 52 / 52 pass.
+- `pnpm run lint` — 0 errors.
+- `pnpm run typecheck` — clean.
+
+Known environment note remains: this host is still on Node `v25.6.0` while Orca
+wants Node 24, so full native-module test runs should happen under Node 24 / CI.
+
+---
+
 ## 2026-05-19 — Forge task provider rebuild follow-up
 
 Victor audit found two Forge MCP payload-shape issues in the Claude rebuild
