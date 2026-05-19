@@ -6,6 +6,21 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-19 — Existing release rebuild switch
+
+Added a supervised `force_rebuild` input to the Axiom upstream sync workflow so
+we can rebuild and clobber assets for an already-published fork release after a
+fork-only packaging fix. The release detector now emits `forced_rebuild:<tag>`
+instead of stopping at `fork_release_exists:<tag>` when this input is set. The
+release-shell step no longer tries to convert an existing published release back
+to draft; it edits title/notes in place and lets the upload steps clobber assets.
+
+Verification:
+- `GITHUB_REPOSITORY=Codename-11/orca node config/scripts/axiom-check-upstream-release.mjs --upstream-tag v1.4.9 --force-rebuild` emitted `should_release=true` and `reason=forced_rebuild:v1.4.9`.
+- Parsed `.github/workflows/axiom-upstream-sync-release.yml` with PyYAML.
+
+---
+
 ## 2026-05-19 — Windows side-by-side installer identity fix
 
 The first Axiom Windows installer still tried to close/replace an installed

@@ -17,6 +17,11 @@ on:
         required: false
         default: false
         type: boolean
+      force_rebuild:
+        description: Rebuild and re-upload assets even if the fork release tag is already published
+        required: false
+        default: false
+        type: boolean
   schedule:
     # Poll shortly after upstream publishes. GitHub may delay schedules, so the
     # checker is idempotent against releases already present in this fork.
@@ -90,6 +95,9 @@ jobs:
           if [[ -n "${{ inputs.upstream_tag || '' }}" ]]; then
             args+=(--upstream-tag "${{ inputs.upstream_tag }}")
           fi
+          if [[ "${{ inputs.force_rebuild || false }}" == "true" ]]; then
+            args+=(--force-rebuild)
+          fi
           node config/scripts/axiom-check-upstream-release.mjs "${args[@]}"
 
       - name: Stop when already published
@@ -139,8 +147,7 @@ jobs:
             gh release edit "$tag" \
               --repo "$GITHUB_REPOSITORY" \
               --title "Axiom Orca $tag" \
-              --notes-file axiom-release-notes.md \
-              --draft
+              --notes-file axiom-release-notes.md
           else
             # The previous step has already pushed the release tag. Let GitHub
             # attach the draft to that tag; passing the tag itself as

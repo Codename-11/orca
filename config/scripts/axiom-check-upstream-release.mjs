@@ -41,13 +41,15 @@ function setOutput(name, value) {
 }
 
 function parseArgs(argv) {
-  const args = { upstreamTag: '', includePrereleases: false }
+  const args = { upstreamTag: '', includePrereleases: false, forceRebuild: false }
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
     if (arg === '--upstream-tag') {
       args.upstreamTag = argv[++i] ?? ''
     } else if (arg === '--include-prereleases') {
       args.includePrereleases = true
+    } else if (arg === '--force-rebuild') {
+      args.forceRebuild = true
     }
   }
   return args
@@ -55,10 +57,14 @@ function parseArgs(argv) {
 
 async function getCandidateRelease({ upstreamRepo, upstreamTag, includePrereleases }) {
   if (upstreamTag) {
-    return githubJson(`https://api.github.com/repos/${upstreamRepo}/releases/tags/${encodeURIComponent(upstreamTag)}`)
+    return githubJson(
+      `https://api.github.com/repos/${upstreamRepo}/releases/tags/${encodeURIComponent(upstreamTag)}`
+    )
   }
 
-  const releases = await githubJson(`https://api.github.com/repos/${upstreamRepo}/releases?per_page=20`)
+  const releases = await githubJson(
+    `https://api.github.com/repos/${upstreamRepo}/releases?per_page=20`
+  )
   if (!Array.isArray(releases)) {
     throw new Error(`GitHub releases response for ${upstreamRepo} was not an array`)
   }
@@ -104,10 +110,13 @@ async function main() {
 
   await setOutput('upstream_tag', tag)
   await setOutput('upstream_name', release.name || tag)
-  await setOutput('upstream_url', release.html_url || `https://github.com/${upstreamRepo}/releases/tag/${tag}`)
+  await setOutput(
+    'upstream_url',
+    release.html_url || `https://github.com/${upstreamRepo}/releases/tag/${tag}`
+  )
   await setOutput('upstream_prerelease', release.prerelease ? 'true' : 'false')
 
-  if (existing && existing.draft !== true) {
+  if (existing && existing.draft !== true && !args.forceRebuild) {
     await setOutput('should_release', 'false')
     await setOutput('reason', `fork_release_exists:${tag}`)
     return
@@ -116,7 +125,11 @@ async function main() {
   await setOutput('should_release', 'true')
   await setOutput(
     'reason',
-    existing?.draft === true ? `fork_draft_release_exists:${tag}` : `new_upstream_release:${tag}`
+    existing?.draft === true
+      ? `fork_draft_release_exists:${tag}`
+      : existing && args.forceRebuild
+        ? `forced_rebuild:${tag}`
+        : `new_upstream_release:${tag}`
   )
 }
 
