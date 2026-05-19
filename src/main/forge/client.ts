@@ -130,7 +130,7 @@ function normalizeIssue(value: unknown): ForgeIssue | null {
   }
 }
 
-async function forgeFetch(path: string, init: RequestInit = {}): Promise<unknown> {
+async function forgeTool(tool: string, input: Record<string, unknown> = {}): Promise<unknown> {
   const baseUrl = getForgeBaseUrl()
   if (!baseUrl) {
     throw new Error('Forge is not configured. Set ORCA_FORGE_API_URL and ORCA_FORGE_API_TOKEN.')
@@ -138,19 +138,21 @@ async function forgeFetch(path: string, init: RequestInit = {}): Promise<unknown
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS)
   try {
-    const res = await fetch(`${baseUrl}${path}`, {
-      ...init,
-      headers: { ...forgeHeaders(), ...init.headers },
+    const res = await fetch(`${baseUrl}/api/mcp/${encodeURIComponent(tool)}`, {
+      method: 'POST',
+      headers: forgeHeaders(),
+      body: JSON.stringify(input),
       signal: controller.signal
     })
     if (!res.ok) {
       const body = await res.text().catch(() => '')
-      throw new Error(`Forge request failed ${res.status}: ${body.slice(0, 200)}`)
+      throw new Error(`Forge ${tool} request failed ${res.status}: ${body.slice(0, 200)}`)
     }
-    if (res.status === 204) {
-      return null
+    const json = await res.json()
+    if (json && typeof json === 'object' && 'data' in json) {
+      return (json as { data: unknown }).data
     }
-    return res.json()
+    return json
   } finally {
     clearTimeout(timeout)
   }
@@ -184,7 +186,7 @@ export async function getStatus(): Promise<ForgeConnectionStatus> {
     return { connected: false, baseUrl: null, error: 'Forge API URL is not configured' }
   }
   try {
-    const json = await forgeFetch('/api/workspace')
+    const json = await forgeTool('workspace.get')
     const workspace = json && typeof json === 'object' ? (json as Record<string, unknown>) : {}
     return {
       connected: true,
@@ -204,24 +206,34 @@ export async function listIssues(
   filter: ForgeListFilter = 'active',
   limit = 50
 ): Promise<ForgeIssue[]> {
-  const params = new URLSearchParams({ limit: String(limit) })
-  if (filter === 'done') {
-    params.set('includeDone', 'true')
-  } else if (filter !== 'all') {
-    params.set('filter', filter)
+  if (filter === 'assigned') {
+    const json = await forgeTool('issues.assigned', { limit, includeDone: false })
+    return issueArray(json)
   }
-  const json = await forgeFetch(`/api/issues?${params.toString()}`)
+
+  const input: Record<string, unknown> = { limit }
+  if (filter === 'done') {
+    input.includeDone = true
+    input.statusCategories = ['DONE']
+  } else if (filter === 'all') {
+    input.includeDone = true
+  } else {
+    // Forge's MCP surface does not expose a "created by me" filter yet. Keep
+    // that tab useful by showing the active queue instead of calling a fake API.
+    input.statusCategories = ['BACKLOG', 'TODO', 'IN_PROGRESS', 'IN_REVIEW']
+  }
+
+  const json = await forgeTool('issues.list', input)
   return issueArray(json)
 }
 
 export async function searchIssues(query: string, limit = 50): Promise<ForgeIssue[]> {
-  const params = new URLSearchParams({ query, limit: String(limit) })
-  const json = await forgeFetch(`/api/issues?${params.toString()}`)
+  const json = await forgeTool('issues.list', { query, limit, includeDone: true })
   return issueArray(json)
 }
 
 export async function listStatuses(): Promise<ForgeIssueStatus[]> {
-  const json = await forgeFetch('/api/statuses')
+  const json = await forgeTool('statuses.list')
   return statusArray(json)
 }
 
@@ -230,10 +242,13 @@ export async function updateIssue(
   updates: ForgeIssueUpdate
 ): Promise<ForgeMutationResult> {
   try {
-    await forgeFetch(`/api/issues/${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      body: JSON.stringify(updates)
-    })
+    const { statusId, ...patch } = updates
+    if (Object.keys(patch).length > 0) {
+      await forgeTool('issues.update', { id, ...patch })
+    }
+    if (statusId) {
+      await forgeTool('issues.transition', { id, statusId })
+    }
     return { ok: true }
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) }
