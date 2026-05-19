@@ -108,12 +108,12 @@ describe('updateIssue', () => {
     expect(calls[1]).toEqual({ tool: 'issues.transition', input: { id: 'iss_1', statusId: 's2' } })
   })
 
-  it('uses issues.release when assignedAgentId is null', async () => {
+  it('uses issues.assign with agentId=null when assignedAgentId is null', async () => {
     const calls = setupTransport(() => null)
     const { updateIssue } = await import('./issues')
     await updateIssue('iss_1', { assignedAgentId: null })
     expect(calls).toHaveLength(1)
-    expect(calls[0]).toEqual({ tool: 'issues.release', input: { id: 'iss_1' } })
+    expect(calls[0]).toEqual({ tool: 'issues.assign', input: { issueId: 'iss_1', agentId: null } })
   })
 
   it('uses issues.assign when assignedAgentId is a value', async () => {
@@ -122,7 +122,7 @@ describe('updateIssue', () => {
     await updateIssue('iss_1', { assignedAgentId: 'agent-a' })
     expect(calls[0]).toEqual({
       tool: 'issues.assign',
-      input: { id: 'iss_1', agentId: 'agent-a' }
+      input: { issueId: 'iss_1', agentId: 'agent-a' }
     })
   })
 
@@ -174,8 +174,11 @@ describe('createIssue', () => {
     expect(calls[0].input).toMatchObject({
       title: 'Brand new',
       projectId: 'p1',
-      priority: 'HIGH',
-      labelIds: ['l1']
+      priority: 'HIGH'
+    })
+    expect(calls[1]).toEqual({
+      tool: 'issues.setLabels',
+      input: { issueId: 'iss_new', add: ['l1'] }
     })
   })
 })
