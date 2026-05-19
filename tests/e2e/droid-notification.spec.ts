@@ -47,6 +47,43 @@ async function getNotificationDispatches(
 }
 
 test.describe('Droid notifications', () => {
+  test('recognized agent title completion dispatches one task-complete notification', async ({
+    orcaPage,
+    electronApp
+  }) => {
+    await waitForSessionReady(orcaPage)
+    await waitForActiveWorktree(orcaPage)
+    await ensureTerminalVisible(orcaPage)
+    await waitForActiveTerminalManager(orcaPage, 30_000)
+    // Why: contextBridge freezes window.api, so notification invokes must be
+    // observed in Electron's main process rather than monkey-patched renderer-side.
+    await installMainProcessNotificationDispatchSpy(electronApp)
+    await installRendererTitleLog(orcaPage)
+
+    const ptyId = await waitForActivePanePtyId(orcaPage)
+    const marker = `__CODEX_NOTIFY_READY_${Date.now()}__`
+    await sendToTerminal(orcaPage, ptyId, `printf '${marker}\\n'\r`)
+    await waitForTerminalOutput(orcaPage, marker)
+
+    await emitOscTitle(orcaPage, ptyId, 'Codex working')
+    await emitOscTitle(orcaPage, ptyId, 'Codex done')
+
+    await expect
+      .poll(
+        async () => {
+          const dispatches = await getNotificationDispatches(electronApp)
+          return dispatches.filter((dispatch) => dispatch.source === 'agent-task-complete')
+        },
+        {
+          timeout: 10_000,
+          message: 'Codex working->done title transition did not dispatch task-complete'
+        }
+      )
+      .toEqual([
+        expect.objectContaining({ source: 'agent-task-complete', terminalTitle: 'Codex done' })
+      ])
+  })
+
   test('Factory Droid needs-input native title does not dispatch a task-complete notification', async ({
     orcaPage,
     electronApp
