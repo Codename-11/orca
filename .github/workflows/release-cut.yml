@@ -57,6 +57,10 @@ concurrency:
 
 jobs:
   cut:
+    # Axiom fork cuts releases through `axiom-upstream-sync-release.yml` so the
+    # upstream workflow stays available for comparison without publishing every
+    # desktop platform from the fork's deploy default branch.
+    if: github.repository == 'stablyai/orca'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:

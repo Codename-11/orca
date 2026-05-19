@@ -12,6 +12,11 @@ on:
         required: false
         default: false
         type: boolean
+      build_mobile:
+        description: Also run the upstream-style Android mobile APK workflow for this release
+        required: false
+        default: false
+        type: boolean
   schedule:
     # Poll shortly after upstream publishes. GitHub may delay schedules, so the
     # checker is idempotent against releases already present in this fork.
@@ -33,9 +38,10 @@ env:
   ORCA_APP_ID: com.axiom-labs.orca
   ORCA_PRODUCT_NAME: Axiom Orca
   ORCA_ARTIFACT_BASENAME: axiom-orca
-  ORCA_LINUX_EXECUTABLE_NAME: axiom-orca
-  ORCA_LINUX_DEB_PACKAGE_NAME: axiom-orca
-  ORCA_LINUX_MAINTAINER: Axiom Labs
+  # Axiom currently publishes Windows desktop builds from this fork. Mobile
+  # remains on Orca's upstream-style Mobile Release workflow and only runs on
+  # `mobile-v*` tags, manual dispatch, or the explicit build_mobile input below.
+  ORCA_RELEASE_PLATFORMS: win
   ORCA_PUBLISH_REPOSITORY: ${{ github.repository }}
   ORCA_UPDATE_OWNER: ${{ github.repository_owner }}
   ORCA_UPDATE_REPO: ${{ github.event.repository.name }}
@@ -140,20 +146,10 @@ jobs:
           path: axiom-release-notes.md
 
   build:
-    name: Build and publish ${{ matrix.os }}
+    name: Build and publish Windows desktop
     needs: sync
     if: needs.sync.outputs.should_release == 'true' && !inputs.dry_run
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            build_cmd: pnpm run build:release && pnpm exec electron-builder --config config/electron-builder.config.cjs --linux --publish always
-          - os: windows-latest
-            build_cmd: pnpm run build:release && pnpm exec electron-builder --config config/electron-builder.config.cjs --win --publish always
-          - os: macos-15
-            build_cmd: pnpm run build:release && ORCA_MAC_RELEASE=1 pnpm exec electron-builder --config config/electron-builder.config.cjs --mac --publish always
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-latest
     timeout-minutes: 90
     steps:
       - name: Checkout release tag
@@ -179,16 +175,68 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         shell: bash
-        run: ${{ matrix.build_cmd }}
+        run: pnpm run build:release && pnpm exec electron-builder --config config/electron-builder.config.cjs --win --publish always
+
+  mobile:
+    name: Build Android mobile APK when requested
+    needs: sync
+    if: needs.sync.outputs.should_release == 'true' && !inputs.dry_run && inputs.build_mobile
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.sync.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Expo prebuild
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Build Android release APK
+        run: cd android && ./gradlew assembleRelease
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: axiom-orca-mobile-apk
+          path: mobile/android/app/build/outputs/apk/release/*.apk
+
+      - name: Upload APKs to draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: gh release upload "${{ needs.sync.outputs.tag }}" --repo "$GITHUB_REPOSITORY" android/app/build/outputs/apk/release/*.apk --clobber
 
   publish:
     name: Verify assets and publish release
-    needs: [sync, build]
-    if: needs.sync.outputs.should_release == 'true' && !inputs.dry_run
+    needs: [sync, build, mobile]
+    if: always() && needs.sync.outputs.should_release == 'true' && !inputs.dry_run && needs.build.result == 'success' && (needs.mobile.result == 'success' || needs.mobile.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -207,6 +255,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          ORCA_RELEASE_PLATFORMS: ${{ env.ORCA_RELEASE_PLATFORMS }}
         run: node config/scripts/verify-release-required-assets.mjs "${{ needs.sync.outputs.tag }}"
 
       - name: Publish draft release
