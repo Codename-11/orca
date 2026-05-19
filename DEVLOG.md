@@ -6,6 +6,20 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-19 — Axiom release shell target fix
+
+The second `Axiom Upstream Sync Release` attempt passed the updater feed tests
+but failed while creating the draft GitHub release: `gh release create` sent
+`Release.target_commitish is invalid` because the workflow passed the release
+tag itself as `--target` after already pushing that tag. Removed `--target` so
+GitHub attaches the draft release to the existing tag.
+
+Verification:
+- `python3` + PyYAML parsed `.github/workflows/axiom-upstream-sync-release.yml`.
+- `ORCA_UPDATE_OWNER=Codename-11 ORCA_UPDATE_REPO=orca pnpm vitest run src/main/updater-prerelease-feed.test.ts --reporter=dot` — 16 / 16 pass.
+
+---
+
 ## 2026-05-19 — Axiom updater feed test env fix
 
 Patched `src/main/updater-prerelease-feed.test.ts` so its mocked GitHub atom

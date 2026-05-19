@@ -131,9 +131,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           tag="${{ steps.check.outputs.upstream_tag }}"
+          # The previous step has already pushed the release tag. Let GitHub
+          # attach the draft to that tag; passing the tag itself as
+          # target_commitish is invalid for `gh release create`.
           gh release create "$tag" \
             --repo "$GITHUB_REPOSITORY" \
-            --target "$tag" \
             --title "Axiom Orca $tag" \
             --notes-file axiom-release-notes.md \
             --draft
