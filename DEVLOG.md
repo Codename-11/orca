@@ -6,6 +6,32 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-19 — Forge task provider rebuild follow-up
+
+Victor audit found two Forge MCP payload-shape issues in the Claude rebuild
+before pushing: `issues.setLabels` requires `{ issueId, add, remove }`, and
+`issues.assign` requires `{ issueId, agentId }`. Patched `feat/forge-provider`
+with `fix(forge): align mutations with Forge MCP schema` and merged it back
+into `axiom/deploy`; create now performs follow-up transition/label/assign
+calls after `issues.create` instead of passing unsupported fields into the
+create payload.
+
+Additional verification:
+- Live read-only REST alias smoke against Forge: `workspace.get`,
+  `statuses.list`, `issues.list`, `projects.list`, `labels.list` — all HTTP 200.
+- Live validation smoke confirmed old `{ id, labelIds }` shape for
+  `issues.setLabels` returns HTTP 400 `issueId Required`.
+- Focused Forge tests: 53 / 53 pass.
+- `pnpm lint` — 0 errors.
+- `pnpm typecheck` — clean.
+- `pnpm run build:electron-vite` — clean.
+
+Known environment note: full `pnpm run test` still fails on this host because
+Homebrew Node `v25.6.0` is outside Orca's declared Node 24 engine and
+`better-sqlite3` segfaults after native rebuild. Use Node 24 for the full suite.
+
+---
+
 ## 2026-05-19 — Forge task provider rebuild
 
 Restructured the Forge task-provider work into a clean, upstream-friendly
