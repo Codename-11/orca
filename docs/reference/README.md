@@ -9,6 +9,12 @@ single design or implementation pass.
 - Public-facing docs that are not part of the root README.
 - Docs that other checked-in files link to.
 
+## Reference docs
+
+- [Forge task provider](./forge-task-provider.md)
+- [Task provider surface map](./task-provider-surface-map.md)
+- [Axiom Orca release readiness](./axiom-release-readiness.md)
+
 ## What Stays Out
 
 Ephemeral design notes, implementation sketches, and planning docs should stay as

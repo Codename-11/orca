@@ -6,6 +6,23 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-20 — Wave 11 release readiness docs and verification
+
+Added `docs/reference/axiom-release-readiness.md` as the durable checklist for
+fork branch policy, Axiom identity constants, update-feed safety, and release
+verification commands. Linked it from `docs/reference/README.md` so future agents
+can find it without searching the DEVLOG.
+
+Verification:
+
+- `pnpm exec vitest run --config config/vitest.config.ts src/shared/task-providers.test.ts src/renderer/src/components/task-providers/provider-ui-registry.test.tsx src/renderer/src/components/forge/ForgeIssueDetailDrawer.test.tsx src/renderer/src/components/forge/ForgeIssueCreateDialog.test.tsx src/renderer/src/components/forge/forge-agent-filter.test.ts src/main/forge src/main/axiom-release-hardening.test.ts src/main/updater-endpoints.test.ts src/main/updater-prerelease-feed.test.ts src/main/updater.test.ts src/main/updater-nudge.test.ts src/main/updater-changelog.test.ts src/main/app-build-identity.test.ts src/renderer/src/components/settings/GeneralPane.test.ts` → 172 tests passed.
+- `pnpm run typecheck` → passed.
+- `pnpm exec oxlint ...` on docs plus touched release/build identity files → passed.
+- `pnpm exec oxfmt --check ...` on docs plus touched release/build identity files → passed after formatting docs.
+- `git diff --check` → passed.
+
+---
+
 ## 2026-05-20 — Wave 10 visible Axiom Orca build identity
 
 Added renderer-safe build identity plumbing so packaged fork builds can show
@@ -38,6 +55,7 @@ Android now uses the fork-owned `com.axiomlabs.orca.mobile` package for
 side-by-side installs.
 
 Verification:
+
 - `pnpm exec vitest run --config config/vitest.config.ts src/main/axiom-release-hardening.test.ts src/main/updater-endpoints.test.ts src/main/updater-prerelease-feed.test.ts src/main/updater.test.ts src/main/updater-nudge.test.ts src/main/updater-changelog.test.ts`
 - `pnpm run typecheck`
 - `pnpm exec oxlint config/electron-builder.config.cjs electron.vite.config.ts mobile/app.json resources/build/installer.nsh src/main/axiom-release-hardening.test.ts src/main/updater-changelog.ts src/main/updater-endpoints.ts src/main/updater-endpoints.test.ts src/main/updater-nudge.ts src/main/updater-prerelease-feed.ts src/main/updater.ts src/types/build-constants.d.ts`
@@ -56,6 +74,7 @@ lists and search. The filtering helper and main Forge issue transport behavior a
 covered by targeted tests.
 
 Verification:
+
 - `pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/forge/forge-agent-filter.test.ts src/main/forge/issues.test.ts`
 - `pnpm run typecheck`
 - `pnpm exec oxlint src/main/forge/issues.ts src/main/forge/issues.test.ts src/main/ipc/forge.ts src/preload/index.ts src/preload/api-types.ts src/renderer/src/runtime/runtime-forge-client.ts src/renderer/src/components/TaskPage.tsx src/renderer/src/components/forge/forge-agent-filter.ts src/renderer/src/components/forge/forge-agent-filter.test.ts src/shared/forge-types.ts src/shared/types.ts`
@@ -73,6 +92,7 @@ CTAs for refresh, clear search, and new issue creation. The UI uses the sanitize
 `forgeConnectionStatus` metadata only; renderer code still never handles Forge tokens.
 
 Verification:
+
 - `pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/forge/forge-empty-state.test.tsx src/renderer/src/components/forge/ForgeIssueEmptyStatePanel.test.tsx`
 - `pnpm run typecheck`
 - `pnpm exec oxlint src/renderer/src/components/TaskPage.tsx src/renderer/src/components/forge/forge-empty-state.ts src/renderer/src/components/forge/forge-empty-state.test.tsx src/renderer/src/components/forge/ForgeIssueEmptyStatePanel.tsx src/renderer/src/components/forge/ForgeIssueEmptyStatePanel.test.tsx`
@@ -89,6 +109,7 @@ and whether auth comes from a saved token or environment token without exposing 
 values. Added main-process tests for sanitized workspace/auth status.
 
 Verification:
+
 - `pnpm run typecheck`
 - `pnpm exec vitest run --config config/vitest.config.ts src/main/forge/issues.test.ts src/renderer/src/lib/forge-links.test.ts src/renderer/src/components/forge/ForgeIssueDetailDrawer.test.tsx`
 - `pnpm exec oxlint src/main/forge/issues.ts src/main/forge/issues.test.ts src/renderer/src/components/TaskPage.tsx src/shared/forge-types.ts`
@@ -105,6 +126,7 @@ lets users adjust project/status inline, saves changes server-side, and applies 
 default status after issue creation via the existing Forge transition path.
 
 Verification:
+
 - `pnpm run typecheck`
 - `pnpm exec vitest run --config config/vitest.config.ts src/main/forge/issues.test.ts src/renderer/src/lib/forge-links.test.ts src/renderer/src/components/forge/ForgeIssueDetailDrawer.test.tsx`
 - `pnpm exec oxlint src/renderer/src/components/TaskPage.tsx src/shared/types.ts src/shared/constants.ts`
@@ -123,6 +145,7 @@ continues through the existing runtime/main-process Forge IPC path; renderer
 code never handles Forge API tokens.
 
 Verification:
+
 - `pnpm run typecheck`
 - `pnpm exec vitest run --config config/vitest.config.ts src/main/forge/issues.test.ts src/renderer/src/lib/forge-links.test.ts src/renderer/src/components/forge/ForgeIssueDetailDrawer.test.tsx`
 - `pnpm exec oxlint src/renderer/src/components/TaskPage.tsx src/main/forge/issues.ts src/main/forge/issues.test.ts src/renderer/src/lib/forge-links.ts src/renderer/src/lib/forge-links.test.ts`
@@ -140,6 +163,7 @@ URL is available, and new workspaces receive the canonical Forge URL instead of
 a synthetic `forge:` pseudo-link.
 
 Verification:
+
 - `pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/lib/forge-links.test.ts src/renderer/src/components/forge/ForgeIssueDetailDrawer.test.tsx`
 - `pnpm run typecheck`
 
@@ -156,6 +180,7 @@ and remove deltas, and detail metadata loads are guarded against stale async
 responses.
 
 Verification:
+
 - `pnpm exec vitest run --config config/vitest.config.ts src/main/forge/issues.test.ts src/renderer/src/components/forge/ForgeIssueDetailDrawer.test.tsx src/shared/task-providers.test.ts src/renderer/src/components/task-providers/provider-ui-registry.test.tsx`
 - `pnpm run typecheck`
 - `pnpm exec oxlint src/main/forge/issues.ts src/main/forge/issues.test.ts src/shared/forge-types.ts src/renderer/src/components/TaskPage.tsx src/renderer/src/components/forge/ForgeIssueDetailDrawer.tsx src/renderer/src/components/forge/ForgeIssueDetailDrawer.test.tsx`
@@ -173,6 +198,7 @@ shares the same metadata path as GitHub/GitLab/Linear while provider auth/RPC
 remains concrete and main-process-safe.
 
 Verification:
+
 - `pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/task-providers/provider-ui-registry.test.tsx`
 - `pnpm run typecheck`
 - `pnpm exec vitest run --config config/vitest.config.ts src/shared/task-providers.test.ts src/renderer/src/components/task-providers/provider-ui-registry.test.tsx`
@@ -187,6 +213,7 @@ start with provider UI metadata/capabilities, keep provider auth/RPC concrete,
 and leave Axiom release/update identity outside any upstream PR shape.
 
 Verification:
+
 - `pnpm run typecheck`
 - `pnpm exec vitest run --config config/vitest.config.ts src/shared/task-providers.test.ts src/main/forge src/renderer/src/store/slices/forge.test.ts src/renderer/src/runtime/runtime-forge-client.test.ts`
 
@@ -278,6 +305,7 @@ release-shell step no longer tries to convert an existing published release back
 to draft; it edits title/notes in place and lets the upload steps clobber assets.
 
 Verification:
+
 - `GITHUB_REPOSITORY=Codename-11/orca node config/scripts/axiom-check-upstream-release.mjs --upstream-tag v1.4.9 --force-rebuild` emitted `should_release=true` and `reason=forced_rebuild:v1.4.9`.
 - Parsed `.github/workflows/axiom-upstream-sync-release.yml` with PyYAML.
 
@@ -296,6 +324,7 @@ separate installer/update/runtime identity from upstream.
 This only updates source config; no rebuild, release upload, or repush was run.
 
 Verification:
+
 - `pnpm exec vitest run --config config/vitest.config.ts src/main/startup --reporter=dot` — 40 / 40 pass.
 - Required `config/electron-builder.config.cjs` with Axiom env and asserted
   `appId`, `productName`, `win.executableName`, and `nsis.guid`.
@@ -314,6 +343,7 @@ install side-by-side with the upstream Orca mobile app instead of replacing it.
 This only updates source config; no rebuild, release upload, or repush was run.
 
 Verification:
+
 - Parsed `mobile/app.json` with Node and asserted `expo.android.package === "com.axiomlabs.orca.mobile"`.
 - `git diff --check`.
 
@@ -333,6 +363,7 @@ release detector now treats existing draft releases as resumable work and the
 release-shell step edits an existing draft instead of failing on recreate.
 
 Verification:
+
 - RED: `ORCA_ARTIFACT_BASENAME=axiom-orca node -e "require('./config/electron-builder.config.cjs')"` failed with `ReferenceError: ext is not defined`.
 - GREEN: required `config/electron-builder.config.cjs` and printed `axiom-orca-windows-setup.${ext}`, `axiom-orca-macos-${arch}.${ext}`, `axiom-orca-linux.${ext}`, and `orca-ide_${version}_${arch}.${ext}`.
 - `node --check config/electron-builder.config.cjs`.
@@ -354,6 +385,7 @@ the upstream branch ref, so it now fetches upstream with `--no-tags` and leaves
 fork release tags to the origin fetch / create-tag step.
 
 Verification:
+
 - `python3` + PyYAML parsed `.github/workflows/axiom-upstream-sync-release.yml`.
 - `git fetch upstream main --no-tags` succeeds with the conflicting local `v1.4.9` tag present.
 - `git fetch origin axiom/deploy --tags` succeeds.
@@ -370,6 +402,7 @@ fixtures were still hardcoded to upstream `stablyai/orca`, causing the feed tag
 regex to find no parseable releases in CI.
 
 Verification:
+
 - `ORCA_UPDATE_OWNER=Codename-11 ORCA_UPDATE_REPO=orca pnpm exec vitest run --config config/vitest.config.ts src/main/updater-prerelease-feed.test.ts --reporter=verbose` — 16 / 16 pass.
 - `pnpm exec vitest run --config config/vitest.config.ts src/main/updater-prerelease-feed.test.ts --reporter=verbose` — 16 / 16 pass.
 - `pnpm exec oxlint src/main/updater-prerelease-feed.test.ts` — 0 errors.
@@ -389,6 +422,7 @@ connection, and clear URL/token state without storing token material in
 renderer settings; blank API key saves preserve an existing main-side token.
 
 Verification:
+
 - RED/GREEN helper test for URL normalization, blank-token preservation, save
   gating, and sanitized config descriptions.
 - `pnpm exec vitest run --config config/vitest.config.ts src/main/forge src/renderer/src/components/settings/forge-connect-form.test.ts` — 52 / 52 pass.
@@ -411,6 +445,7 @@ calls after `issues.create` instead of passing unsupported fields into the
 create payload.
 
 Additional verification:
+
 - Live read-only REST alias smoke against Forge: `workspace.get`,
   `statuses.list`, `issues.list`, `projects.list`, `labels.list` — all HTTP 200.
 - Live validation smoke confirmed old `{ id, labelIds }` shape for
@@ -436,12 +471,12 @@ session carved out a focused `feat/forge-provider` branch that branches off
 
 ### Branch layout
 
-| Branch | Purpose | State |
-|---|---|---|
-| `main` | tracks `upstream/main` | untouched (`03b88951`) |
-| `feat/forge-provider` | clean Forge slice | 6 commits off `main`, ready to keep building on |
-| `axiom/deploy` | merge / release branch | merged `feat/forge-provider`, +7 commits ahead of `origin` |
-| `axiom/forge-task-provider-updater` | superseded mixed branch | left in place, no longer the source of truth |
+| Branch                              | Purpose                 | State                                                      |
+| ----------------------------------- | ----------------------- | ---------------------------------------------------------- |
+| `main`                              | tracks `upstream/main`  | untouched (`03b88951`)                                     |
+| `feat/forge-provider`               | clean Forge slice       | 6 commits off `main`, ready to keep building on            |
+| `axiom/deploy`                      | merge / release branch  | merged `feat/forge-provider`, +7 commits ahead of `origin` |
+| `axiom/forge-task-provider-updater` | superseded mixed branch | left in place, no longer the source of truth               |
 
 Not pushed yet. `axiom/deploy` is ahead of `origin/axiom/deploy` by 7
 commits (Forge work + the merge commit).
@@ -449,6 +484,7 @@ commits (Forge work + the merge commit).
 ### What landed
 
 **Main process** (`src/main/forge/`)
+
 - `config.ts` — secure credential storage. `~/.orca/forge-config.json`
   (plaintext baseUrl at 0600) + `~/.orca/forge-token.enc` (safeStorage,
   falls back to plaintext-0600 on keychain-less Linux). Disk wins over env;
@@ -468,6 +504,7 @@ commits (Forge work + the merge commit).
   `labels.list`.
 
 **IPC** (`src/main/ipc/forge.ts`)
+
 - Channels: `forge:status`, `forge:getConfig`, `forge:saveConfig`,
   `forge:clearConfig`, `forge:listStatuses`, `forge:listProjects`,
   `forge:listLabels`, `forge:listAgents`, `forge:listIssues`,
@@ -477,9 +514,11 @@ commits (Forge work + the merge commit).
   tokens never cross the IPC boundary.
 
 **Preload** (`src/preload/api-types.ts`, `src/preload/index.ts`)
+
 - `window.api.forge.*` exposes the full surface.
 
 **Renderer**
+
 - `src/renderer/src/runtime/runtime-forge-client.ts` — local + remote
   runtime wrappers around each IPC call.
 - `src/renderer/src/store/slices/forge.ts` — new Zustand slice. Connection
@@ -498,6 +537,7 @@ commits (Forge work + the merge commit).
   view. List view remains the default.
 
 **Shared types** (`src/shared/forge-types.ts`)
+
 - Added `ForgeLabel`, `ForgeComment`, `ForgeIssueCreate`,
   `ForgeConfigSettings`, `ForgeSaveConfigArgs`, and `ForgeIssueCreateResult`
   / `ForgeCommentCreateResult` tagged unions. `ForgeIssueUpdate` widened
@@ -505,6 +545,7 @@ commits (Forge work + the merge commit).
   `src/shared/types.ts`.
 
 **Tests** (`src/main/forge/`)
+
 - `client.test.ts` — normalization, identifier fallback (AXI-123 synthesis),
   array extractor shapes, transport (env→header→URL plumbing, error
   surface, 204 handling, `ForgeNotConfiguredError`).
