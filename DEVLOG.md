@@ -6,6 +6,25 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-20 — Wave 10 visible Axiom Orca build identity
+
+Added renderer-safe build identity plumbing so packaged fork builds can show
+`Axiom Orca` as the visible app/build name instead of relying on the upstream
+Orca label. The main process now resolves compile-time app name / User Model ID
+constants for packaged startup, exposes a safe `updater:getBuildInfo` IPC
+payload, and the General settings update section displays `Current build:
+<name> <version>`.
+
+Verification:
+
+- `pnpm exec vitest run --config config/vitest.config.ts src/main/app-build-identity.test.ts src/renderer/src/components/settings/GeneralPane.test.ts src/main/window/attach-main-window-services.test.ts` → 12 tests passed.
+- `pnpm run typecheck` → passed.
+- `pnpm exec oxlint ...` on touched Wave 10 files → passed.
+- `pnpm exec oxfmt --check ...` on touched Wave 10 files → passed.
+- `git diff --check` → passed.
+
+---
+
 ## 2026-05-20 — Wave 9 Axiom updater and release hardening
 
 Hardened the fork build and updater path so Axiom Orca releases stay isolated

@@ -42,6 +42,7 @@ import {
 } from './startup/configure-process'
 import { startFirstWindowStartupServices } from './startup/first-window-startup-services'
 import { getDevInstanceIdentity } from './startup/dev-instance-identity'
+import { resolveConfiguredAppIdentity } from './app-build-identity'
 import { hydrateShellPath, mergePathSegments } from './startup/hydrate-shell-path'
 import { acquireSingleInstanceLock } from './startup/single-instance-lock'
 import { RateLimitService } from './rate-limits/service'
@@ -107,6 +108,7 @@ let watcherShutdownPromise: Promise<void> | null = null
 let watcherShutdownDone = false
 let automations: AutomationService | null = null
 const isServeMode = process.argv.includes('--serve')
+const configuredAppIdentity = resolveConfiguredAppIdentity()
 const devInstanceIdentity = getDevInstanceIdentity(is.dev)
 const devAgentHookEndpointNamespace = devInstanceIdentity.isDev
   ? devInstanceIdentity.appUserModelId
@@ -722,8 +724,12 @@ function driveSyntheticTitleFromHook(
 }
 
 app.whenReady().then(async () => {
-  electronApp.setAppUserModelId(devInstanceIdentity.appUserModelId)
-  app.setName(devInstanceIdentity.name)
+  electronApp.setAppUserModelId(
+    devInstanceIdentity.isDev
+      ? devInstanceIdentity.appUserModelId
+      : configuredAppIdentity.appUserModelId
+  )
+  app.setName(devInstanceIdentity.isDev ? devInstanceIdentity.name : configuredAppIdentity.name)
 
   if (process.platform === 'darwin' && is.dev) {
     const dockIcon = nativeImage.createFromPath(devIcon)

@@ -24,6 +24,7 @@ import {
   setupAutoUpdater,
   dismissNudge
 } from '../updater'
+import { buildAppInfo } from '../app-build-identity'
 import { scheduleHistoryGc } from '../terminal-history'
 import { hydrateLocalPtyRegistryAtBoot } from '../memory/hydrate-local-pty-registry'
 import type { ClaudeRuntimeAuthPreparation } from '../claude-accounts/runtime-auth-service'
@@ -355,6 +356,7 @@ function registerFileDropRelay(mainWindow: BrowserWindow): void {
 export function registerUpdaterHandlers(_store: Store): void {
   ipcMain.removeHandler('updater:getStatus')
   ipcMain.removeHandler('updater:getVersion')
+  ipcMain.removeHandler('updater:getBuildInfo')
   ipcMain.removeHandler('updater:check')
   ipcMain.removeHandler('updater:download')
   ipcMain.removeHandler('updater:quitAndInstall')
@@ -362,6 +364,7 @@ export function registerUpdaterHandlers(_store: Store): void {
 
   ipcMain.handle('updater:getStatus', () => getUpdateStatus())
   ipcMain.handle('updater:getVersion', () => app.getVersion())
+  ipcMain.handle('updater:getBuildInfo', () => buildAppInfo(app.getVersion()))
   ipcMain.handle('updater:check', (_event, options?: { includePrerelease?: boolean }) =>
     checkForUpdatesFromMenu(options)
   )

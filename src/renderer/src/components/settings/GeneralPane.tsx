@@ -55,6 +55,19 @@ export function shouldCommitOpenInApplicationsDraft(applications: OpenInApplicat
   })
 }
 
+type AppBuildInfo = {
+  name: string
+  version: string
+  appUserModelId?: string
+}
+
+export function formatAppBuildLabel(buildInfo: AppBuildInfo | null): string {
+  if (!buildInfo) {
+    return 'Orca …'
+  }
+  return `${buildInfo.name} ${buildInfo.version}`
+}
+
 export { GENERAL_PANE_SEARCH_ENTRIES }
 
 type GeneralPaneProps = {
@@ -89,7 +102,7 @@ export function GeneralPane({ settings, updateSettings }: GeneralPaneProps): Rea
     // as a download failure based on a stale version from a prior cycle.
     updateVersionRef.current = null
   }
-  const [appVersion, setAppVersion] = useState<string | null>(null)
+  const [appBuildInfo, setAppBuildInfo] = useState<AppBuildInfo | null>(null)
   const [autoSaveDelayDraft, setAutoSaveDelayDraft] = useState(
     String(settings.editorAutoSaveDelayMs)
   )
@@ -110,7 +123,7 @@ export function GeneralPane({ settings, updateSettings }: GeneralPaneProps): Rea
   >('loading')
 
   useEffect(() => {
-    window.api.updater.getVersion().then(setAppVersion)
+    window.api.updater.getBuildInfo().then(setAppBuildInfo)
   }, [])
 
   useEffect(() => {
@@ -748,7 +761,9 @@ export function GeneralPane({ settings, updateSettings }: GeneralPaneProps): Rea
       <section key="updates" className="space-y-4">
         <div className="space-y-1">
           <h3 className="text-sm font-semibold">Updates</h3>
-          <p className="text-xs text-muted-foreground">Current version: {appVersion ?? '…'}</p>
+          <p className="text-xs text-muted-foreground">
+            Current build: {formatAppBuildLabel(appBuildInfo)}
+          </p>
         </div>
 
         <SearchableSetting

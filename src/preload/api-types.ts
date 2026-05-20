@@ -1325,6 +1325,7 @@ export type PreloadApi = {
   }
   updater: {
     getVersion: () => Promise<string>
+    getBuildInfo: () => Promise<{ name: string; version: string; appUserModelId: string }>
     getStatus: () => Promise<UpdateStatus>
     check: (options?: { includePrerelease?: boolean }) => Promise<void>
     download: () => Promise<void>

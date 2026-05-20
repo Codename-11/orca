@@ -1036,6 +1036,12 @@ function createAccountsApi(): never {
 function createUpdaterApi(): NonNullable<Partial<PreloadApi>['updater']> {
   return {
     getVersion: () => Promise.resolve('web'),
+    getBuildInfo: () =>
+      Promise.resolve({
+        name: 'Orca Web',
+        version: 'web',
+        appUserModelId: 'com.stablyai.orca.web'
+      }),
     getStatus: () => Promise.resolve({ state: 'idle' } as never),
     check: () => Promise.resolve(),
     download: () => Promise.resolve(),
