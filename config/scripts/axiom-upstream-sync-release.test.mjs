@@ -184,7 +184,7 @@ describe('Axiom upstream sync release workflow', () => {
 })
 
 describe('Axiom upstream sync script hardening', () => {
-  it('fails loudly on merge conflicts and verifies Axiom identity after upstream sync', () => {
+  it('fails loudly on unsafe merge conflicts and verifies Axiom identity after upstream sync', () => {
     expect(syncScript).toContain('printConflictDiagnostics')
     expect(syncScript).toContain('assertAxiomIdentityFiles')
     expect(syncScript).toContain('Upstream merge conflicted')
@@ -192,5 +192,12 @@ describe('Axiom upstream sync script hardening', () => {
     expect(syncScript).toContain('com.axiomlabs.orca.mobile')
     expect(syncScript).toContain('ORCA_UPDATE_OWNER')
     expect(syncScript).toContain('ORCA_UPDATE_REPO')
+  })
+
+  it('auto-resolves only the expected package.json version conflict before failing unsafe merges', () => {
+    expect(syncScript).toContain('resolvePackageVersionConflict')
+    expect(syncScript).toContain("conflicts.length === 1 && conflicts[0] === 'package.json'")
+    expect(syncScript).toContain('versionConflictPattern')
+    expect(syncScript).toContain("runInherited('git', ['add', 'package.json'])")
   })
 })

@@ -86,6 +86,41 @@ function printConflictDiagnostics(error) {
   }
 }
 
+function resolvePackageVersionConflict(forkVersion) {
+  if (!forkVersion) {
+    return false
+  }
+  const conflicts = unresolvedConflictFiles()
+  if (!(conflicts.length === 1 && conflicts[0] === 'package.json')) {
+    return false
+  }
+
+  const content = readFileSync('package.json', 'utf8')
+  const versionConflictPattern =
+    /<<<<<<<[^\n]*\n(\s*"version":\s*"[^"]+",\n)=======\n(\s*"version":\s*"[^"]+",\n)>>>>>>>[^\n]*(?:\n)?/m
+  const matches = [...content.matchAll(new RegExp(versionConflictPattern, 'g'))]
+  if (matches.length !== 1) {
+    return false
+  }
+
+  const indentation = matches[0][1].match(/^(\s*)/)?.[1] ?? '  '
+  const resolved = content.replace(
+    versionConflictPattern,
+    `${indentation}"version": "${forkVersion}",\n`
+  )
+  if (
+    resolved.includes('<<<<<<<') ||
+    resolved.includes('=======') ||
+    resolved.includes('>>>>>>>')
+  ) {
+    return false
+  }
+  JSON.parse(resolved)
+  writeFileSync('package.json', resolved)
+  console.log(`Auto-resolved package.json version conflict to ${forkVersion}`)
+  return true
+}
+
 function parseArgs(argv) {
   const args = { upstreamTag: '', forkVersion: '', forkTag: '' }
   for (let i = 0; i < argv.length; i += 1) {
@@ -166,10 +201,23 @@ function main() {
   try {
     runInherited('git', ['merge', '--no-ff', '--no-edit', mergeRef])
   } catch (error) {
-    printConflictDiagnostics(error)
-    throw new Error(
-      'Upstream merge conflicted; resolve conflicts without clobbering Axiom identity/update settings.'
-    )
+    if (resolvePackageVersionConflict(args.forkVersion)) {
+      runInherited('git', ['add', 'package.json'])
+      const conflicts = unresolvedConflictFiles()
+      if (conflicts.length === 0) {
+        runInherited('git', ['commit', '--no-edit'])
+      } else {
+        printConflictDiagnostics(error)
+        throw new Error(
+          'Upstream merge still has unsafe conflicts after package.json version auto-resolution.'
+        )
+      }
+    } else {
+      printConflictDiagnostics(error)
+      throw new Error(
+        'Upstream merge conflicted; resolve conflicts without clobbering Axiom identity/update settings.'
+      )
+    }
   }
   assertAxiomIdentityFiles()
   const versionChanged = updatePackageVersion(args.forkVersion)
