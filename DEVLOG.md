@@ -6,6 +6,18 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-19 — Forge provider enhancement plan
+
+Added `docs/plans/2026-05-19-forge-provider-enhancements.md` to sequence the
+remaining Forge provider work: Linear-style issue details, canonical Forge links,
+issue creation, Forge defaults, richer auth/workspace status, onboarding empty
+states, agent-native filters, Axiom build identity, and updater hardening for
+fork-only releases. The plan keeps Forge work upstream-compatible by separating
+provider registry seams from fork-specific implementation and preserving the
+`main` / `feat/forge-provider` / `axiom/deploy` branch contract.
+
+---
+
 ## 2026-05-19 — Forge integration settings polish
 
 Moved Forge connection management out of Task Sources and into Integrations so
