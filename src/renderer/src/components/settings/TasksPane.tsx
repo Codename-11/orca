@@ -1,13 +1,12 @@
-import { Check, Github, Gitlab } from 'lucide-react'
+import { Check } from 'lucide-react'
 import type { GlobalSettings, TaskProvider } from '../../../../shared/types'
 import {
-  TASK_PROVIDERS,
   normalizeVisibleTaskProviders,
-  resolveVisibleTaskProvider
+  resolveVisibleTaskProvider,
+  toggleVisibleTaskProvider
 } from '../../../../shared/task-providers'
 import { cn } from '@/lib/utils'
-import { LinearIcon } from '@/components/icons/LinearIcon'
-import { ForgeIcon } from '@/components/icons/ForgeIcon'
+import { TASK_PROVIDER_UI_OPTIONS } from '@/components/task-providers/provider-ui-registry'
 import { Label } from '../ui/label'
 import { SearchableSetting } from './SearchableSetting'
 
@@ -15,38 +14,6 @@ type TasksPaneProps = {
   settings: GlobalSettings
   updateSettings: (updates: Partial<GlobalSettings>) => void
 }
-
-const TASK_PROVIDER_OPTIONS: readonly {
-  id: TaskProvider
-  label: string
-  description: string
-  Icon: (props: { className?: string }) => React.JSX.Element
-}[] = [
-  {
-    id: 'github',
-    label: 'GitHub',
-    description: 'Show GitHub in the Tasks source picker and sidebar shortcuts.',
-    Icon: ({ className }) => <Github className={className} />
-  },
-  {
-    id: 'gitlab',
-    label: 'GitLab',
-    description: 'Show GitLab in the Tasks source picker and sidebar shortcuts.',
-    Icon: ({ className }) => <Gitlab className={className} />
-  },
-  {
-    id: 'linear',
-    label: 'Linear',
-    description: 'Show Linear in the Tasks source picker and sidebar shortcuts.',
-    Icon: ({ className }) => <LinearIcon className={className} />
-  },
-  {
-    id: 'forge',
-    label: 'Forge',
-    description: 'Show Forge in the Tasks source picker and sidebar shortcuts.',
-    Icon: ({ className }) => <ForgeIcon className={className} />
-  }
-]
 
 export function TasksPane({ settings, updateSettings }: TasksPaneProps): React.JSX.Element {
   const visibleProviders = normalizeVisibleTaskProviders(settings.visibleTaskProviders)
@@ -57,9 +24,7 @@ export function TasksPane({ settings, updateSettings }: TasksPaneProps): React.J
       return
     }
 
-    const nextProviders = isVisible
-      ? visibleProviders.filter((entry) => entry !== provider)
-      : TASK_PROVIDERS.filter((entry) => entry === provider || visibleProviders.includes(entry))
+    const nextProviders = toggleVisibleTaskProvider(visibleProviders, provider)
 
     updateSettings({
       visibleTaskProviders: nextProviders,
@@ -94,7 +59,7 @@ export function TasksPane({ settings, updateSettings }: TasksPaneProps): React.J
           ]}
           className="grid gap-2"
         >
-          {TASK_PROVIDER_OPTIONS.map((option) => {
+          {TASK_PROVIDER_UI_OPTIONS.map((option) => {
             const enabled = visibleProviders.includes(option.id)
             const isLastEnabled = enabled && visibleProviders.length === 1
             const Icon = option.Icon

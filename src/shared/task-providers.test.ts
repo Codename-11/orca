@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  TASK_PROVIDERS,
   filterAvailableTaskProviders,
   normalizeVisibleTaskProviders,
-  resolveVisibleTaskProvider
+  resolveVisibleTaskProvider,
+  toggleVisibleTaskProvider
 } from './task-providers'
 
 describe('task providers', () => {
@@ -38,5 +40,26 @@ describe('task providers', () => {
         linearConnected: false
       })
     ).toEqual(['github'])
+  })
+
+  it('serializes task-source toggles with canonical provider IDs and order', () => {
+    expect(toggleVisibleTaskProvider(['github', 'linear'], 'forge')).toEqual([
+      'github',
+      'linear',
+      'forge'
+    ])
+    expect(toggleVisibleTaskProvider(['github', 'linear', 'forge'], 'linear')).toEqual([
+      'github',
+      'forge'
+    ])
+    expect(toggleVisibleTaskProvider(['forge'], 'forge')).toEqual(['forge'])
+  })
+
+  it('uses the shared provider order when adding a hidden provider', () => {
+    expect(toggleVisibleTaskProvider(['forge'], 'gitlab')).toEqual(['gitlab', 'forge'])
+    expect(toggleVisibleTaskProvider(['linear'], 'github')).toEqual(['github', 'linear'])
+    expect(toggleVisibleTaskProvider(['github'], 'forge')).toEqual(
+      TASK_PROVIDERS.filter((provider) => provider === 'github' || provider === 'forge')
+    )
   })
 })

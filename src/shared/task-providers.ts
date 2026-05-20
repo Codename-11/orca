@@ -50,6 +50,24 @@ export function filterAvailableTaskProviders(
   return available.length > 0 ? available : ['github']
 }
 
+export function toggleVisibleTaskProvider(
+  visibleProviders: readonly TaskProvider[],
+  provider: TaskProvider
+): TaskProvider[] {
+  const normalized = normalizeVisibleTaskProviders([...visibleProviders])
+  const isVisible = normalized.includes(provider)
+
+  if (isVisible && normalized.length === 1) {
+    return normalized
+  }
+
+  if (isVisible) {
+    return normalized.filter((entry) => entry !== provider)
+  }
+
+  return TASK_PROVIDERS.filter((entry) => entry === provider || normalized.includes(entry))
+}
+
 export function resolveVisibleTaskProvider(
   preferred: TaskProvider | null | undefined,
   visibleProviders: readonly TaskProvider[]

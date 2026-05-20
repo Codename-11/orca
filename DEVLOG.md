@@ -6,6 +6,21 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-19 — Forge provider Wave 1 registry seam
+
+Added a renderer task-provider UI registry so provider labels, icons, settings
+routing, onboarding copy, and capability flags live in one place instead of being
+duplicated between Task Sources and the Tasks page source picker. Forge now
+shares the same metadata path as GitHub/GitLab/Linear while provider auth/RPC
+remains concrete and main-process-safe.
+
+Verification:
+- `pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/task-providers/provider-ui-registry.test.tsx`
+- `pnpm run typecheck`
+- `pnpm exec vitest run --config config/vitest.config.ts src/shared/task-providers.test.ts src/renderer/src/components/task-providers/provider-ui-registry.test.tsx`
+
+---
+
 ## 2026-05-19 — Forge provider Wave 0 audit
 
 Added `docs/reference/task-provider-surface-map.md` to capture the current
