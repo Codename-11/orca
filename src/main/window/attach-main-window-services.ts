@@ -41,8 +41,12 @@ export function attachMainWindowServices(
   store: Store,
   runtime: OrcaRuntimeService,
   getSelectedCodexHomePath?: () => string | null,
-  prepareClaudeAuth?: () => Promise<ClaudeRuntimeAuthPreparation>
+  prepareClaudeAuth?: () => Promise<ClaudeRuntimeAuthPreparation>,
+  options?: {
+    onBeforeRendererReload?: (args: { webContentsId: number; ignoreCache: boolean }) => void
+  }
 ): void {
+  registerAppReloadHandler(mainWindow, options?.onBeforeRendererReload)
   registerRepoHandlers(mainWindow, store)
   registerWorktreeHandlers(mainWindow, store, runtime)
   registerWorkspaceCleanupHandlers(store, { runtime, getLocalPtyProvider })
@@ -206,6 +210,27 @@ export function attachMainWindowServices(
     // close prevents stale tab→webContents ids from leaking across app relaunch
     // or hot-reload cycles.
     browserManager.unregisterAll()
+  })
+}
+
+function registerAppReloadHandler(
+  mainWindow: BrowserWindow,
+  onBeforeRendererReload?: (args: { webContentsId: number; ignoreCache: boolean }) => void
+): void {
+  // Why: the process-global IPC handler can outlive the BrowserWindow, so keep
+  // the registered WebContents and guard both lifetimes before using it.
+  const mainWebContents = mainWindow.webContents
+  ipcMain.removeHandler('app:reload')
+  ipcMain.handle('app:reload', (event) => {
+    if (
+      mainWindow.isDestroyed() ||
+      mainWebContents.isDestroyed() ||
+      event.sender !== mainWebContents
+    ) {
+      return
+    }
+    onBeforeRendererReload?.({ webContentsId: mainWebContents.id, ignoreCache: false })
+    mainWebContents.reload()
   })
 }
 
