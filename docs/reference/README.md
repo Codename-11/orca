@@ -14,6 +14,7 @@ single design or implementation pass.
 - [Forge task provider](./forge-task-provider.md)
 - [Task provider surface map](./task-provider-surface-map.md)
 - [Axiom Orca release readiness](./axiom-release-readiness.md)
+- [Hermes repository-dispatch watcher](./hermes-repository-dispatch-watcher.md)
 
 ## What Stays Out
 

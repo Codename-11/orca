@@ -99,6 +99,16 @@ The clean upstream mirror workflow lives at
 events (`upstream_main` / `upstream_push`) and fast-forwards fork `main` from
 `stablyai/orca/main` only when the payload ref is `refs/heads/main` (or `main`).
 
+Hermes owns the lightweight upstream watcher for cases where a true upstream
+GitHub webhook is unavailable. `config/scripts/hermes-repository-dispatch-watcher.mjs`
+polls the latest semver upstream tag and upstream `main` SHA, stores last-seen
+state under `~/.hermes/state/`, and dispatches only changed surfaces to the two
+workflows above. The watcher is silent on success, dispatches the current
+snapshot once on first run so a newly-created watcher does not miss an already
+visible upstream tag, and is documented in
+`docs/reference/hermes-repository-dispatch-watcher.md` so the pattern can be
+reused for other upstream/fork watchers.
+
 Example dispatch payloads for a webhook bridge:
 
 ```bash

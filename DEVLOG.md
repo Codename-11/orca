@@ -6,6 +6,50 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-20 — Hermes upstream dispatch watcher
+
+Added a reusable Hermes-owned repository-dispatch watcher at
+`config/scripts/hermes-repository-dispatch-watcher.mjs`. The script polls an
+upstream repository's latest semver tag plus branch SHA, compares against a
+profile-local state file, and sends `repository_dispatch` events only for changed
+surfaces. It is generic via `--upstream-repo`, `--target-repo`, event-name, branch,
+and state-file flags; it reads GitHub auth from `GH_TOKEN` / `GITHUB_TOKEN` or
+`gh auth token`, stays silent on success, and prints only concise actionable
+errors on failure.
+
+Installed the live Hermes script-only wrapper at
+`~/.hermes/scripts/orca-upstream-watcher.sh` and registered the enabled Hermes
+cron job `Orca Upstream Dispatch Watcher` (`e029ff924c8c`) on `every 15m` with
+`no_agent: true`; a manual scheduler run completed with `last_status: ok`. The
+state file is
+`~/.hermes/state/orca-upstream-watcher.json`. A manual dry run showed no pending
+dispatches after state bootstrap for upstream `v1.4.14-rc.0` and main SHA
+`e88b4d1a160919db83d4c4d38cbdaf9e919fe6b9`.
+
+Documented the reusable pattern in
+`docs/reference/hermes-repository-dispatch-watcher.md`, linked it from
+`docs/reference/README.md`, and added the Hermes watcher handoff to
+`docs/reference/axiom-release-readiness.md`.
+
+Bootstrap dispatch smoke: manually sent an `upstream_release` dispatch for
+`v1.4.14-rc.0` after the watcher detected the current upstream tag. GitHub run
+`26195770072` proved the dispatch path works, then failed loudly in the protected
+sync step due upstream merge conflicts in `package.json`,
+`src/renderer/src/components/settings/GeneralPane.test.ts`, and
+`src/renderer/src/components/settings/GeneralPane.tsx`. The workflow's durable
+failure notifier completed successfully.
+
+Verification:
+
+- `pnpm exec vitest run --config config/vitest.config.ts config/scripts/hermes-repository-dispatch-watcher.test.mjs config/scripts/axiom-upstream-sync-release.test.mjs` → 20 tests passed.
+- `node --check config/scripts/hermes-repository-dispatch-watcher.mjs` → passed.
+- `pnpm run typecheck` → passed.
+- `pnpm exec oxlint ...` on watcher/tests/docs → passed.
+- `pnpm exec oxfmt --check ...` on watcher/tests/docs → passed after formatting.
+- `git diff --check` → passed.
+
+---
+
 ## 2026-05-20 — Event-driven upstream hooks for releases and main mirror
 
 Replaced the Axiom release workflow's interval timer with event-driven triggers.
