@@ -6,6 +6,39 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-20 — Event-driven upstream hooks for releases and main mirror
+
+Replaced the Axiom release workflow's interval timer with event-driven triggers.
+Upstream release/tag hooks now enter through `repository_dispatch` event types
+`upstream_release` / `upstream_tag` with `client_payload.upstream_tag`, `tag`, or
+`ref`; manual release tests still use `workflow_dispatch`, and Axiom-only releases
+still support pushed `axiom-v*` tags. The workflow no longer references
+`AXIOM_AUTO_RELEASES` or a cron schedule.
+
+Added `.github/workflows/axiom-upstream-main-sync.yml` as a separate clean-mirror
+path for upstream commits. It accepts `repository_dispatch` events
+`upstream_main` / `upstream_push` (or manual dispatch), ignores non-main refs, and
+fast-forwards fork `main` from `stablyai/orca/main` without touching
+`axiom/deploy` or publishing releases. Updated release readiness docs with example
+GitHub dispatch payloads for a webhook bridge.
+
+Verification:
+
+- `pnpm exec vitest run --config config/vitest.config.ts config/scripts/axiom-upstream-sync-release.test.mjs` → 14 tests passed.
+- `pnpm run typecheck` → passed.
+- `pnpm exec oxlint ...` on touched workflows/docs/tests → passed.
+- `pnpm exec oxfmt --check ...` on touched workflows/docs/tests → passed after formatting tests.
+- Parsed both Axiom workflow YAML files with PyYAML → passed.
+- `git diff --check` → passed.
+- Manual `Axiom Upstream Main Mirror` dispatch run `26194139870` succeeded and
+  fast-forwarded fork `main` to match `stablyai/orca/main`.
+- Repository-dispatch release hook smoke run `26194168256` succeeded and stopped
+  at the already-published `axiom-v1.4.13-axiom.1` release.
+- Repository-dispatch main hook smoke run `26194186289` succeeded as a no-op once
+  fork `main` was already aligned.
+
+---
+
 ## 2026-05-20 — Tag-only Axiom release triggers and updater tag parsing
 
 Hardened the Axiom release lane so it only reacts to intentional release tags:

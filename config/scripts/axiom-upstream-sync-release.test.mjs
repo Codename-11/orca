@@ -15,6 +15,7 @@ import {
 } from './verify-release-required-assets.mjs'
 
 const workflow = readFileSync('.github/workflows/axiom-upstream-sync-release.yml', 'utf8')
+const mirrorWorkflow = readFileSync('.github/workflows/axiom-upstream-main-sync.yml', 'utf8')
 const checkScript = readFileSync('config/scripts/axiom-check-upstream-release.mjs', 'utf8')
 const syncScript = readFileSync('config/scripts/axiom-sync-upstream-release.mjs', 'utf8')
 const notifyScript = readFileSync('config/scripts/axiom-report-sync-failure.mjs', 'utf8')
@@ -90,6 +91,18 @@ describe('Axiom upstream sync release workflow', () => {
     expect(workflow).toContain('ref: ${{ needs.sync.outputs.tag }}')
   })
 
+  it('uses repository_dispatch for upstream release tags instead of an interval timer', () => {
+    expect(workflow).toContain('repository_dispatch:')
+    expect(workflow).toContain('- upstream_release')
+    expect(workflow).toContain('- upstream_tag')
+    expect(workflow).toContain("github.event_name == 'repository_dispatch'")
+    expect(workflow).toContain('github.event.client_payload.upstream_tag')
+    expect(workflow).toContain('github.event.client_payload.tag')
+    expect(workflow).toContain('github.event.client_payload.ref')
+    expect(workflow).not.toContain('cron:')
+    expect(workflow).not.toContain('AXIOM_AUTO_RELEASES')
+  })
+
   it('supports manually-created Axiom tags without reacting to arbitrary branch pushes', () => {
     expect(workflow).toContain('push:')
     expect(workflow).toContain("- 'axiom-v*'")
@@ -110,8 +123,28 @@ describe('Axiom upstream sync release workflow', () => {
         platforms: ['win', 'android'],
         artifactBasename: 'axiom-orca'
       })
-    ).toEqual(['latest.yml', 'axiom-orca-windows-setup.exe', 'axiom-orca-windows-setup.exe.blockmap', 'app-release.apk'])
+    ).toEqual([
+      'latest.yml',
+      'axiom-orca-windows-setup.exe',
+      'axiom-orca-windows-setup.exe.blockmap',
+      'app-release.apk'
+    ])
     expect(workflow).toContain("inputs.build_mobile && 'win,android' || env.ORCA_RELEASE_PLATFORMS")
+  })
+
+  it('mirrors upstream main commits through repository_dispatch without touching deploy releases', () => {
+    expect(mirrorWorkflow).toContain('name: Axiom Upstream Main Mirror')
+    expect(mirrorWorkflow).toContain('repository_dispatch:')
+    expect(mirrorWorkflow).toContain('- upstream_main')
+    expect(mirrorWorkflow).toContain('- upstream_push')
+    expect(mirrorWorkflow).toContain('workflow_dispatch:')
+    expect(mirrorWorkflow).toContain('ref: ${{ env.AXIOM_UPSTREAM_BRANCH }}')
+    expect(mirrorWorkflow).toContain('github.event.client_payload.ref')
+    expect(mirrorWorkflow).toContain(
+      'git push origin "refs/remotes/upstream/${AXIOM_UPSTREAM_BRANCH}:refs/heads/${AXIOM_UPSTREAM_BRANCH}"'
+    )
+    expect(mirrorWorkflow).toContain('Notify mirror failure')
+    expect(mirrorWorkflow).not.toContain('cron:')
   })
 
   it('supports Axiom-only revisions without clobbering upstream release tags', () => {

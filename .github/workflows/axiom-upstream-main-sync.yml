@@ -1,0 +1,109 @@
+name: Axiom Upstream Main Mirror
+
+on:
+  repository_dispatch:
+    types:
+      # Intended target for a webhook bridge listening to upstream push events
+      # from stablyai/orca. Payload may include ref: refs/heads/main.
+      - upstream_main
+      - upstream_push
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: Upstream branch/ref to mirror; only main is accepted for the clean mirror branch
+        required: false
+        default: main
+        type: string
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: axiom-upstream-main-mirror
+  cancel-in-progress: false
+
+env:
+  AXIOM_UPSTREAM_BRANCH: main
+  AXIOM_UPSTREAM_REPOSITORY: stablyai/orca
+  AXIOM_UPSTREAM_REPOSITORY_URL: https://github.com/stablyai/orca.git
+
+jobs:
+  mirror:
+    name: Fast-forward clean upstream mirror
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      should_sync: ${{ steps.ref.outputs.should_sync }}
+      before: ${{ steps.sync.outputs.before }}
+      after: ${{ steps.sync.outputs.after }}
+    steps:
+      - name: Checkout fork mirror branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.AXIOM_UPSTREAM_BRANCH }}
+          fetch-depth: 0
+
+      - name: Configure git author
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Resolve upstream ref
+        id: ref
+        env:
+          DISPATCH_REF: ${{ github.event.client_payload.ref || github.event.client_payload.branch || inputs.upstream_ref || 'main' }}
+        run: |
+          ref="$DISPATCH_REF"
+          ref="${ref#refs/heads/}"
+          if [[ "$ref" != "$AXIOM_UPSTREAM_BRANCH" ]]; then
+            echo "Ignoring upstream ref '$DISPATCH_REF'; only '$AXIOM_UPSTREAM_BRANCH' mirrors into fork main."
+            echo "should_sync=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "should_sync=true" >> "$GITHUB_OUTPUT"
+          echo "upstream_ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - name: Fast-forward fork main from upstream main
+        id: sync
+        if: steps.ref.outputs.should_sync == 'true'
+        run: |
+          git remote add upstream "$AXIOM_UPSTREAM_REPOSITORY_URL" 2>/dev/null || git remote set-url upstream "$AXIOM_UPSTREAM_REPOSITORY_URL"
+          git fetch upstream "$AXIOM_UPSTREAM_BRANCH" --prune
+          before="$(git rev-parse HEAD)"
+          after="$(git rev-parse "refs/remotes/upstream/${AXIOM_UPSTREAM_BRANCH}")"
+          echo "before=$before" >> "$GITHUB_OUTPUT"
+          echo "after=$after" >> "$GITHUB_OUTPUT"
+          if [[ "$before" == "$after" ]]; then
+            echo "Fork main is already aligned with upstream/$AXIOM_UPSTREAM_BRANCH at $after."
+            exit 0
+          fi
+          git push origin "refs/remotes/upstream/${AXIOM_UPSTREAM_BRANCH}:refs/heads/${AXIOM_UPSTREAM_BRANCH}"
+          echo "Fast-forwarded fork main: $before -> $after"
+
+      - name: Summarize mirror result
+        if: always()
+        run: |
+          {
+            echo "## Axiom upstream main mirror"
+            echo
+            echo "- Event: ${{ github.event_name }}"
+            echo "- Upstream branch: ${AXIOM_UPSTREAM_BRANCH}"
+            echo "- Should sync: ${{ steps.ref.outputs.should_sync || 'false' }}"
+            echo "- Before: ${{ steps.sync.outputs.before || 'n/a' }}"
+            echo "- After: ${{ steps.sync.outputs.after || 'n/a' }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Notify mirror failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          AXIOM_FAILED_STEP: Axiom upstream main mirror
+          AXIOM_UPSTREAM_REF: refs/heads/main
+          AXIOM_UPSTREAM_TAG: main
+          AXIOM_FORK_TAG: main
+          AXIOM_FORK_VERSION: main
+          AXIOM_DEPLOY_BRANCH: main
+          AXIOM_SYNC_DISCORD_WEBHOOK: ${{ secrets.AXIOM_SYNC_DISCORD_WEBHOOK }}
+        run: node config/scripts/axiom-report-sync-failure.mjs

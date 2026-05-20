@@ -4,6 +4,14 @@ on:
   push:
     tags:
       - 'axiom-v*'
+  repository_dispatch:
+    types:
+      # Intended target for a webhook bridge listening to upstream release/tag
+      # events from stablyai/orca. The payload may include upstream_tag, tag,
+      # ref, or axiom_tag.
+      - upstream_release
+      - upstream_tag
+      - axiom_release
   workflow_dispatch:
     inputs:
       upstream_tag:
@@ -38,11 +46,8 @@ on:
         description: Optional explicit Axiom revision number for manual fork-only releases
         required: false
         type: string
-  schedule:
-    # Poll shortly after upstream publishes. GitHub may delay schedules, so the
-    # checker is idempotent against releases already present in this fork.
-    # Scheduled jobs stay inert until repo variable AXIOM_AUTO_RELEASES=true.
-    - cron: '*/15 * * * *'
+  # No timer here: upstream release/tag events should enter via repository_dispatch
+  # from a webhook bridge, or via manual workflow dispatch when testing.
 
 permissions:
   contents: write
@@ -77,7 +82,7 @@ env:
 jobs:
   sync:
     name: Detect, sync, verify, and tag
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || vars.AXIOM_AUTO_RELEASES == 'true'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     outputs:
@@ -91,7 +96,7 @@ jobs:
       - name: Checkout release source
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.axiom_tag || (github.ref_type == 'tag' && github.ref_name) || env.AXIOM_DEPLOY_BRANCH }}
+          ref: ${{ inputs.axiom_tag || github.event.client_payload.axiom_tag || (github.ref_type == 'tag' && github.ref_name) || env.AXIOM_DEPLOY_BRANCH }}
           fetch-depth: 0
 
       - name: Setup Node.js
@@ -115,15 +120,19 @@ jobs:
           AXIOM_EVENT_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         run: |
           args=()
-          axiom_tag="${{ inputs.axiom_tag || '' }}"
+          axiom_tag="${{ inputs.axiom_tag || github.event.client_payload.axiom_tag || '' }}"
+          upstream_tag="${{ inputs.upstream_tag || github.event.client_payload.upstream_tag || github.event.client_payload.tag || github.event.client_payload.ref || '' }}"
+          if [[ "$upstream_tag" == refs/tags/* ]]; then
+            upstream_tag="${upstream_tag#refs/tags/}"
+          fi
           if [[ -z "$axiom_tag" && "$AXIOM_EVENT_TAG" == axiom-v* ]]; then
             axiom_tag="$AXIOM_EVENT_TAG"
           fi
           if [[ -n "$axiom_tag" ]]; then
             args+=(--axiom-tag "$axiom_tag")
           fi
-          if [[ -n "${{ inputs.upstream_tag || '' }}" ]]; then
-            args+=(--upstream-tag "${{ inputs.upstream_tag }}")
+          if [[ -n "$upstream_tag" ]]; then
+            args+=(--upstream-tag "$upstream_tag")
           fi
           if [[ "${{ inputs.force_rebuild || false }}" == "true" ]]; then
             args+=(--force-rebuild)

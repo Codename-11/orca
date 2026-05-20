@@ -51,9 +51,11 @@ fork-owned prerelease versions and tags:
 
 The workflow tracks upstream prerelease cuts (`AXIOM_INCLUDE_PRERELEASES=1`) so
 Axiom's release lane follows the same automated RC cadence as upstream rather
-than rebuilding older stable tags from newer `main` code. Scheduled upstream sync
-skips once the matching fork tag exists. Manual Axiom-only update builds should
-use `bump_axiom_revision` or `axiom_revision` so the Electron updater sees a
+than rebuilding older stable tags from newer `main` code. Upstream release/tag
+hooks should enter the fork as `repository_dispatch` events (`upstream_release` or
+`upstream_tag`) with `client_payload.upstream_tag` (or `tag` / `ref`) set to the
+upstream `v*` tag. Manual Axiom-only update builds should use
+`bump_axiom_revision` or `axiom_revision` so the Electron updater sees a
 semantically newer fork version from the `Codename-11/orca` release feed.
 
 ## Pre-release checklist
@@ -86,8 +88,36 @@ YAML before merging.
 
 ## Upstream-sync automation
 
-The Axiom upstream sync workflow lives at
-`.github/workflows/axiom-upstream-sync-release.yml`. It is allowed to push only:
+The Axiom upstream sync release workflow lives at
+`.github/workflows/axiom-upstream-sync-release.yml`. It is event-driven, not
+interval-driven: upstream release/tag hooks should trigger `repository_dispatch`
+events, manual testing uses `workflow_dispatch`, and Axiom-only fork releases can
+still be triggered by pushing an `axiom-v*` tag.
+
+The clean upstream mirror workflow lives at
+`.github/workflows/axiom-upstream-main-sync.yml`. It accepts `repository_dispatch`
+events (`upstream_main` / `upstream_push`) and fast-forwards fork `main` from
+`stablyai/orca/main` only when the payload ref is `refs/heads/main` (or `main`).
+
+Example dispatch payloads for a webhook bridge:
+
+```bash
+# Upstream release/tag event
+curl -X POST \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  -H "Accept: application/vnd.github+json" \
+  https://api.github.com/repos/Codename-11/orca/dispatches \
+  -d '{"event_type":"upstream_release","client_payload":{"upstream_tag":"v1.4.13"}}'
+
+# Upstream main push event
+curl -X POST \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  -H "Accept: application/vnd.github+json" \
+  https://api.github.com/repos/Codename-11/orca/dispatches \
+  -d '{"event_type":"upstream_main","client_payload":{"ref":"refs/heads/main"}}'
+```
+
+The release workflow is allowed to push only:
 
 - `refs/remotes/upstream/main` to `refs/heads/main`, preserving `main` as the
   upstream mirror.
