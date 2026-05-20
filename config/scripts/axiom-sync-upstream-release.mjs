@@ -34,6 +34,8 @@ const AXIOM_IDENTITY_EXPECTATIONS = [
   ['config/electron-builder.config.cjs', 'com.axiomlabs.orca'],
   ['config/electron-builder.config.cjs', 'Axiom Orca'],
   ['config/electron-builder.config.cjs', 'b6c06723-a52f-5004-ad9f-f39666f5e928'],
+  ['electron.vite.config.ts', 'ORCA_UPDATE_OWNER'],
+  ['electron.vite.config.ts', 'ORCA_UPDATE_REPO'],
   ['electron.vite.config.ts', 'ORCA_APP_NAME'],
   ['resources/build/installer.nsh', 'Axiom Orca.exe'],
   ['mobile/app.json', 'com.axiomlabs.orca.mobile']
@@ -58,6 +60,11 @@ function assertAxiomIdentityFiles() {
   }
 }
 
+function unresolvedConflictFiles() {
+  const output = run('git', ['diff', '--name-only', '--diff-filter=U'])
+  return output ? output.split('\n').filter(Boolean) : []
+}
+
 function printConflictDiagnostics(error) {
   console.error(
     '::error::Upstream merge conflicted; leaving the working tree intact for inspection.'
@@ -71,31 +78,35 @@ function printConflictDiagnostics(error) {
   try {
     console.error(run('git', ['status', '--short']))
   } catch {}
-  try {
-    console.error(run('git', ['diff', '--name-only', '--diff-filter=U']))
-  } catch {}
+  const conflicts = unresolvedConflictFiles()
+  if (conflicts.length > 0) {
+    console.error(`Conflicted files:\n${conflicts.join('\n')}`)
+  }
 }
 
 function parseArgs(argv) {
-  const args = { upstreamTag: '' }
+  const args = { upstreamTag: '', forkVersion: '', forkTag: '' }
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--upstream-tag') {
       args.upstreamTag = argv[++i] ?? ''
+    } else if (argv[i] === '--fork-version') {
+      args.forkVersion = argv[++i] ?? ''
+    } else if (argv[i] === '--fork-tag') {
+      args.forkTag = argv[++i] ?? ''
     }
   }
   return args
 }
 
-function updatePackageVersion(upstreamTag) {
-  if (!upstreamTag) {
-    return false
+function updatePackageVersion(forkVersion) {
+  if (!forkVersion) {
+    throw new Error('Axiom fork version is required before release')
   }
-  const version = upstreamTag.replace(/^v/i, '')
   const pkg = JSON.parse(readFileSync('package.json', 'utf8'))
-  if (pkg.version === version) {
+  if (pkg.version === forkVersion) {
     return false
   }
-  pkg.version = version
+  pkg.version = forkVersion
   writeFileSync('package.json', `${JSON.stringify(pkg, null, 2)}\n`)
   return true
 }
@@ -115,6 +126,9 @@ function main() {
   if (deployBranch !== 'axiom/deploy') {
     throw new Error(`Refusing to release from non-Axiom deploy branch: ${deployBranch}`)
   }
+  if (args.forkTag && !args.forkTag.startsWith('axiom-v')) {
+    throw new Error(`Refusing to create non-Axiom release tag: ${args.forkTag}`)
+  }
 
   if (hasChanges()) {
     throw new Error('Working tree must be clean before upstream sync')
@@ -126,9 +140,15 @@ function main() {
     runInherited('git', ['remote', 'add', 'upstream', upstreamRepo])
   }
   runInherited('git', ['remote', 'set-url', 'upstream', upstreamRepo])
-  // Why: the fork reuses upstream version tags for Axiom releases, so fetching
-  // upstream tags can fail when the same tag points at the fork's deploy merge.
   runInherited('git', ['fetch', 'upstream', upstreamBranch, '--no-tags'])
+  if (args.upstreamTag) {
+    runInherited('git', [
+      'fetch',
+      'upstream',
+      `refs/tags/${args.upstreamTag}:refs/remotes/upstream-tags/${args.upstreamTag}`,
+      '--no-tags'
+    ])
+  }
   runInherited('git', ['fetch', 'origin', deployBranch, '--tags'])
 
   if (branchExists(`refs/remotes/origin/${deployBranch}`)) {
@@ -138,8 +158,11 @@ function main() {
   }
 
   assertAxiomIdentityFiles()
+  const mergeRef = args.upstreamTag
+    ? `refs/remotes/upstream-tags/${args.upstreamTag}`
+    : `upstream/${upstreamBranch}`
   try {
-    runInherited('git', ['merge', '--no-ff', '--no-edit', `upstream/${upstreamBranch}`])
+    runInherited('git', ['merge', '--no-ff', '--no-edit', mergeRef])
   } catch (error) {
     printConflictDiagnostics(error)
     throw new Error(
@@ -147,19 +170,21 @@ function main() {
     )
   }
   assertAxiomIdentityFiles()
-  const versionChanged = updatePackageVersion(args.upstreamTag)
+  const versionChanged = updatePackageVersion(args.forkVersion)
   if (versionChanged) {
     runInherited('git', ['add', 'package.json'])
     runInherited('git', [
       'commit',
       '-m',
-      `chore(release): align Axiom build to ${args.upstreamTag}`
+      `chore(release): align Axiom build to ${args.forkVersion}`
     ])
   }
   assertAxiomIdentityFiles()
 
   const head = run('git', ['rev-parse', 'HEAD'])
-  console.log(`Axiom deploy branch ${deployBranch} synchronized at ${head}`)
+  console.log(
+    `Axiom deploy branch ${deployBranch} synchronized at ${head} for ${args.forkTag || args.forkVersion}`
+  )
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

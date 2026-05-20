@@ -22,6 +22,15 @@ on:
         required: false
         default: false
         type: boolean
+      bump_axiom_revision:
+        description: Publish the next Axiom revision for the selected upstream release
+        required: false
+        default: false
+        type: boolean
+      axiom_revision:
+        description: Optional explicit Axiom revision number for manual fork-only releases
+        required: false
+        type: string
   schedule:
     # Poll shortly after upstream publishes. GitHub may delay schedules, so the
     # checker is idempotent against releases already present in this fork.
@@ -30,6 +39,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 concurrency:
   group: axiom-upstream-sync-release
@@ -64,7 +74,9 @@ jobs:
     timeout-minutes: 45
     outputs:
       should_release: ${{ steps.check.outputs.should_release }}
-      tag: ${{ steps.check.outputs.upstream_tag }}
+      tag: ${{ steps.check.outputs.fork_tag }}
+      upstream_tag: ${{ steps.check.outputs.upstream_tag }}
+      fork_version: ${{ steps.check.outputs.fork_version }}
       release_notes: axiom-release-notes.md
     steps:
       - name: Checkout Axiom deploy branch
@@ -99,6 +111,12 @@ jobs:
           if [[ "${{ inputs.force_rebuild || false }}" == "true" ]]; then
             args+=(--force-rebuild)
           fi
+          if [[ "${{ inputs.bump_axiom_revision || false }}" == "true" ]]; then
+            args+=(--bump-axiom-revision)
+          fi
+          if [[ -n "${{ inputs.axiom_revision || '' }}" ]]; then
+            args+=(--axiom-revision "${{ inputs.axiom_revision }}")
+          fi
           node config/scripts/axiom-check-upstream-release.mjs "${args[@]}"
 
       - name: Stop when already published
@@ -107,8 +125,13 @@ jobs:
           echo "No Axiom release needed: ${{ steps.check.outputs.reason }}"
 
       - name: Merge upstream into isolated deploy branch
+        id: merge
         if: steps.check.outputs.should_release == 'true' && !inputs.force_rebuild
-        run: node config/scripts/axiom-sync-upstream-release.mjs --upstream-tag "${{ steps.check.outputs.upstream_tag }}"
+        run: >-
+          node config/scripts/axiom-sync-upstream-release.mjs
+          --upstream-tag "${{ steps.check.outputs.upstream_tag }}"
+          --fork-version "${{ steps.check.outputs.fork_version }}"
+          --fork-tag "${{ steps.check.outputs.fork_tag }}"
 
       - name: Fast-forward upstream mirror branch
         if: steps.check.outputs.should_release == 'true' && !inputs.force_rebuild && !inputs.dry_run
@@ -141,7 +164,7 @@ jobs:
       - name: Create release tag
         if: steps.check.outputs.should_release == 'true' && !inputs.dry_run
         run: |
-          tag="${{ steps.check.outputs.upstream_tag }}"
+          tag="${{ steps.check.outputs.fork_tag }}"
           git tag -f "$tag"
           git push origin "HEAD:${AXIOM_DEPLOY_BRANCH}"
           git push origin "refs/tags/$tag" --force
@@ -151,11 +174,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          tag="${{ steps.check.outputs.upstream_tag }}"
+          tag="${{ steps.check.outputs.fork_tag }}"
+          title="Axiom Orca ${{ steps.check.outputs.fork_version }} (upstream ${{ steps.check.outputs.upstream_tag }})"
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release edit "$tag" \
               --repo "$GITHUB_REPOSITORY" \
-              --title "Axiom Orca $tag" \
+              --title "$title" \
               --notes-file axiom-release-notes.md
           else
             # The previous step has already pushed the release tag. Let GitHub
@@ -163,7 +187,7 @@ jobs:
             # target_commitish is invalid for `gh release create`.
             gh release create "$tag" \
               --repo "$GITHUB_REPOSITORY" \
-              --title "Axiom Orca $tag" \
+              --title "$title" \
               --notes-file axiom-release-notes.md \
               --draft
           fi
@@ -174,6 +198,17 @@ jobs:
         with:
           name: axiom-release-notes
           path: axiom-release-notes.md
+
+      - name: Notify upstream sync failure
+        if: failure() && steps.check.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AXIOM_SYNC_DISCORD_WEBHOOK: ${{ secrets.AXIOM_SYNC_DISCORD_WEBHOOK }}
+          AXIOM_UPSTREAM_TAG: ${{ steps.check.outputs.upstream_tag }}
+          AXIOM_FORK_TAG: ${{ steps.check.outputs.fork_tag }}
+          AXIOM_FORK_VERSION: ${{ steps.check.outputs.fork_version }}
+          AXIOM_FAILED_STEP: Detect, sync, verify, and tag
+        run: node config/scripts/axiom-report-sync-failure.mjs
 
   build:
     name: Build and publish Windows desktop
@@ -304,3 +339,31 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release edit "${{ needs.sync.outputs.tag }}" --repo "$GITHUB_REPOSITORY" --draft=false
+
+
+  notify-failure:
+    name: Notify failed Axiom release
+    needs: [sync, build, mobile, publish]
+    if: >-
+      always() &&
+      needs.sync.outputs.should_release == 'true' &&
+      !inputs.dry_run &&
+      (needs.sync.result == 'failure' || needs.build.result == 'failure' || needs.mobile.result == 'failure' || needs.publish.result == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Axiom deploy branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.AXIOM_DEPLOY_BRANCH }}
+          fetch-depth: 0
+
+      - name: Notify release failure
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AXIOM_SYNC_DISCORD_WEBHOOK: ${{ secrets.AXIOM_SYNC_DISCORD_WEBHOOK }}
+          AXIOM_UPSTREAM_TAG: ${{ needs.sync.outputs.upstream_tag }}
+          AXIOM_FORK_TAG: ${{ needs.sync.outputs.tag }}
+          AXIOM_FORK_VERSION: ${{ needs.sync.outputs.fork_version }}
+          AXIOM_FAILED_STEP: Axiom release build/publish
+        run: node config/scripts/axiom-report-sync-failure.mjs
