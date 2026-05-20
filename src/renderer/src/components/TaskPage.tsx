@@ -91,6 +91,10 @@ import GitHubItemDialog from '@/components/GitHubItemDialog'
 import GitLabItemDialog from '@/components/GitLabItemDialog'
 import ProjectViewWrapper from '@/components/github-project/ProjectViewWrapper'
 import LinearIssueWorkspace from '@/components/LinearIssueWorkspace'
+import {
+  ForgeIssueDetailDrawer,
+  applyForgeIssuePatch
+} from '@/components/forge/ForgeIssueDetailDrawer'
 import { LinearIcon } from '@/components/icons/LinearIcon'
 import { TASK_PROVIDER_UI_OPTIONS } from '@/components/task-providers/provider-ui-registry'
 import { cn } from '@/lib/utils'
@@ -116,8 +120,13 @@ import type {
   GitHubWorkItem,
   GitLabTodo,
   GitLabWorkItem,
+  ForgeAgentSummary,
+  ForgeComment,
   ForgeIssue,
   ForgeIssueStatus,
+  ForgeIssueUpdate,
+  ForgeLabel,
+  ForgeProjectSummary,
   LinearIssue,
   LinearTeam,
   LinearWorkflowState,
@@ -134,7 +143,12 @@ import {
   linearUpdateIssue
 } from '@/runtime/runtime-linear-client'
 import {
+  forgeCreateComment,
+  forgeListAgents,
+  forgeListComments,
   forgeListIssues,
+  forgeListLabels,
+  forgeListProjects,
   forgeListStatuses,
   forgeSearchIssues,
   forgeUpdateIssue
@@ -1837,6 +1851,15 @@ export default function TaskPage(): React.JSX.Element {
     () => new Set()
   )
   const [forgeViewMode, setForgeViewMode] = useState<'list' | 'board'>('list')
+  const [selectedForgeIssue, setSelectedForgeIssue] = useState<ForgeIssue | null>(null)
+  const [forgeDetailComments, setForgeDetailComments] = useState<ForgeComment[]>([])
+  const [forgeDetailCommentsLoading, setForgeDetailCommentsLoading] = useState(false)
+  const [forgeDetailCommentDraft, setForgeDetailCommentDraft] = useState('')
+  const [forgeDetailMutationPending, setForgeDetailMutationPending] = useState(false)
+  const [forgeDetailProjects, setForgeDetailProjects] = useState<ForgeProjectSummary[]>([])
+  const [forgeDetailLabels, setForgeDetailLabels] = useState<ForgeLabel[]>([])
+  const [forgeDetailAgents, setForgeDetailAgents] = useState<ForgeAgentSummary[]>([])
+  const forgeDetailRequestRef = useRef(0)
 
   const [taskSearchInput, setTaskSearchInput] = useState(initialTaskQuery)
   const [appliedTaskSearch, setAppliedTaskSearch] = useState(initialTaskQuery)
@@ -3321,6 +3344,9 @@ export default function TaskPage(): React.JSX.Element {
           if (!result.ok) {
             throw new Error(result.error)
           }
+          setSelectedForgeIssue((current) =>
+            current?.id === issue.id ? { ...current, status: nextStatus } : current
+          )
           toast.success(`Moved ${issue.identifier} to ${nextStatus.name}`)
           setForgeRefreshNonce((current) => current + 1)
         })
@@ -3339,6 +3365,129 @@ export default function TaskPage(): React.JSX.Element {
         })
     },
     [settings]
+  )
+
+  const openForgeIssueDetail = useCallback(
+    (issue: ForgeIssue) => {
+      const requestId = forgeDetailRequestRef.current + 1
+      forgeDetailRequestRef.current = requestId
+      setSelectedForgeIssue(issue)
+      setForgeDetailCommentDraft('')
+      setForgeDetailComments([])
+      setForgeDetailCommentsLoading(true)
+      void Promise.allSettled([
+        forgeListComments(settings, issue.id),
+        forgeListProjects(settings),
+        forgeListLabels(settings),
+        forgeListAgents(settings),
+        forgeListStatuses(settings)
+      ])
+        .then(([comments, projects, labels, agents, statuses]) => {
+          if (forgeDetailRequestRef.current !== requestId) {
+            return
+          }
+          if (comments.status === 'fulfilled') {
+            setForgeDetailComments(comments.value)
+          } else {
+            toast.error('Failed to load Forge comments.')
+          }
+          if (projects.status === 'fulfilled') {
+            setForgeDetailProjects(projects.value)
+          } else {
+            toast.error('Failed to load Forge projects.')
+          }
+          if (labels.status === 'fulfilled') {
+            setForgeDetailLabels(labels.value)
+          } else {
+            toast.error('Failed to load Forge labels.')
+          }
+          if (agents.status === 'fulfilled') {
+            setForgeDetailAgents(agents.value)
+          } else {
+            toast.error('Failed to load Forge agents.')
+          }
+          if (statuses.status === 'fulfilled' && statuses.value.length > 0) {
+            setForgeStatuses(statuses.value)
+          } else if (statuses.status === 'rejected') {
+            toast.error('Failed to load Forge statuses.')
+          }
+        })
+        .finally(() => {
+          if (forgeDetailRequestRef.current === requestId) {
+            setForgeDetailCommentsLoading(false)
+          }
+        })
+    },
+    [settings]
+  )
+
+  const patchVisibleForgeIssue = useCallback((issueId: string, nextIssue: ForgeIssue) => {
+    setForgeIssues((current) =>
+      current.map((candidate) => (candidate.id === issueId ? nextIssue : candidate))
+    )
+    setSelectedForgeIssue((current) => (current?.id === issueId ? nextIssue : current))
+  }, [])
+
+  const handleForgeDetailUpdateIssue = useCallback(
+    async (updates: ForgeIssueUpdate) => {
+      if (!selectedForgeIssue) {
+        return
+      }
+      setForgeDetailMutationPending(true)
+      try {
+        const result = await forgeUpdateIssue(settings, selectedForgeIssue.id, updates)
+        if (!result.ok) {
+          toast.error(result.error)
+          return
+        }
+        const nextIssue = applyForgeIssuePatch(selectedForgeIssue, updates, {
+          statuses: forgeStatuses,
+          projects: forgeDetailProjects,
+          labels: forgeDetailLabels,
+          agents: forgeDetailAgents
+        })
+        patchVisibleForgeIssue(selectedForgeIssue.id, nextIssue)
+        setForgeRefreshNonce((current) => current + 1)
+        toast.success(`Updated ${selectedForgeIssue.identifier}`)
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Failed to update Forge issue.')
+      } finally {
+        setForgeDetailMutationPending(false)
+      }
+    },
+    [
+      forgeDetailAgents,
+      forgeDetailLabels,
+      forgeDetailProjects,
+      forgeStatuses,
+      patchVisibleForgeIssue,
+      selectedForgeIssue,
+      settings
+    ]
+  )
+
+  const handleForgeDetailCreateComment = useCallback(
+    async (body: string) => {
+      if (!selectedForgeIssue) {
+        return
+      }
+      setForgeDetailMutationPending(true)
+      try {
+        const result = await forgeCreateComment(settings, selectedForgeIssue.id, body)
+        if (!result.ok) {
+          toast.error(result.error)
+          return
+        }
+        setForgeDetailComments((current) => [...current, result.comment])
+        setForgeDetailCommentDraft('')
+        toast.success(`Commented on ${selectedForgeIssue.identifier}`)
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Failed to comment on Forge issue.')
+      } finally {
+        setForgeDetailMutationPending(false)
+      }
+    },
+    [selectedForgeIssue, settings]
   )
 
   // Why: group Forge issues into board columns. statuses.list ordering wins
@@ -4905,11 +5054,11 @@ export default function TaskPage(): React.JSX.Element {
                                       key={issue.id}
                                       role="button"
                                       tabIndex={0}
-                                      onClick={() => handleUseForgeItem(issue)}
+                                      onClick={() => openForgeIssueDetail(issue)}
                                       onKeyDown={(event) => {
                                         if (event.key === 'Enter' || event.key === ' ') {
                                           event.preventDefault()
-                                          handleUseForgeItem(issue)
+                                          openForgeIssueDetail(issue)
                                         }
                                       }}
                                       className={cn(
@@ -5032,11 +5181,11 @@ export default function TaskPage(): React.JSX.Element {
                         key={issue.id}
                         role="button"
                         tabIndex={0}
-                        onClick={() => handleUseForgeItem(issue)}
+                        onClick={() => openForgeIssueDetail(issue)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' || e.key === ' ') {
                             e.preventDefault()
-                            handleUseForgeItem(issue)
+                            openForgeIssueDetail(issue)
                           }
                         }}
                         className={cn(
@@ -5992,6 +6141,36 @@ export default function TaskPage(): React.JSX.Element {
         }
         onClose={() => setGitlabDialogItem(null)}
       />
+
+      {selectedForgeIssue ? (
+        <ForgeIssueDetailDrawer
+          open={selectedForgeIssue !== null}
+          onOpenChange={(open) => {
+            if (!open) {
+              forgeDetailRequestRef.current += 1
+              setSelectedForgeIssue(null)
+            }
+          }}
+          issue={selectedForgeIssue}
+          statuses={forgeStatuses}
+          projects={forgeDetailProjects}
+          labels={forgeDetailLabels}
+          agents={forgeDetailAgents}
+          comments={forgeDetailComments}
+          commentsLoading={forgeDetailCommentsLoading}
+          commentDraft={forgeDetailCommentDraft}
+          mutationPending={forgeDetailMutationPending}
+          onCommentDraftChange={setForgeDetailCommentDraft}
+          onCreateComment={(body) => void handleForgeDetailCreateComment(body)}
+          onUpdateIssue={(updates) => void handleForgeDetailUpdateIssue(updates)}
+          onUseIssue={() => {
+            const issue = selectedForgeIssue
+            forgeDetailRequestRef.current += 1
+            setSelectedForgeIssue(null)
+            handleUseForgeItem(issue)
+          }}
+        />
+      ) : null}
 
       <Dialog
         open={linearConnectOpen}

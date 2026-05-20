@@ -99,7 +99,7 @@ export async function updateIssue(
   updates: ForgeIssueUpdate
 ): Promise<ForgeMutationResult> {
   try {
-    const { statusId, labelIds, assignedAgentId, ...patch } = updates
+    const { statusId, labelIds, removeLabelIds, assignedAgentId, ...patch } = updates
     const patchPayload: Record<string, unknown> = {}
     if (Object.prototype.hasOwnProperty.call(patch, 'title') && patch.title !== undefined) {
       patchPayload.title = patch.title
@@ -120,10 +120,14 @@ export async function updateIssue(
     if (statusId) {
       await forgeTool('issues.transition', { id, statusId })
     }
-    if (labelIds) {
-      // Why: Forge MCP uses additive label mutations rather than a `labelIds`
-      // replacement field. The UI currently sends selected label ids as adds.
-      await forgeTool('issues.setLabels', { issueId: id, add: labelIds })
+    if (labelIds || removeLabelIds) {
+      // Why: Forge MCP uses additive/removal label mutations rather than a
+      // replacement field. The UI sends explicit add/remove deltas.
+      await forgeTool('issues.setLabels', {
+        issueId: id,
+        add: labelIds ?? [],
+        remove: removeLabelIds ?? []
+      })
     }
     if (assignedAgentId !== undefined) {
       await forgeTool('issues.assign', { issueId: id, agentId: assignedAgentId })

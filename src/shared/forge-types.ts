@@ -59,6 +59,7 @@ export type ForgeIssueUpdate = {
   description?: string | null
   projectId?: string | null
   labelIds?: string[]
+  removeLabelIds?: string[]
   assignedAgentId?: string | null
 }
 

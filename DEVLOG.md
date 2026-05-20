@@ -6,6 +6,25 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-20 — Forge provider Wave 2 detail drawer
+
+Added a Forge issue detail drawer with Linear-style read/edit parity for title,
+identifier, project, status, priority, labels, assigned agent, description, and
+comments. Forge rows now open details first while preserving the explicit “Use
+issue” workspace action. Mutations continue through the existing renderer runtime
+client and main-process Forge IPC path; label updates now support explicit add
+and remove deltas, and detail metadata loads are guarded against stale async
+responses.
+
+Verification:
+- `pnpm exec vitest run --config config/vitest.config.ts src/main/forge/issues.test.ts src/renderer/src/components/forge/ForgeIssueDetailDrawer.test.tsx src/shared/task-providers.test.ts src/renderer/src/components/task-providers/provider-ui-registry.test.tsx`
+- `pnpm run typecheck`
+- `pnpm exec oxlint src/main/forge/issues.ts src/main/forge/issues.test.ts src/shared/forge-types.ts src/renderer/src/components/TaskPage.tsx src/renderer/src/components/forge/ForgeIssueDetailDrawer.tsx src/renderer/src/components/forge/ForgeIssueDetailDrawer.test.tsx`
+- `pnpm exec oxfmt --check src/main/forge/issues.ts src/main/forge/issues.test.ts src/shared/forge-types.ts src/renderer/src/components/TaskPage.tsx src/renderer/src/components/forge/ForgeIssueDetailDrawer.tsx src/renderer/src/components/forge/ForgeIssueDetailDrawer.test.tsx`
+- `git diff --check`
+
+---
+
 ## 2026-05-19 — Forge provider Wave 1 registry seam
 
 Added a renderer task-provider UI registry so provider labels, icons, settings
