@@ -929,6 +929,7 @@ export type {
   ForgeIssue,
   ForgeIssueCreate,
   ForgeIssueCreateResult,
+  ForgeIssueListOptions,
   ForgeIssuePriority,
   ForgeIssueStatus,
   ForgeIssueStatusCategory,

@@ -96,6 +96,13 @@ import {
   applyForgeIssuePatch
 } from '@/components/forge/ForgeIssueDetailDrawer'
 import { ForgeIssueEmptyStatePanel } from '@/components/forge/ForgeIssueEmptyStatePanel'
+import {
+  ALL_FORGE_AGENTS_FILTER,
+  UNASSIGNED_FORGE_AGENT_FILTER,
+  getForgeAgentFilterLabel,
+  getForgeAgentFilterOptions,
+  type ForgeAgentFilterValue
+} from '@/components/forge/forge-agent-filter'
 import { getForgeIssueEmptyState } from '@/components/forge/forge-empty-state'
 import { LinearIcon } from '@/components/icons/LinearIcon'
 import { TASK_PROVIDER_UI_OPTIONS } from '@/components/task-providers/provider-ui-registry'
@@ -1854,6 +1861,8 @@ export default function TaskPage(): React.JSX.Element {
   const [forgeSearchInput, setForgeSearchInput] = useState('')
   const [appliedForgeSearch, setAppliedForgeSearch] = useState('')
   const [activeForgePreset, setActiveForgePreset] = useState<ForgePresetId>('active')
+  const [activeForgeAgentFilter, setActiveForgeAgentFilter] =
+    useState<ForgeAgentFilterValue>(ALL_FORGE_AGENTS_FILTER)
   const [forgeRefreshNonce, setForgeRefreshNonce] = useState(0)
   const [forgeStatuses, setForgeStatuses] = useState<ForgeIssueStatus[]>([])
   const [forgeUpdatingIssueIds, setForgeUpdatingIssueIds] = useState<ReadonlySet<string>>(
@@ -3343,13 +3352,15 @@ export default function TaskPage(): React.JSX.Element {
     setForgeLoading(true)
     setForgeError(null)
     const trimmed = appliedForgeSearch.trim()
+    const agentOptions = getForgeAgentFilterOptions(activeForgeAgentFilter)
     const request =
       trimmed.length > 0
-        ? forgeSearchIssues(settings, trimmed, FORGE_ITEM_LIMIT)
-        : forgeListIssues(settings, activeForgePreset, FORGE_ITEM_LIMIT)
+        ? forgeSearchIssues(settings, trimmed, FORGE_ITEM_LIMIT, agentOptions)
+        : forgeListIssues(settings, activeForgePreset, FORGE_ITEM_LIMIT, agentOptions)
     void Promise.all([
       request,
       forgeListStatuses(settings).catch(() => [] as ForgeIssueStatus[]),
+      forgeListAgents(settings).catch(() => [] as ForgeAgentSummary[]),
       forgeStatus(settings).catch(
         (error): ForgeConnectionStatus => ({
           connected: false,
@@ -3358,12 +3369,13 @@ export default function TaskPage(): React.JSX.Element {
         })
       )
     ])
-      .then(([issues, statuses, status]) => {
+      .then(([issues, statuses, agents, status]) => {
         if (cancelled) {
           return
         }
         setForgeIssues(issues)
         setForgeStatuses(statuses)
+        setForgeDetailAgents(agents)
         setForgeConnectionStatus(status)
         setForgeLoading(false)
       })
@@ -3378,6 +3390,7 @@ export default function TaskPage(): React.JSX.Element {
       cancelled = true
     }
   }, [
+    activeForgeAgentFilter,
     activeForgePreset,
     appliedForgeSearch,
     forgeRefreshNonce,
@@ -3595,13 +3608,21 @@ export default function TaskPage(): React.JSX.Element {
 
   const activeForgePresetLabel =
     FORGE_PRESETS.find((preset) => preset.id === activeForgePreset)?.label ?? 'Active'
+  const activeForgeAgentFilterLabel = getForgeAgentFilterLabel(
+    activeForgeAgentFilter,
+    forgeDetailAgents
+  )
+  const activeForgeFilterLabel =
+    activeForgeAgentFilter === ALL_FORGE_AGENTS_FILTER
+      ? activeForgePresetLabel
+      : `${activeForgePresetLabel} • ${activeForgeAgentFilterLabel}`
   const forgeIssueEmptyState = getForgeIssueEmptyState({
     issueCount: forgeIssues.length,
     loading: forgeLoading,
     error: forgeError,
     connectionStatus: forgeConnectionStatus,
     searchQuery: forgeSearchInput,
-    activePresetLabel: activeForgePresetLabel,
+    activePresetLabel: activeForgeFilterLabel,
     statusCount: forgeStatuses.length,
     viewMode: forgeViewMode
   })
@@ -4393,7 +4414,7 @@ export default function TaskPage(): React.JSX.Element {
                         ) : null}
                       </div>
                     ) : null}
-                    <div className="mt-3 flex min-w-0 items-center gap-3">
+                    <div className="mt-3 flex min-w-0 flex-wrap items-center gap-3">
                       <div className="relative min-w-0 flex-1 basis-64">
                         <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                         <Input
@@ -4434,6 +4455,35 @@ export default function TaskPage(): React.JSX.Element {
                           </button>
                         ) : null}
                       </div>
+                      <Select
+                        value={activeForgeAgentFilter}
+                        onValueChange={(value) => {
+                          setActiveForgeAgentFilter(value as ForgeAgentFilterValue)
+                          setForgeRefreshNonce((n) => n + 1)
+                        }}
+                      >
+                        <SelectTrigger
+                          aria-label="Filter Forge issues by assigned agent"
+                          className="h-8 w-full min-w-[180px] max-w-[240px] border-border/50 bg-background text-xs sm:w-auto"
+                        >
+                          <Users className="mr-2 size-3.5 text-muted-foreground" />
+                          <SelectValue placeholder="All agents" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={ALL_FORGE_AGENTS_FILTER}>All agents</SelectItem>
+                          <SelectItem value={UNASSIGNED_FORGE_AGENT_FILTER}>Unassigned</SelectItem>
+                          {forgeDetailAgents.map((agent) => (
+                            <SelectItem key={agent.id} value={agent.id}>
+                              {agent.name}
+                              {agent.profileKey ? (
+                                <span className="ml-1 text-muted-foreground">
+                                  @{agent.profileKey}
+                                </span>
+                              ) : null}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
                 ) : taskSource === 'linear' && linearStatus.connected ? (

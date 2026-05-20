@@ -1125,11 +1125,15 @@ const api = {
     listProjects: (): Promise<unknown[]> => ipcRenderer.invoke('forge:listProjects'),
     listLabels: (): Promise<unknown[]> => ipcRenderer.invoke('forge:listLabels'),
     listAgents: (): Promise<unknown[]> => ipcRenderer.invoke('forge:listAgents'),
-    searchIssues: (args: { query: string; limit?: number }): Promise<unknown[]> =>
-      ipcRenderer.invoke('forge:searchIssues', args),
+    searchIssues: (args: {
+      query: string
+      limit?: number
+      assignedAgentId?: string | null
+    }): Promise<unknown[]> => ipcRenderer.invoke('forge:searchIssues', args),
     listIssues: (args?: {
       filter?: 'active' | 'assigned' | 'created' | 'all' | 'done'
       limit?: number
+      assignedAgentId?: string | null
     }): Promise<unknown[]> => ipcRenderer.invoke('forge:listIssues', args),
     listComments: (args: { issueId: string }): Promise<unknown[]> =>
       ipcRenderer.invoke('forge:listComments', args),

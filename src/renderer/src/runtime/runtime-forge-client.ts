@@ -7,6 +7,7 @@ import type {
   ForgeIssue,
   ForgeIssueCreate,
   ForgeIssueCreateResult,
+  ForgeIssueListOptions,
   ForgeIssueStatus,
   ForgeIssueUpdate,
   ForgeLabel,
@@ -125,33 +126,31 @@ export async function forgeListAgents(
 export async function forgeListIssues(
   settings: RuntimeForgeSettings,
   filter?: ForgeListFilter,
-  limit?: number
+  limit?: number,
+  options: ForgeIssueListOptions = {}
 ): Promise<ForgeIssue[]> {
+  const args = { filter, limit, ...options }
   const remote = remoteTarget(settings)
   return remote
-    ? callRuntimeRpc<ForgeIssue[]>(
-        remote,
-        'forge.listIssues',
-        { filter, limit },
-        { timeoutMs: WRITE_TIMEOUT_MS }
-      )
-    : window.api.forge.listIssues({ filter, limit })
+    ? callRuntimeRpc<ForgeIssue[]>(remote, 'forge.listIssues', args, {
+        timeoutMs: WRITE_TIMEOUT_MS
+      })
+    : window.api.forge.listIssues(args)
 }
 
 export async function forgeSearchIssues(
   settings: RuntimeForgeSettings,
   query: string,
-  limit?: number
+  limit?: number,
+  options: ForgeIssueListOptions = {}
 ): Promise<ForgeIssue[]> {
+  const args = { query, limit, ...options }
   const remote = remoteTarget(settings)
   return remote
-    ? callRuntimeRpc<ForgeIssue[]>(
-        remote,
-        'forge.searchIssues',
-        { query, limit },
-        { timeoutMs: WRITE_TIMEOUT_MS }
-      )
-    : window.api.forge.searchIssues({ query, limit })
+    ? callRuntimeRpc<ForgeIssue[]>(remote, 'forge.searchIssues', args, {
+        timeoutMs: WRITE_TIMEOUT_MS
+      })
+    : window.api.forge.searchIssues(args)
 }
 
 export async function forgeListComments(

@@ -1134,8 +1134,16 @@ export type PreloadApi = {
     listProjects: () => Promise<ForgeProjectSummary[]>
     listLabels: () => Promise<ForgeLabel[]>
     listAgents: () => Promise<ForgeAgentSummary[]>
-    searchIssues: (args: { query: string; limit?: number }) => Promise<ForgeIssue[]>
-    listIssues: (args?: { filter?: ForgeListFilter; limit?: number }) => Promise<ForgeIssue[]>
+    searchIssues: (args: {
+      query: string
+      limit?: number
+      assignedAgentId?: string | null
+    }) => Promise<ForgeIssue[]>
+    listIssues: (args?: {
+      filter?: ForgeListFilter
+      limit?: number
+      assignedAgentId?: string | null
+    }) => Promise<ForgeIssue[]>
     listComments: (args: { issueId: string }) => Promise<ForgeComment[]>
     updateIssue: (args: { id: string; updates: ForgeIssueUpdate }) => Promise<ForgeMutationResult>
     createIssue: (args: { input: ForgeIssueCreate }) => Promise<ForgeIssueCreateResult>

@@ -12,6 +12,7 @@ import type {
   ForgeIssue,
   ForgeIssueCreate,
   ForgeIssueCreateResult,
+  ForgeIssueListOptions,
   ForgeIssueStatus,
   ForgeIssueUpdate,
   ForgeListFilter,
@@ -63,14 +64,18 @@ export async function getStatus(): Promise<ForgeConnectionStatus> {
 
 export async function listIssues(
   filter: ForgeListFilter = 'active',
-  limit = 50
+  limit = 50,
+  options: ForgeIssueListOptions = {}
 ): Promise<ForgeIssue[]> {
-  if (filter === 'assigned') {
+  if (filter === 'assigned' && !Object.prototype.hasOwnProperty.call(options, 'assignedAgentId')) {
     const json = await forgeTool('issues.assigned', { limit, includeDone: false })
     return issueArray(json)
   }
 
   const input: Record<string, unknown> = { limit }
+  if (Object.prototype.hasOwnProperty.call(options, 'assignedAgentId')) {
+    input.assignedAgentId = options.assignedAgentId ?? null
+  }
   if (filter === 'done') {
     input.includeDone = true
     input.statusCategories = ['DONE']
@@ -87,12 +92,20 @@ export async function listIssues(
   return issueArray(json)
 }
 
-export async function searchIssues(query: string, limit = 50): Promise<ForgeIssue[]> {
+export async function searchIssues(
+  query: string,
+  limit = 50,
+  options: ForgeIssueListOptions = {}
+): Promise<ForgeIssue[]> {
   const trimmed = query.trim()
   if (!trimmed) {
     return []
   }
-  const json = await forgeTool('issues.list', { query: trimmed, limit, includeDone: true })
+  const input: Record<string, unknown> = { query: trimmed, limit, includeDone: true }
+  if (Object.prototype.hasOwnProperty.call(options, 'assignedAgentId')) {
+    input.assignedAgentId = options.assignedAgentId ?? null
+  }
+  const json = await forgeTool('issues.list', input)
   return issueArray(json)
 }
 

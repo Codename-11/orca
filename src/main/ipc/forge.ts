@@ -2,6 +2,7 @@ import { ipcMain } from 'electron'
 import type {
   ForgeConfigSettings,
   ForgeIssueCreate,
+  ForgeIssueListOptions,
   ForgeIssueUpdate,
   ForgeListFilter,
   ForgeSaveConfigArgs
@@ -22,6 +23,15 @@ import { listLabels } from '../forge/labels'
 import { clearForgeConfig, resolveForgeConfig, saveForgeConfig } from '../forge/config'
 
 const VALID_FILTERS = new Set<ForgeListFilter>(['active', 'assigned', 'created', 'all', 'done'])
+
+function normalizeListOptions(args?: { assignedAgentId?: unknown }): ForgeIssueListOptions {
+  if (!Object.prototype.hasOwnProperty.call(args ?? {}, 'assignedAgentId')) {
+    return {}
+  }
+  return typeof args?.assignedAgentId === 'string' && args.assignedAgentId.trim()
+    ? { assignedAgentId: args.assignedAgentId.trim() }
+    : { assignedAgentId: null }
+}
 
 function clampLimit(value: unknown, fallback: number): number {
   const n = typeof value === 'number' && Number.isFinite(value) ? value : fallback
@@ -48,20 +58,26 @@ export function registerForgeHandlers(): void {
 
   ipcMain.handle(
     'forge:listIssues',
-    async (_event, args?: { filter?: ForgeListFilter; limit?: number }) => {
+    async (
+      _event,
+      args?: { filter?: ForgeListFilter; limit?: number; assignedAgentId?: string | null }
+    ) => {
       const filter = VALID_FILTERS.has(args?.filter as ForgeListFilter)
         ? (args!.filter as ForgeListFilter)
         : 'active'
-      return listIssues(filter, clampLimit(args?.limit, 50))
+      return listIssues(filter, clampLimit(args?.limit, 50), normalizeListOptions(args))
     }
   )
 
-  ipcMain.handle('forge:searchIssues', async (_event, args: { query: string; limit?: number }) => {
-    if (typeof args?.query !== 'string') {
-      return []
+  ipcMain.handle(
+    'forge:searchIssues',
+    async (_event, args: { query: string; limit?: number; assignedAgentId?: string | null }) => {
+      if (typeof args?.query !== 'string') {
+        return []
+      }
+      return searchIssues(args.query, clampLimit(args.limit, 50), normalizeListOptions(args))
     }
-    return searchIssues(args.query, clampLimit(args.limit, 50))
-  })
+  )
 
   ipcMain.handle('forge:listComments', async (_event, args: { issueId: string }) => {
     if (typeof args?.issueId !== 'string' || !args.issueId.trim()) {

@@ -6,6 +6,24 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-20 — Forge provider Wave 8 agent-oriented filters
+
+Added agent-oriented Forge issue filtering across the renderer, runtime client,
+preload boundary, IPC validation, and main-process Forge MCP calls. The Forge task
+source now includes an agent selector with All agents, Unassigned, and discovered
+Forge agents, and the chosen constraint is forwarded server-side for both preset
+lists and search. The filtering helper and main Forge issue transport behavior are
+covered by targeted tests.
+
+Verification:
+- `pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/forge/forge-agent-filter.test.ts src/main/forge/issues.test.ts`
+- `pnpm run typecheck`
+- `pnpm exec oxlint src/main/forge/issues.ts src/main/forge/issues.test.ts src/main/ipc/forge.ts src/preload/index.ts src/preload/api-types.ts src/renderer/src/runtime/runtime-forge-client.ts src/renderer/src/components/TaskPage.tsx src/renderer/src/components/forge/forge-agent-filter.ts src/renderer/src/components/forge/forge-agent-filter.test.ts src/shared/forge-types.ts src/shared/types.ts`
+- `pnpm exec oxfmt --check src/main/forge/issues.ts src/main/forge/issues.test.ts src/main/ipc/forge.ts src/preload/index.ts src/preload/api-types.ts src/renderer/src/runtime/runtime-forge-client.ts src/renderer/src/components/TaskPage.tsx src/renderer/src/components/forge/forge-agent-filter.ts src/renderer/src/components/forge/forge-agent-filter.test.ts src/shared/forge-types.ts src/shared/types.ts`
+- `git diff --check`
+
+---
+
 ## 2026-05-20 — Forge provider Wave 7 onboarding and empty states
 
 Added a Forge empty-state model and reusable panel for task-source onboarding. The Forge

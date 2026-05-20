@@ -110,6 +110,30 @@ describe('listIssues', () => {
     expect(calls[0].input.statusCategories).toEqual(['DONE'])
     expect(calls[0].input.includeDone).toBe(true)
   })
+
+  it('filters issues by a specific Forge agent through issues.list', async () => {
+    const calls = setupTransport(() => ({ issues: [] }))
+    const { listIssues } = await import('./issues')
+    await listIssues('active', 25, { assignedAgentId: 'agent-victor' })
+    expect(calls[0]).toEqual({
+      tool: 'issues.list',
+      input: {
+        limit: 25,
+        assignedAgentId: 'agent-victor',
+        statusCategories: ['BACKLOG', 'TODO', 'IN_PROGRESS', 'IN_REVIEW']
+      }
+    })
+  })
+
+  it('filters for unassigned Forge issues with assignedAgentId=null', async () => {
+    const calls = setupTransport(() => ({ issues: [] }))
+    const { listIssues } = await import('./issues')
+    await listIssues('all', 25, { assignedAgentId: null })
+    expect(calls[0]).toEqual({
+      tool: 'issues.list',
+      input: { limit: 25, assignedAgentId: null, includeDone: true }
+    })
+  })
 })
 
 describe('searchIssues', () => {
@@ -120,13 +144,13 @@ describe('searchIssues', () => {
     expect(calls).toHaveLength(0)
   })
 
-  it('forwards trimmed query and limit', async () => {
+  it('forwards trimmed query, limit, and agent filter options', async () => {
     const calls = setupTransport(() => ({ issues: [{ id: '1', title: 'T' }] }))
     const { searchIssues } = await import('./issues')
-    await searchIssues('  forge ', 25)
+    await searchIssues('  forge ', 25, { assignedAgentId: 'agent-victor' })
     expect(calls[0]).toEqual({
       tool: 'issues.list',
-      input: { query: 'forge', limit: 25, includeDone: true }
+      input: { query: 'forge', limit: 25, includeDone: true, assignedAgentId: 'agent-victor' }
     })
   })
 })

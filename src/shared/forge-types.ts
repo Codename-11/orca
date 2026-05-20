@@ -55,6 +55,10 @@ export type ForgeConnectionStatus = {
 
 export type ForgeListFilter = 'active' | 'assigned' | 'created' | 'all' | 'done'
 
+export type ForgeIssueListOptions = {
+  assignedAgentId?: string | null
+}
+
 export type ForgeIssueUpdate = {
   statusId?: string
   title?: string
