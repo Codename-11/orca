@@ -6,6 +6,17 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-19 — Forced rebuild skips upstream merge
+
+Forced rebuilds now skip the upstream merge step. The republish path is for
+fork-only packaging fixes against the current deployed tree; re-merging
+`upstream/main` on every forced rebuild can introduce avoidable conflicts after
+upstream advances past the release tag (for example, `package.json` moving to a
+future dev version while the fork release remains `v1.4.9`). Normal new-release
+runs still merge upstream before tagging/building.
+
+---
+
 ## 2026-05-19 — Manual Windows asset clobber for republished tags
 
 Switched the Axiom Windows release job from `electron-builder --publish always`

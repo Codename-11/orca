@@ -106,7 +106,7 @@ jobs:
           echo "No Axiom release needed: ${{ steps.check.outputs.reason }}"
 
       - name: Merge upstream into isolated deploy branch
-        if: steps.check.outputs.should_release == 'true'
+        if: steps.check.outputs.should_release == 'true' && !inputs.force_rebuild
         run: node config/scripts/axiom-sync-upstream-release.mjs --upstream-tag "${{ steps.check.outputs.upstream_tag }}"
 
       - name: Install dependencies
