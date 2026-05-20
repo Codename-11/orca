@@ -8,7 +8,6 @@ import {
   AlertCircle,
   ArrowDownUp,
   ArrowRight,
-  Boxes,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -94,6 +93,7 @@ import GitHubItemDialog from '@/components/GitHubItemDialog'
 import GitLabItemDialog from '@/components/GitLabItemDialog'
 import ProjectViewWrapper from '@/components/github-project/ProjectViewWrapper'
 import LinearIssueWorkspace from '@/components/LinearIssueWorkspace'
+import { ForgeIcon } from '@/components/icons/ForgeIcon'
 import { cn } from '@/lib/utils'
 import {
   getLinkedWorkItemSuggestedName,
@@ -209,7 +209,7 @@ const SOURCE_OPTIONS: SourceOption[] = [
   {
     id: 'forge',
     label: 'Forge',
-    Icon: ({ className }) => <Boxes className={className} />
+    Icon: ({ className }) => <ForgeIcon className={className} />
   }
 ]
 

@@ -15,10 +15,5 @@ export const TASKS_PANE_SEARCH_ENTRIES: SettingsSearchEntry[] = [
       'display',
       'hide'
     ]
-  },
-  {
-    title: 'Forge Connect',
-    description: 'Connect Forge to browse and manage Forge issues from the Tasks page.',
-    keywords: ['forge', 'tasks', 'connect', 'api key', 'token', 'base url', 'project manager']
   }
 ]
