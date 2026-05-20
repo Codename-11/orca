@@ -78,7 +78,7 @@ describe('Axiom upstream sync release workflow', () => {
     expect(workflow).toContain('issues: write')
     expect(workflow).toContain('Notify upstream sync failure')
     expect(workflow).toContain('Notify failed Axiom release')
-    expect(workflow).toContain('if: failure() && steps.check.outputs.should_release == \'true\'')
+    expect(workflow).toContain("if: failure() && steps.check.outputs.should_release == 'true'")
     expect(notifyScript).toContain('ISSUE_LABEL')
     expect(notifyScript).toContain('axiom-upstream-sync')
     expect(notifyScript).toContain('Conflicted files')

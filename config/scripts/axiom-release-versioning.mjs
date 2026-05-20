@@ -54,18 +54,21 @@ export function parseAxiomRevisionFromTag(tag, upstreamTag) {
 }
 
 export function maxAxiomRevision(tags, upstreamTag) {
-  return Math.max(
-    0,
-    ...Array.from(tags, (tag) => parseAxiomRevisionFromTag(tag, upstreamTag) ?? 0)
-  )
+  return Math.max(0, ...Array.from(tags, (tag) => parseAxiomRevisionFromTag(tag, upstreamTag) ?? 0))
 }
 
-export function resolveForkReleaseVersion({ upstreamTag, existingTags = [], requestedRevision, bumpRevision = false }) {
+export function resolveForkReleaseVersion({
+  upstreamTag,
+  existingTags = [],
+  requestedRevision,
+  bumpRevision = false
+}) {
   const highestRevision = maxAxiomRevision(existingTags, upstreamTag)
   const parsedRequestedRevision = requestedRevision
     ? Number.parseInt(String(requestedRevision), 10)
     : null
-  const revision = parsedRequestedRevision ?? (bumpRevision ? highestRevision + 1 : highestRevision || 1)
+  const revision =
+    parsedRequestedRevision ?? (bumpRevision ? highestRevision + 1 : highestRevision || 1)
   const forkVersion = forkVersionForRevision(upstreamTag, revision)
   return {
     upstreamTag: normalizeUpstreamTag(upstreamTag),

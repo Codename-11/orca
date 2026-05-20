@@ -6,6 +6,30 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-20 — Fork-versioned Axiom upstream releases
+
+Converted Axiom upstream sync from upstream-tag reuse to fork-owned release
+versions/tags. Upstream releases now resolve to `1.4.x-axiom.N` app versions and
+`axiom-v1.4.x-axiom.N` release tags, while manual Axiom-only builds can publish
+the next revision with `bump_axiom_revision` or a specific `axiom_revision`. The
+workflow continues to mirror `upstream/main` into `main`, releases only from
+`axiom/deploy`, and points packaged update feeds at `Codename-11/orca`.
+
+Added a durable failure reporter that upserts one `axiom-upstream-sync` GitHub
+issue, with optional Discord webhook support, when merge/test/build/publish fails.
+The reporter captures the upstream tag/ref, fork tag/version, deploy branch,
+run URL, conflicted files, and git status so scheduled failures are actionable
+instead of just red CI runs.
+
+Verification:
+
+- `pnpm exec vitest run --config config/vitest.config.ts config/scripts/axiom-upstream-sync-release.test.mjs src/main/axiom-release-hardening.test.ts src/main/updater-endpoints.test.ts src/main/updater-prerelease-feed.test.ts src/main/updater-nudge.test.ts src/main/updater-changelog.test.ts src/main/app-build-identity.test.ts src/shared/task-providers.test.ts src/renderer/src/components/forge/ForgeIssueDetailDrawer.test.tsx src/renderer/src/components/forge/forge-agent-filter.test.ts src/main/forge/issues.test.ts` → 97 tests passed.
+- `pnpm run typecheck` → passed.
+- `node --check` on Axiom release scripts → passed.
+- Parsed `.github/workflows/axiom-upstream-sync-release.yml` with PyYAML → passed.
+
+---
+
 ## 2026-05-20 — Axiom upstream sync workflow safety
 
 Ported and hardened the fork-only upstream release automation onto

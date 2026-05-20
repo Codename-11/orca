@@ -92,7 +92,9 @@ async function getCandidateRelease({ upstreamRepo, upstreamTag, includePrereleas
 }
 
 async function listForkReleaseTags(forkRepo) {
-  const releases = await githubJson(`https://api.github.com/repos/${forkRepo}/releases?per_page=100`)
+  const releases = await githubJson(
+    `https://api.github.com/repos/${forkRepo}/releases?per_page=100`
+  )
   if (!Array.isArray(releases)) {
     throw new Error(`GitHub releases response for ${forkRepo} was not an array`)
   }

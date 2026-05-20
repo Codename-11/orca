@@ -49,7 +49,12 @@ function run(command, args) {
 }
 
 function splitLines(output) {
-  return output ? output.split('\n').map((line) => line.trim()).filter(Boolean) : []
+  return output
+    ? output
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+    : []
 }
 
 function getRunUrl() {
@@ -77,10 +82,12 @@ function issueBody() {
   const deployBranch = envString('AXIOM_DEPLOY_BRANCH', 'axiom/deploy')
   const failedStep = envString('AXIOM_FAILED_STEP', 'Axiom upstream sync workflow')
   const runUrl = getRunUrl()
-  const conflictBlock = conflicts.length > 0 ? conflicts.map((file) => `- ${file}`).join('\n') : '- none reported'
+  const conflictBlock =
+    conflicts.length > 0 ? conflicts.map((file) => `- ${file}`).join('\n') : '- none reported'
   const statusBlock = status.length > 0 ? status.join('\n') : 'No git status output captured.'
 
-  return `Axiom Orca upstream sync is blocked and no release was published.\n\n` +
+  return (
+    `Axiom Orca upstream sync is blocked and no release was published.\n\n` +
     `## Failure\n` +
     `- Failed step: ${failedStep}\n` +
     `- Upstream ref/tag: ${upstreamRef}\n` +
@@ -92,6 +99,7 @@ function issueBody() {
     `## Git status\n\`\`\`\n${statusBlock}\n\`\`\`\n\n` +
     `## Resolution\n` +
     `Resolve the upstream merge on \`${deployBranch}\`, preserve Axiom identity/update settings and Forge provider changes, then rerun the workflow. The workflow must remain silent on success and must not tag or publish until guards and tests pass.\n`
+  )
 }
 
 async function ensureLabel(repo) {
@@ -115,7 +123,9 @@ async function findOpenIssue(repo) {
     `https://api.github.com/repos/${repo}/issues?state=open&labels=${encodeURIComponent(ISSUE_LABEL)}&per_page=20`
   )
   return Array.isArray(issues)
-    ? issues.find((issue) => issue?.pull_request === undefined && issue?.title?.startsWith(ISSUE_TITLE))
+    ? issues.find(
+        (issue) => issue?.pull_request === undefined && issue?.title?.startsWith(ISSUE_TITLE)
+      )
     : null
 }
 
@@ -155,7 +165,9 @@ async function postDiscordIfConfigured() {
     `Axiom Orca upstream sync blocked: ${upstreamTag} -> ${forkTag}`,
     runUrl,
     conflicts.length > 0 ? `Conflicts: ${conflicts.join(', ')}` : 'No conflicted files captured.'
-  ].filter(Boolean).join('\n')
+  ]
+    .filter(Boolean)
+    .join('\n')
   await fetch(webhook, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

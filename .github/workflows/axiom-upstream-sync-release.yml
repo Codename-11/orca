@@ -340,7 +340,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release edit "${{ needs.sync.outputs.tag }}" --repo "$GITHUB_REPOSITORY" --draft=false
 
-
   notify-failure:
     name: Notify failed Axiom release
     needs: [sync, build, mobile, publish]
