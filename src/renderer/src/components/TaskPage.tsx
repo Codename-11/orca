@@ -98,6 +98,7 @@ import {
 import { LinearIcon } from '@/components/icons/LinearIcon'
 import { TASK_PROVIDER_UI_OPTIONS } from '@/components/task-providers/provider-ui-registry'
 import { cn } from '@/lib/utils'
+import { forgeIssueOpenUrl, forgeIssueReference } from '@/lib/forge-links'
 import {
   getLinkedWorkItemSuggestedName,
   getTaskPresetQuery,
@@ -3718,7 +3719,7 @@ export default function TaskPage(): React.JSX.Element {
         type: 'issue',
         number: 0,
         title: issue.title,
-        url: issue.url ?? `forge:${issue.identifier}`,
+        url: forgeIssueReference(issue),
         linearIdentifier: issue.identifier
       }
       openModal('new-workspace-composer', {
@@ -6160,9 +6161,11 @@ export default function TaskPage(): React.JSX.Element {
           commentsLoading={forgeDetailCommentsLoading}
           commentDraft={forgeDetailCommentDraft}
           mutationPending={forgeDetailMutationPending}
+          openUrl={forgeIssueOpenUrl(selectedForgeIssue)}
           onCommentDraftChange={setForgeDetailCommentDraft}
           onCreateComment={(body) => void handleForgeDetailCreateComment(body)}
           onUpdateIssue={(updates) => void handleForgeDetailUpdateIssue(updates)}
+          onOpenIssue={(url) => window.api.shell.openUrl(url)}
           onUseIssue={() => {
             const issue = selectedForgeIssue
             forgeDetailRequestRef.current += 1

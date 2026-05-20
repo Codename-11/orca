@@ -1,4 +1,4 @@
-import { ArrowRight, LoaderCircle, MessageSquare, UserRound } from 'lucide-react'
+import { ArrowRight, ExternalLink, LoaderCircle, MessageSquare, UserRound } from 'lucide-react'
 import type {
   ForgeAgentSummary,
   ForgeComment,
@@ -32,9 +32,11 @@ type ForgeIssueDetailDrawerContentProps = {
   commentsLoading: boolean
   commentDraft: string
   mutationPending: boolean
+  openUrl: string | null
   onCommentDraftChange: (value: string) => void
   onCreateComment: (body: string) => void
   onUpdateIssue: (updates: ForgeIssueUpdate) => void
+  onOpenIssue: (url: string) => void
   onUseIssue: () => void
 }
 
@@ -76,9 +78,11 @@ export function ForgeIssueDetailDrawerContent({
   commentsLoading,
   commentDraft,
   mutationPending,
+  openUrl,
   onCommentDraftChange,
   onCreateComment,
   onUpdateIssue,
+  onOpenIssue,
   onUseIssue
 }: ForgeIssueDetailDrawerContentProps): React.JSX.Element {
   const availableLabels = labels.filter((label) => !issue.labels?.includes(label.name))
@@ -108,10 +112,23 @@ export function ForgeIssueDetailDrawerContent({
             </div>
             <h2 className="text-lg font-semibold leading-tight text-foreground">{issue.title}</h2>
           </div>
-          <Button size="sm" className="shrink-0 gap-1.5" onClick={onUseIssue}>
-            <ArrowRight className="size-3.5" />
-            Use issue
-          </Button>
+          <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+            {openUrl ? (
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5"
+                onClick={() => onOpenIssue(openUrl)}
+              >
+                <ExternalLink className="size-3.5" />
+                Open in Forge
+              </Button>
+            ) : null}
+            <Button size="sm" className="gap-1.5" onClick={onUseIssue}>
+              <ArrowRight className="size-3.5" />
+              Use issue
+            </Button>
+          </div>
         </div>
       </div>
 

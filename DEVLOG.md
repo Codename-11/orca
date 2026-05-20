@@ -6,6 +6,20 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-20 — Forge provider Wave 3 canonical links
+
+Added Forge link helpers so renderer code only opens server-provided http(s)
+issue URLs and uses the issue identifier as the safe agent reference fallback.
+The Forge detail drawer now exposes an “Open in Forge” action when a canonical
+URL is available, and new workspaces receive the canonical Forge URL instead of
+a synthetic `forge:` pseudo-link.
+
+Verification:
+- `pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/lib/forge-links.test.ts src/renderer/src/components/forge/ForgeIssueDetailDrawer.test.tsx`
+- `pnpm run typecheck`
+
+---
+
 ## 2026-05-20 — Forge provider Wave 2 detail drawer
 
 Added a Forge issue detail drawer with Linear-style read/edit parity for title,

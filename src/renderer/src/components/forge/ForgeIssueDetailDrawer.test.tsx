@@ -61,9 +61,11 @@ describe('ForgeIssueDetailDrawerContent', () => {
         commentsLoading={false}
         commentDraft="Ship it"
         mutationPending={false}
+        openUrl="https://forge.example/w/axi/issues/iss_1"
         onCommentDraftChange={vi.fn()}
         onCreateComment={vi.fn()}
         onUpdateIssue={vi.fn()}
+        onOpenIssue={vi.fn()}
         onUseIssue={vi.fn()}
       />
     )
@@ -73,6 +75,7 @@ describe('ForgeIssueDetailDrawerContent', () => {
     expect(markup).toContain('Axiom UI')
     expect(markup).toContain('Todo')
     expect(markup).toContain('HIGH')
+    expect(markup).toContain('Open in Forge')
     expect(markup).toContain('Victor')
     expect(markup).toContain('bug')
     expect(markup).toContain('Bring Forge issues up to Linear interaction parity.')
