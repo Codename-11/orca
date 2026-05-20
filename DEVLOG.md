@@ -6,6 +6,24 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-20 — Forge provider Wave 4 issue creation
+
+Added a Forge issue composer to the Forge task source toolbar. The composer
+supports title, optional markdown description, project selection, priority,
+Cmd/Ctrl+Enter submit, optimistic list insertion, refresh invalidation, and
+automatically opens the new issue in the Forge detail drawer. Issue creation
+continues through the existing runtime/main-process Forge IPC path; renderer
+code never handles Forge API tokens.
+
+Verification:
+- `pnpm run typecheck`
+- `pnpm exec vitest run --config config/vitest.config.ts src/main/forge/issues.test.ts src/renderer/src/lib/forge-links.test.ts src/renderer/src/components/forge/ForgeIssueDetailDrawer.test.tsx`
+- `pnpm exec oxlint src/renderer/src/components/TaskPage.tsx src/main/forge/issues.ts src/main/forge/issues.test.ts src/renderer/src/lib/forge-links.ts src/renderer/src/lib/forge-links.test.ts`
+- `pnpm exec oxfmt --check src/renderer/src/components/TaskPage.tsx src/main/forge/issues.ts src/main/forge/issues.test.ts src/renderer/src/lib/forge-links.ts src/renderer/src/lib/forge-links.test.ts`
+- `git diff --check`
+
+---
+
 ## 2026-05-20 — Forge provider Wave 3 canonical links
 
 Added Forge link helpers so renderer code only opens server-provided http(s)

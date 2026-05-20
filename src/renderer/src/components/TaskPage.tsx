@@ -145,6 +145,7 @@ import {
 } from '@/runtime/runtime-linear-client'
 import {
   forgeCreateComment,
+  forgeCreateIssue,
   forgeListAgents,
   forgeListComments,
   forgeListIssues,
@@ -1860,6 +1861,12 @@ export default function TaskPage(): React.JSX.Element {
   const [forgeDetailProjects, setForgeDetailProjects] = useState<ForgeProjectSummary[]>([])
   const [forgeDetailLabels, setForgeDetailLabels] = useState<ForgeLabel[]>([])
   const [forgeDetailAgents, setForgeDetailAgents] = useState<ForgeAgentSummary[]>([])
+  const [newForgeIssueOpen, setNewForgeIssueOpen] = useState(false)
+  const [newForgeIssueTitle, setNewForgeIssueTitle] = useState('')
+  const [newForgeIssueBody, setNewForgeIssueBody] = useState('')
+  const [newForgeIssueProjectId, setNewForgeIssueProjectId] = useState<string | null>(null)
+  const [newForgeIssuePriority, setNewForgeIssuePriority] = useState<ForgeIssue['priority']>('NONE')
+  const [newForgeIssueSubmitting, setNewForgeIssueSubmitting] = useState(false)
   const forgeDetailRequestRef = useRef(0)
 
   const [taskSearchInput, setTaskSearchInput] = useState(initialTaskQuery)
@@ -3008,6 +3015,7 @@ export default function TaskPage(): React.JSX.Element {
       dialogWorkItem ||
       newIssueOpen ||
       newLinearIssueOpen ||
+      newForgeIssueOpen ||
       activeModal !== 'none'
     ) {
       return
@@ -3043,7 +3051,15 @@ export default function TaskPage(): React.JSX.Element {
 
     window.addEventListener('keydown', onKeyDown, { capture: true })
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
-  }, [activeModal, dialogWorkItem, githubMode, newIssueOpen, newLinearIssueOpen, taskSource])
+  }, [
+    activeModal,
+    dialogWorkItem,
+    githubMode,
+    newIssueOpen,
+    newLinearIssueOpen,
+    newForgeIssueOpen,
+    taskSource
+  ])
 
   const openComposerForItem = useCallback(
     (item: GitHubWorkItem): void => {
@@ -3229,6 +3245,7 @@ export default function TaskPage(): React.JSX.Element {
       selectedLinearIssue ||
       newIssueOpen ||
       newLinearIssueOpen ||
+      newForgeIssueOpen ||
       activeModal !== 'none'
     ) {
       return
@@ -3270,6 +3287,7 @@ export default function TaskPage(): React.JSX.Element {
     dialogWorkItem,
     newIssueOpen,
     newLinearIssueOpen,
+    newForgeIssueOpen,
     selectedLinearIssue
   ])
 
@@ -3731,6 +3749,51 @@ export default function TaskPage(): React.JSX.Element {
     [openModal]
   )
 
+  const handleCreateNewForgeIssue = useCallback(async (): Promise<void> => {
+    const title = newForgeIssueTitle.trim()
+    if (!title || newForgeIssueSubmitting) {
+      return
+    }
+    setNewForgeIssueSubmitting(true)
+    try {
+      const result = await forgeCreateIssue(settings, {
+        title,
+        description: newForgeIssueBody.trim() || undefined,
+        projectId: newForgeIssueProjectId ?? undefined,
+        priority: newForgeIssuePriority === 'NONE' ? undefined : newForgeIssuePriority
+      })
+      if (!result.ok) {
+        toast.error(result.error || 'Failed to create Forge issue.')
+        return
+      }
+      setNewForgeIssueOpen(false)
+      setNewForgeIssueTitle('')
+      setNewForgeIssueBody('')
+      setNewForgeIssuePriority('NONE')
+      setForgeIssues((current) => {
+        const exists = current.some((candidate) => candidate.id === result.issue.id)
+        return exists
+          ? current.map((candidate) =>
+              candidate.id === result.issue.id ? result.issue : candidate
+            )
+          : [result.issue, ...current]
+      })
+      setForgeRefreshNonce((n) => n + 1)
+      openForgeIssueDetail(result.issue)
+      toast.success(`Created ${result.issue.identifier}`)
+    } finally {
+      setNewForgeIssueSubmitting(false)
+    }
+  }, [
+    newForgeIssueBody,
+    newForgeIssuePriority,
+    newForgeIssueProjectId,
+    newForgeIssueSubmitting,
+    newForgeIssueTitle,
+    openForgeIssueDetail,
+    settings
+  ])
+
   const handleLinearConnect = useCallback(async (): Promise<void> => {
     const key = linearApiKeyDraft.trim()
     if (!key) {
@@ -4163,6 +4226,38 @@ export default function TaskPage(): React.JSX.Element {
                         })}
                       </div>
                       <div className="flex items-center gap-2">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              onClick={() => {
+                                setNewForgeIssueTitle('')
+                                setNewForgeIssueBody('')
+                                setNewForgeIssuePriority('NONE')
+                                setNewForgeIssueProjectId(forgeDetailProjects[0]?.id ?? null)
+                                if (forgeDetailProjects.length === 0) {
+                                  void forgeListProjects(settings)
+                                    .then((projects) => {
+                                      setForgeDetailProjects(projects)
+                                      setNewForgeIssueProjectId(
+                                        (current) => current ?? projects[0]?.id ?? null
+                                      )
+                                    })
+                                    .catch(() => toast.error('Failed to load Forge projects.'))
+                                }
+                                setNewForgeIssueOpen(true)
+                              }}
+                              aria-label="New Forge issue"
+                              className="border-border/50 bg-transparent hover:bg-muted/50 backdrop-blur-md supports-[backdrop-filter]:bg-transparent"
+                            >
+                              <Plus className="size-4" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom" sideOffset={6}>
+                            New Forge issue
+                          </TooltipContent>
+                        </Tooltip>
                         <div className="flex rounded-md border border-border/50 bg-transparent p-0.5">
                           {[
                             { id: 'list' as const, label: 'List', Icon: List },
@@ -5986,6 +6081,132 @@ export default function TaskPage(): React.JSX.Element {
               disabled={!newIssueTargetRepo || !newIssueTitle.trim() || newIssueSubmitting}
             >
               {newIssueSubmitting ? (
+                <>
+                  <LoaderCircle className="size-4 animate-spin" />
+                  Creating…
+                </>
+              ) : (
+                'Create issue'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={newForgeIssueOpen}
+        onOpenChange={(open) => {
+          if (!newForgeIssueSubmitting) {
+            setNewForgeIssueOpen(open)
+          }
+        }}
+      >
+        <DialogContent
+          className="sm:max-w-lg"
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+              event.preventDefault()
+              void handleCreateNewForgeIssue()
+            }
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>New Forge issue</DialogTitle>
+            <DialogDescription>
+              Creates a new Forge issue in the selected project. Tokens stay in the main process.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] font-medium text-muted-foreground">Project</label>
+                <Select
+                  value={newForgeIssueProjectId ?? '__none__'}
+                  onValueChange={(value) =>
+                    setNewForgeIssueProjectId(value === '__none__' ? null : value)
+                  }
+                  disabled={newForgeIssueSubmitting}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">No project</SelectItem>
+                    {forgeDetailProjects.map((project) => (
+                      <SelectItem key={project.id} value={project.id}>
+                        {project.key ? `${project.key} — ` : ''}
+                        {project.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] font-medium text-muted-foreground">Priority</label>
+                <Select
+                  value={newForgeIssuePriority}
+                  onValueChange={(value) =>
+                    setNewForgeIssuePriority(value as ForgeIssue['priority'])
+                  }
+                  disabled={newForgeIssueSubmitting}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(['NONE', 'LOW', 'MEDIUM', 'HIGH', 'URGENT'] as const).map((priority) => (
+                      <SelectItem key={priority} value={priority}>
+                        {priority}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-[11px] font-medium text-muted-foreground">Title</label>
+              <Input
+                autoFocus
+                value={newForgeIssueTitle}
+                onChange={(e) => setNewForgeIssueTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                    e.preventDefault()
+                    void handleCreateNewForgeIssue()
+                  }
+                }}
+                placeholder="Short summary"
+                disabled={newForgeIssueSubmitting}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-[11px] font-medium text-muted-foreground">
+                Description (optional, markdown)
+              </label>
+              <textarea
+                value={newForgeIssueBody}
+                onChange={(e) => setNewForgeIssueBody(e.target.value)}
+                placeholder="What needs doing?"
+                rows={6}
+                disabled={newForgeIssueSubmitting}
+                className="w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 resize-none max-h-60 overflow-y-auto"
+              />
+            </div>
+            <p className="text-[10px] text-muted-foreground">Cmd/Ctrl+Enter to submit.</p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setNewForgeIssueOpen(false)}
+              disabled={newForgeIssueSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => void handleCreateNewForgeIssue()}
+              disabled={!newForgeIssueTitle.trim() || newForgeIssueSubmitting}
+            >
+              {newForgeIssueSubmitting ? (
                 <>
                   <LoaderCircle className="size-4 animate-spin" />
                   Creating…
