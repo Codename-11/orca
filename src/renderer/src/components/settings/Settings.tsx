@@ -486,7 +486,7 @@ function Settings(): React.JSX.Element {
       {
         id: 'integrations',
         title: 'Integrations',
-        description: 'Connect GitHub, GitLab, Linear, and source-hosting services.',
+        description: 'Connect GitHub, GitLab, Linear, Forge, and source-hosting services.',
         icon: Blocks,
         searchEntries: INTEGRATIONS_PANE_SEARCH_ENTRIES,
         group: 'setup'
@@ -1095,7 +1095,7 @@ function Settings(): React.JSX.Element {
                 <SettingsSection
                   id="integrations"
                   title="Integrations"
-                  description="Connect GitHub, GitLab, Linear, and source-hosting services."
+                  description="Connect GitHub, GitLab, Linear, Forge, and source-hosting services."
                   searchEntries={INTEGRATIONS_PANE_SEARCH_ENTRIES}
                 >
                   {isSectionMounted('integrations') ? <IntegrationsPane /> : null}

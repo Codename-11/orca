@@ -28,6 +28,7 @@ import {
   DialogTitle
 } from '../ui/dialog'
 import type { SettingsSearchEntry } from './settings-search'
+import { ForgeConnectSection } from './ForgeConnectSection'
 
 function LinearIcon({ className }: { className?: string }): React.JSX.Element {
   return (
@@ -67,6 +68,11 @@ export const INTEGRATIONS_PANE_SEARCH_ENTRIES: SettingsSearchEntry[] = [
     title: 'Linear Integration',
     description: 'Connect Linear to browse and link issues.',
     keywords: ['linear', 'integration', 'api key', 'connect', 'disconnect']
+  },
+  {
+    title: 'Forge Integration',
+    description: 'Connect Forge to browse and manage Forge issues.',
+    keywords: ['forge', 'integration', 'tasks', 'api key', 'token', 'base url', 'project manager']
   }
 ]
 
@@ -684,6 +690,8 @@ export function IntegrationsPane(): React.JSX.Element {
           </div>
         )}
       </div>
+
+      <ForgeConnectSection />
 
       {/* Linear */}
       <div className="rounded-md border border-border/50 bg-muted/30 px-4 py-3">

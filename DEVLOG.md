@@ -6,6 +6,17 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-19 — Forge integration settings polish
+
+Moved Forge connection management out of Task Sources and into Integrations so
+it sits with GitHub/GitLab/Linear auth setup. Added the Forge anvil/ember brand
+icon as a shared renderer icon and reused it in the Tasks source picker, Task
+page source selector, and Forge integration card. Settings search now routes
+Forge API key/base URL queries to Integrations while Task Sources stays focused
+on provider visibility.
+
+---
+
 ## 2026-05-19 — Axiom installer running-app check narrowed
 
 Added a fork-specific NSIS include so the Windows installer only detects and
