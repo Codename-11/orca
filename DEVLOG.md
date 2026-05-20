@@ -29,6 +29,8 @@ Verification:
 - `pnpm run typecheck` → passed.
 - `node --check` on Axiom release scripts → passed.
 - Parsed `.github/workflows/axiom-upstream-sync-release.yml` with PyYAML → passed.
+- Manual dry-run dispatch on `axiom/deploy` for upstream `v1.4.13-rc.2` → run
+  `26182708728` completed successfully without publishing release assets.
 
 ---
 

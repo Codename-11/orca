@@ -44,10 +44,10 @@ builds default to `stablyai/orca`, while Axiom builds can route to the fork via
 Do not publish fork assets over an upstream release/tag. Axiom releases use
 fork-owned prerelease versions and tags:
 
-| Upstream release | Axiom app version | Axiom release tag          |
-| ---------------- | ----------------- | -------------------------- |
-| `v1.4.10`        | `1.4.10-axiom.1`  | `axiom-v1.4.10-axiom.1`   |
-| Axiom hotfix     | `1.4.10-axiom.2`  | `axiom-v1.4.10-axiom.2`   |
+| Upstream release | Axiom app version | Axiom release tag       |
+| ---------------- | ----------------- | ----------------------- |
+| `v1.4.10`        | `1.4.10-axiom.1`  | `axiom-v1.4.10-axiom.1` |
+| Axiom hotfix     | `1.4.10-axiom.2`  | `axiom-v1.4.10-axiom.2` |
 
 The workflow tracks upstream prerelease cuts (`AXIOM_INCLUDE_PRERELEASES=1`) so
 Axiom's release lane follows the same automated RC cadence as upstream rather
@@ -104,5 +104,7 @@ that tag.
 Failures are noisy and durable: merge conflicts, guard failures, test failures,
 and build/publish failures upsert a single `axiom-upstream-sync` GitHub issue with
 conflicted files, upstream tag/ref, fork tag/version, deploy branch, and Actions
-run URL. If `AXIOM_SYNC_DISCORD_WEBHOOK` is configured, failures also post to
-Discord. Successful no-op/successful release runs do not post chat/task noise.
+run URL. Keep GitHub Issues enabled on `Codename-11/orca` so this upsert path can
+persist notifications. If `AXIOM_SYNC_DISCORD_WEBHOOK` is configured, failures
+also post to Discord. Successful no-op/successful release runs do not post
+chat/task noise.
