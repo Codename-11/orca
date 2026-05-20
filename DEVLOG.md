@@ -6,6 +6,22 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-20 — Forge provider Wave 6 richer auth/workspace status
+
+Expanded Forge connection status with sanitized auth/source metadata and workspace slug.
+The Forge task toolbar now displays connected/error state, workspace name/slug, base URL,
+and whether auth comes from a saved token or environment token without exposing token
+values. Added main-process tests for sanitized workspace/auth status.
+
+Verification:
+- `pnpm run typecheck`
+- `pnpm exec vitest run --config config/vitest.config.ts src/main/forge/issues.test.ts src/renderer/src/lib/forge-links.test.ts src/renderer/src/components/forge/ForgeIssueDetailDrawer.test.tsx`
+- `pnpm exec oxlint src/main/forge/issues.ts src/main/forge/issues.test.ts src/renderer/src/components/TaskPage.tsx src/shared/forge-types.ts`
+- `pnpm exec oxfmt --check src/main/forge/issues.ts src/main/forge/issues.test.ts src/renderer/src/components/TaskPage.tsx src/shared/forge-types.ts`
+- `git diff --check`
+
+---
+
 ## 2026-05-20 — Forge provider Wave 5 default project/status preferences
 
 Persisted Forge issue-creation defaults in global settings (`defaultForgeProjectId`,

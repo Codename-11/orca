@@ -34,6 +34,8 @@ export async function getStatus(): Promise<ForgeConnectionStatus> {
     return {
       connected: false,
       baseUrl: null,
+      hasToken: resolved.hasToken,
+      configSource: resolved.baseUrlSource,
       error: 'Forge API URL is not configured'
     }
   }
@@ -43,12 +45,17 @@ export async function getStatus(): Promise<ForgeConnectionStatus> {
     return {
       connected: true,
       baseUrl: resolved.baseUrl,
-      workspaceName: typeof workspace.name === 'string' ? workspace.name : null
+      hasToken: resolved.hasToken,
+      configSource: resolved.baseUrlSource,
+      workspaceName: typeof workspace.name === 'string' ? workspace.name : null,
+      workspaceSlug: typeof workspace.slug === 'string' ? workspace.slug : null
     }
   } catch (error) {
     return {
       connected: false,
       baseUrl: resolved.baseUrl,
+      hasToken: resolved.hasToken,
+      configSource: resolved.baseUrlSource,
       error: error instanceof Error ? error.message : String(error)
     }
   }

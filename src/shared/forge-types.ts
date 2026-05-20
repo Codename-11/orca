@@ -46,7 +46,10 @@ export type ForgeIssue = {
 export type ForgeConnectionStatus = {
   connected: boolean
   baseUrl: string | null
+  hasToken?: boolean
+  configSource?: 'config' | 'env' | 'none'
   workspaceName?: string | null
+  workspaceSlug?: string | null
   error?: string
 }
 

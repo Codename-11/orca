@@ -43,6 +43,40 @@ afterEach(() => {
   vi.doUnmock('./client')
 })
 
+describe('getStatus', () => {
+  it('returns sanitized workspace and auth metadata', async () => {
+    const calls = setupTransport(() => ({ name: 'Axiom Forge', slug: 'axiom' }))
+    const { getStatus } = await import('./issues')
+    const status = await getStatus()
+    expect(status).toMatchObject({
+      connected: true,
+      baseUrl: 'https://forge.example',
+      hasToken: true,
+      configSource: 'env',
+      workspaceName: 'Axiom Forge',
+      workspaceSlug: 'axiom'
+    })
+    expect(calls).toEqual([{ tool: 'workspace.get', input: {} }])
+  })
+
+  it('reports configuration state without exposing token values', async () => {
+    delete process.env.FORGE_BASE_URL
+    delete process.env.FORGE_API_TOKEN
+    const calls = setupTransport(() => ({ name: 'unused' }))
+    const { getStatus } = await import('./issues')
+    const status = await getStatus()
+    expect(status).toEqual({
+      connected: false,
+      baseUrl: null,
+      hasToken: false,
+      configSource: 'none',
+      error: 'Forge API URL is not configured'
+    })
+    expect(JSON.stringify(status)).not.toContain('tok')
+    expect(calls).toHaveLength(0)
+  })
+})
+
 describe('listIssues', () => {
   it('calls issues.assigned for the assigned filter', async () => {
     const calls = setupTransport(() => ({ issues: [] }))

@@ -123,6 +123,7 @@ import type {
   GitLabWorkItem,
   ForgeAgentSummary,
   ForgeComment,
+  ForgeConnectionStatus,
   ForgeIssue,
   ForgeIssueStatus,
   ForgeIssueUpdate,
@@ -153,6 +154,7 @@ import {
   forgeListProjects,
   forgeListStatuses,
   forgeSearchIssues,
+  forgeStatus,
   forgeUpdateIssue
 } from '@/runtime/runtime-forge-client'
 import {
@@ -1843,6 +1845,9 @@ export default function TaskPage(): React.JSX.Element {
   // ── Forge task-source state ───────────────────────────────────────
   const [forgeIssues, setForgeIssues] = useState<ForgeIssue[]>([])
   const [forgeLoading, setForgeLoading] = useState(false)
+  const [forgeConnectionStatus, setForgeConnectionStatus] = useState<ForgeConnectionStatus | null>(
+    null
+  )
   const [forgeError, setForgeError] = useState<string | null>(null)
   const [forgeSearchInput, setForgeSearchInput] = useState('')
   const [appliedForgeSearch, setAppliedForgeSearch] = useState('')
@@ -3323,13 +3328,24 @@ export default function TaskPage(): React.JSX.Element {
       trimmed.length > 0
         ? forgeSearchIssues(settings, trimmed, FORGE_ITEM_LIMIT)
         : forgeListIssues(settings, activeForgePreset, FORGE_ITEM_LIMIT)
-    void Promise.all([request, forgeListStatuses(settings).catch(() => [] as ForgeIssueStatus[])])
-      .then(([issues, statuses]) => {
+    void Promise.all([
+      request,
+      forgeListStatuses(settings).catch(() => [] as ForgeIssueStatus[]),
+      forgeStatus(settings).catch(
+        (error): ForgeConnectionStatus => ({
+          connected: false,
+          baseUrl: null,
+          error: error instanceof Error ? error.message : 'Failed to check Forge status.'
+        })
+      )
+    ])
+      .then(([issues, statuses, status]) => {
         if (cancelled) {
           return
         }
         setForgeIssues(issues)
         setForgeStatuses(statuses)
+        setForgeConnectionStatus(status)
         setForgeLoading(false)
       })
       .catch((err) => {
@@ -4313,6 +4329,42 @@ export default function TaskPage(): React.JSX.Element {
                         </Tooltip>
                       </div>
                     </div>
+                    {forgeConnectionStatus ? (
+                      <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                        <span
+                          className={cn(
+                            'rounded-full border px-2 py-0.5 font-medium',
+                            forgeConnectionStatus.connected
+                              ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-300'
+                              : 'border-destructive/35 bg-destructive/10 text-destructive'
+                          )}
+                        >
+                          {forgeConnectionStatus.connected ? 'Connected' : 'Not connected'}
+                        </span>
+                        {forgeConnectionStatus.workspaceName ? (
+                          <span>{forgeConnectionStatus.workspaceName}</span>
+                        ) : null}
+                        {forgeConnectionStatus.workspaceSlug ? (
+                          <span className="font-mono">/{forgeConnectionStatus.workspaceSlug}</span>
+                        ) : null}
+                        {forgeConnectionStatus.baseUrl ? (
+                          <span className="max-w-[260px] truncate font-mono">
+                            {forgeConnectionStatus.baseUrl}
+                          </span>
+                        ) : null}
+                        <span>
+                          Auth:{' '}
+                          {forgeConnectionStatus.hasToken
+                            ? forgeConnectionStatus.configSource === 'env'
+                              ? 'environment token'
+                              : 'saved token'
+                            : 'missing token'}
+                        </span>
+                        {forgeConnectionStatus.error ? (
+                          <span className="text-destructive">{forgeConnectionStatus.error}</span>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <div className="mt-3 flex min-w-0 items-center gap-3">
                       <div className="relative min-w-0 flex-1 basis-64">
                         <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
