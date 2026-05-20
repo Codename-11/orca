@@ -6,6 +6,27 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-20 — Axiom upstream sync workflow safety
+
+Ported and hardened the fork-only upstream release automation onto
+`feat/forge-provider`. The workflow checks out and publishes from `axiom/deploy`,
+fast-forwards `main` only from `upstream/main`, injects the Axiom build/update
+identity for release jobs, and verifies fork release tests before tagging. The
+sync script now refuses unexpected branch names, prints actionable conflict
+diagnostics on merge failure, and guards Axiom identity files after upstream sync
+so package/update settings cannot be silently clobbered.
+
+Verification:
+
+- `pnpm exec vitest run --config config/vitest.config.ts config/scripts/axiom-upstream-sync-release.test.mjs src/main/axiom-release-hardening.test.ts src/main/updater-endpoints.test.ts src/main/app-build-identity.test.ts` → 12 tests passed.
+- `node --check config/scripts/axiom-check-upstream-release.mjs && node --check config/scripts/axiom-sync-upstream-release.mjs && node --check config/scripts/axiom-generate-release-notes.mjs` → passed.
+- Parsed `.github/workflows/axiom-upstream-sync-release.yml` with PyYAML → passed.
+- `pnpm exec oxlint config/scripts/axiom-upstream-sync-release.test.mjs .github/workflows/axiom-upstream-sync-release.yml` → passed.
+- `pnpm exec oxfmt --check ...` on Axiom workflow/scripts → passed.
+- `git diff --check` → passed.
+
+---
+
 ## 2026-05-20 — Wave 11 release readiness docs and verification
 
 Added `docs/reference/axiom-release-readiness.md` as the durable checklist for

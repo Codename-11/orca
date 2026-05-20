@@ -1,0 +1,306 @@
+name: Axiom Upstream Sync Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: Optional upstream Orca release tag to force, e.g. v1.4.9
+        required: false
+        type: string
+      dry_run:
+        description: Sync and verify without pushing tags/releases
+        required: false
+        default: false
+        type: boolean
+      build_mobile:
+        description: Also run the upstream-style Android mobile APK workflow for this release
+        required: false
+        default: false
+        type: boolean
+      force_rebuild:
+        description: Rebuild and re-upload assets even if the fork release tag is already published
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    # Poll shortly after upstream publishes. GitHub may delay schedules, so the
+    # checker is idempotent against releases already present in this fork.
+    # Scheduled jobs stay inert until repo variable AXIOM_AUTO_RELEASES=true.
+    - cron: '*/15 * * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: axiom-upstream-sync-release
+  cancel-in-progress: false
+
+env:
+  AXIOM_DEPLOY_BRANCH: axiom/deploy
+  AXIOM_UPSTREAM_BRANCH: main
+  AXIOM_UPSTREAM_REPOSITORY: stablyai/orca
+  AXIOM_UPSTREAM_REPOSITORY_URL: https://github.com/stablyai/orca.git
+  ORCA_APP_ID: com.axiomlabs.orca
+  ORCA_APP_USER_MODEL_ID: com.axiomlabs.orca
+  ORCA_PRODUCT_NAME: Axiom Orca
+  ORCA_PACKAGE_NAME: axiom-orca
+  ORCA_APP_NAME: Axiom Orca
+  ORCA_WINDOWS_EXECUTABLE_NAME: Axiom Orca
+  ORCA_NSIS_GUID: b6c06723-a52f-5004-ad9f-f39666f5e928
+  ORCA_ARTIFACT_BASENAME: axiom-orca
+  # Axiom currently publishes Windows desktop builds from this fork. Mobile
+  # remains on Orca's upstream-style Mobile Release workflow and only runs on
+  # `mobile-v*` tags, manual dispatch, or the explicit build_mobile input below.
+  ORCA_RELEASE_PLATFORMS: win
+  ORCA_PUBLISH_REPOSITORY: ${{ github.repository }}
+  ORCA_UPDATE_OWNER: ${{ github.repository_owner }}
+  ORCA_UPDATE_REPO: ${{ github.event.repository.name }}
+
+jobs:
+  sync:
+    name: Detect, sync, verify, and tag
+    if: github.event_name == 'workflow_dispatch' || vars.AXIOM_AUTO_RELEASES == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      should_release: ${{ steps.check.outputs.should_release }}
+      tag: ${{ steps.check.outputs.upstream_tag }}
+      release_notes: axiom-release-notes.md
+    steps:
+      - name: Checkout Axiom deploy branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.AXIOM_DEPLOY_BRANCH }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: package.json
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Configure git author
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Detect new upstream release
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          args=()
+          if [[ -n "${{ inputs.upstream_tag || '' }}" ]]; then
+            args+=(--upstream-tag "${{ inputs.upstream_tag }}")
+          fi
+          if [[ "${{ inputs.force_rebuild || false }}" == "true" ]]; then
+            args+=(--force-rebuild)
+          fi
+          node config/scripts/axiom-check-upstream-release.mjs "${args[@]}"
+
+      - name: Stop when already published
+        if: steps.check.outputs.should_release != 'true'
+        run: |
+          echo "No Axiom release needed: ${{ steps.check.outputs.reason }}"
+
+      - name: Merge upstream into isolated deploy branch
+        if: steps.check.outputs.should_release == 'true' && !inputs.force_rebuild
+        run: node config/scripts/axiom-sync-upstream-release.mjs --upstream-tag "${{ steps.check.outputs.upstream_tag }}"
+
+      - name: Fast-forward upstream mirror branch
+        if: steps.check.outputs.should_release == 'true' && !inputs.force_rebuild && !inputs.dry_run
+        run: git push origin "refs/remotes/upstream/${AXIOM_UPSTREAM_BRANCH}:refs/heads/${AXIOM_UPSTREAM_BRANCH}"
+
+      - name: Install dependencies
+        if: steps.check.outputs.should_release == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify combined fork
+        if: steps.check.outputs.should_release == 'true'
+        run: |
+          pnpm run typecheck
+          pnpm exec vitest run --config config/vitest.config.ts \
+            src/shared/task-providers.test.ts \
+            src/main/axiom-release-hardening.test.ts \
+            src/main/updater-endpoints.test.ts \
+            src/main/updater-prerelease-feed.test.ts \
+            src/main/updater-nudge.test.ts \
+            src/main/updater-changelog.test.ts \
+            src/main/app-build-identity.test.ts \
+            config/scripts/axiom-upstream-sync-release.test.mjs
+
+      - name: Generate release notes
+        if: steps.check.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node config/scripts/axiom-generate-release-notes.mjs "${{ steps.check.outputs.upstream_tag }}" --output axiom-release-notes.md
+
+      - name: Create release tag
+        if: steps.check.outputs.should_release == 'true' && !inputs.dry_run
+        run: |
+          tag="${{ steps.check.outputs.upstream_tag }}"
+          git tag -f "$tag"
+          git push origin "HEAD:${AXIOM_DEPLOY_BRANCH}"
+          git push origin "refs/tags/$tag" --force
+
+      - name: Create draft release shell
+        if: steps.check.outputs.should_release == 'true' && !inputs.dry_run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${{ steps.check.outputs.upstream_tag }}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Axiom Orca $tag" \
+              --notes-file axiom-release-notes.md
+          else
+            # The previous step has already pushed the release tag. Let GitHub
+            # attach the draft to that tag; passing the tag itself as
+            # target_commitish is invalid for `gh release create`.
+            gh release create "$tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Axiom Orca $tag" \
+              --notes-file axiom-release-notes.md \
+              --draft
+          fi
+
+      - name: Upload release notes artifact
+        if: steps.check.outputs.should_release == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: axiom-release-notes
+          path: axiom-release-notes.md
+
+  build:
+    name: Build and publish Windows desktop
+    needs: sync
+    if: needs.sync.outputs.should_release == 'true' && !inputs.dry_run
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.sync.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: package.json
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Windows installer
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        shell: bash
+        run: pnpm run build:release && pnpm exec electron-builder --config config/electron-builder.config.cjs --win --publish never
+
+      - name: Upload Windows installer to Axiom GitHub Releases feed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          gh release upload "${{ needs.sync.outputs.tag }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            dist/axiom-orca-windows-setup.exe \
+            dist/axiom-orca-windows-setup.exe.blockmap \
+            dist/latest.yml \
+            --clobber
+
+  mobile:
+    name: Build Android mobile APK when requested
+    needs: sync
+    if: needs.sync.outputs.should_release == 'true' && !inputs.dry_run && inputs.build_mobile
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.sync.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Expo prebuild
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Build Android release APK
+        run: cd android && ./gradlew assembleRelease
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: axiom-orca-mobile-apk
+          path: mobile/android/app/build/outputs/apk/release/*.apk
+
+      - name: Upload APKs to draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: gh release upload "${{ needs.sync.outputs.tag }}" --repo "$GITHUB_REPOSITORY" android/app/build/outputs/apk/release/*.apk --clobber
+
+  publish:
+    name: Verify assets and publish release
+    needs: [sync, build, mobile]
+    if: always() && needs.sync.outputs.should_release == 'true' && !inputs.dry_run && needs.build.result == 'success' && (needs.mobile.result == 'success' || needs.mobile.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.sync.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: package.json
+
+      - name: Verify required release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          ORCA_RELEASE_PLATFORMS: ${{ env.ORCA_RELEASE_PLATFORMS }}
+        run: node config/scripts/verify-release-required-assets.mjs "${{ needs.sync.outputs.tag }}"
+
+      - name: Publish draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${{ needs.sync.outputs.tag }}" --repo "$GITHUB_REPOSITORY" --draft=false

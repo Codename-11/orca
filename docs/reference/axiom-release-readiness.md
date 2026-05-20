@@ -70,5 +70,20 @@ pnpm exec oxfmt --check config/electron-builder.config.cjs electron.vite.config.
 git diff --check
 ```
 
-For workflow-only edits, also validate any Axiom release scripts with Node and
-parse the workflow YAML before merging.
+For workflow-only edits, also validate any Axiom release scripts with Node, run
+`config/scripts/axiom-upstream-sync-release.test.mjs`, and parse the workflow
+YAML before merging.
+
+## Upstream-sync automation
+
+The Axiom upstream sync workflow lives at
+`.github/workflows/axiom-upstream-sync-release.yml`. It is allowed to push only:
+
+- `refs/remotes/upstream/main` to `refs/heads/main`, preserving `main` as the
+  upstream mirror.
+- The synchronized release commit to `axiom/deploy`.
+- The selected release tag that the build jobs check out.
+
+The sync script refuses unexpected branch names, emits conflict diagnostics when
+`git merge upstream/main` fails, and re-checks the Axiom identity files after
+sync so upstream changes cannot silently remove fork package/update settings.
