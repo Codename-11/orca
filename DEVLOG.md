@@ -6,6 +6,19 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-19 — Manual Windows asset clobber for republished tags
+
+Switched the Axiom Windows release job from `electron-builder --publish always`
+to a two-step build/upload flow: build with `--publish never`, then upload
+`dist/axiom-orca-windows-setup.exe`, its blockmap, and `dist/latest.yml` via
+`gh release upload --clobber`. Electron Builder refuses to publish assets to an
+existing published GitHub release once the release is more than two hours old,
+which left old Windows assets in place during the first forced rebuild. Manual
+upload keeps normal new releases working and makes supervised republish runs
+actually replace the installer.
+
+---
+
 ## 2026-05-19 — Existing release rebuild switch
 
 Added a supervised `force_rebuild` input to the Axiom upstream sync workflow so

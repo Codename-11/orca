@@ -190,14 +190,26 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build and publish to Axiom GitHub Releases feed
+      - name: Build Windows installer
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
         shell: bash
-        run: pnpm run build:release && pnpm exec electron-builder --config config/electron-builder.config.cjs --win --publish always
+        run: pnpm run build:release && pnpm exec electron-builder --config config/electron-builder.config.cjs --win --publish never
+
+      - name: Upload Windows installer to Axiom GitHub Releases feed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          gh release upload "${{ needs.sync.outputs.tag }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            dist/axiom-orca-windows-setup.exe \
+            dist/axiom-orca-windows-setup.exe.blockmap \
+            dist/latest.yml \
+            --clobber
 
   mobile:
     name: Build Android mobile APK when requested
