@@ -6,6 +6,19 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-20 — Restored Axiom upstream auto-deploy path
+
+Resolved the protected `v1.4.14-rc.0` upstream merge into `axiom/deploy` while preserving both sides of the settings UI collision: Axiom's visible build identity label remains in the Updates section, and upstream's desktop platform detection now powers the CLI section with Windows support. The Axiom package version for the deploy lane is now `1.4.14-rc.0.axiom.1`.
+
+Hardened `config/scripts/axiom-sync-upstream-release.mjs` for the chronic safe conflict: if an upstream merge conflicts only on `package.json`'s top-level version line, the script resolves that file to the computed fork version, stages it, and completes the merge. Any additional or non-version conflicts still fail loudly with diagnostics so fork identity/update settings cannot be clobbered automatically.
+
+Verification so far:
+
+- `pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/settings/GeneralPane.test.ts config/scripts/axiom-upstream-sync-release.test.mjs` → 20 tests passed.
+- `git diff --check` → passed after the merge commit.
+
+---
+
 ## 2026-05-20 — Hermes upstream dispatch watcher
 
 Added a reusable Hermes-owned repository-dispatch watcher at
