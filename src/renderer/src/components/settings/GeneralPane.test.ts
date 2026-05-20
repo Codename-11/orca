@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { formatAppBuildLabel, shouldCommitOpenInApplicationsDraft } from './GeneralPane'
+import {
+  formatAppBuildLabel,
+  getDesktopPlatformFromUserAgent,
+  shouldCommitOpenInApplicationsDraft
+} from './GeneralPane'
 
 describe('GeneralPane open-in application drafts', () => {
   it('does not commit rows until both label and command are present', () => {
@@ -40,5 +44,17 @@ describe('GeneralPane build identity label', () => {
 
   it('falls back to Orca while build identity is loading', () => {
     expect(formatAppBuildLabel(null)).toBe('Orca …')
+  })
+})
+
+describe('GeneralPane desktop platform detection', () => {
+  it('detects macOS, Windows, and other desktop platforms from user agents', () => {
+    expect(getDesktopPlatformFromUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)')).toBe(
+      'darwin'
+    )
+    expect(getDesktopPlatformFromUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64)')).toBe(
+      'win32'
+    )
+    expect(getDesktopPlatformFromUserAgent('Mozilla/5.0 (X11; Linux x86_64)')).toBe('other')
   })
 })

@@ -68,6 +68,16 @@ export function formatAppBuildLabel(buildInfo: AppBuildInfo | null): string {
   return `${buildInfo.name} ${buildInfo.version}`
 }
 
+export function getDesktopPlatformFromUserAgent(userAgent: string): 'darwin' | 'win32' | 'other' {
+  if (userAgent.includes('Mac')) {
+    return 'darwin'
+  }
+  if (userAgent.includes('Windows')) {
+    return 'win32'
+  }
+  return 'other'
+}
+
 export { GENERAL_PANE_SEARCH_ENTRIES }
 
 type GeneralPaneProps = {
@@ -665,7 +675,7 @@ export function GeneralPane({ settings, updateSettings }: GeneralPaneProps): Rea
     matchesSettingsSearch(searchQuery, GENERAL_CLI_SEARCH_ENTRIES) ? (
       <CliSection
         key="cli"
-        currentPlatform={navigator.userAgent.includes('Mac') ? 'darwin' : 'other'}
+        currentPlatform={getDesktopPlatformFromUserAgent(navigator.userAgent)}
       />
     ) : null,
     matchesSettingsSearch(searchQuery, GENERAL_CACHE_TIMER_SEARCH_ENTRIES) ? (
