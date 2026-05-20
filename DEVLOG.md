@@ -6,6 +6,23 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-20 — Forge provider Wave 7 onboarding and empty states
+
+Added a Forge empty-state model and reusable panel for task-source onboarding. The Forge
+list and board now distinguish missing/disconnected Forge auth, missing board statuses,
+empty search results, filtered-out issue sets, and truly empty workspaces, with inline
+CTAs for refresh, clear search, and new issue creation. The UI uses the sanitized
+`forgeConnectionStatus` metadata only; renderer code still never handles Forge tokens.
+
+Verification:
+- `pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/forge/forge-empty-state.test.tsx src/renderer/src/components/forge/ForgeIssueEmptyStatePanel.test.tsx`
+- `pnpm run typecheck`
+- `pnpm exec oxlint src/renderer/src/components/TaskPage.tsx src/renderer/src/components/forge/forge-empty-state.ts src/renderer/src/components/forge/forge-empty-state.test.tsx src/renderer/src/components/forge/ForgeIssueEmptyStatePanel.tsx src/renderer/src/components/forge/ForgeIssueEmptyStatePanel.test.tsx`
+- `pnpm exec oxfmt --check src/renderer/src/components/TaskPage.tsx src/renderer/src/components/forge/forge-empty-state.ts src/renderer/src/components/forge/forge-empty-state.test.tsx src/renderer/src/components/forge/ForgeIssueEmptyStatePanel.tsx src/renderer/src/components/forge/ForgeIssueEmptyStatePanel.test.tsx`
+- `git diff --check`
+
+---
+
 ## 2026-05-20 — Forge provider Wave 6 richer auth/workspace status
 
 Expanded Forge connection status with sanitized auth/source metadata and workspace slug.

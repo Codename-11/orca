@@ -95,6 +95,8 @@ import {
   ForgeIssueDetailDrawer,
   applyForgeIssuePatch
 } from '@/components/forge/ForgeIssueDetailDrawer'
+import { ForgeIssueEmptyStatePanel } from '@/components/forge/ForgeIssueEmptyStatePanel'
+import { getForgeIssueEmptyState } from '@/components/forge/forge-empty-state'
 import { LinearIcon } from '@/components/icons/LinearIcon'
 import { TASK_PROVIDER_UI_OPTIONS } from '@/components/task-providers/provider-ui-registry'
 import { cn } from '@/lib/utils'
@@ -1875,6 +1877,23 @@ export default function TaskPage(): React.JSX.Element {
   const [newForgeIssueSubmitting, setNewForgeIssueSubmitting] = useState(false)
   const forgeDetailRequestRef = useRef(0)
 
+  const openNewForgeIssueComposer = useCallback(() => {
+    setNewForgeIssueTitle('')
+    setNewForgeIssueBody('')
+    setNewForgeIssuePriority('NONE')
+    setNewForgeIssueProjectId(settings?.defaultForgeProjectId ?? null)
+    setNewForgeIssueStatusId(settings?.defaultForgeStatusId ?? null)
+    if (forgeDetailProjects.length === 0) {
+      void forgeListProjects(settings)
+        .then((projects) => {
+          setForgeDetailProjects(projects)
+          setNewForgeIssueProjectId((current) => current ?? settings?.defaultForgeProjectId ?? null)
+        })
+        .catch(() => toast.error('Failed to load Forge projects.'))
+    }
+    setNewForgeIssueOpen(true)
+  }, [forgeDetailProjects.length, settings])
+
   const [taskSearchInput, setTaskSearchInput] = useState(initialTaskQuery)
   const [appliedTaskSearch, setAppliedTaskSearch] = useState(initialTaskQuery)
   const taskSearchInputRef = useRef<HTMLInputElement>(null)
@@ -3574,6 +3593,33 @@ export default function TaskPage(): React.JSX.Element {
     return Array.from(byId.values()).filter((section) => section.issues.length > 0 || true)
   }, [forgeIssues, forgeStatuses])
 
+  const activeForgePresetLabel =
+    FORGE_PRESETS.find((preset) => preset.id === activeForgePreset)?.label ?? 'Active'
+  const forgeIssueEmptyState = getForgeIssueEmptyState({
+    issueCount: forgeIssues.length,
+    loading: forgeLoading,
+    error: forgeError,
+    connectionStatus: forgeConnectionStatus,
+    searchQuery: forgeSearchInput,
+    activePresetLabel: activeForgePresetLabel,
+    statusCount: forgeStatuses.length,
+    viewMode: forgeViewMode
+  })
+  const handleForgeEmptyStateAction = useCallback(
+    (action: 'New Forge issue' | 'Clear search' | 'Refresh' | 'Refresh connection') => {
+      if (action === 'New Forge issue') {
+        openNewForgeIssueComposer()
+        return
+      }
+      if (action === 'Clear search') {
+        setForgeSearchInput('')
+        setAppliedForgeSearch('')
+      }
+      setForgeRefreshNonce((current) => current + 1)
+    },
+    [openNewForgeIssueComposer]
+  )
+
   // Why: debounce the Linear search input so we don't fire a request on every
   // keystroke — matches the 300ms cadence used for GitHub search.
   useEffect(() => {
@@ -4251,25 +4297,7 @@ export default function TaskPage(): React.JSX.Element {
                             <Button
                               variant="outline"
                               size="icon"
-                              onClick={() => {
-                                setNewForgeIssueTitle('')
-                                setNewForgeIssueBody('')
-                                setNewForgeIssuePriority('NONE')
-                                setNewForgeIssueProjectId(settings?.defaultForgeProjectId ?? null)
-                                setNewForgeIssueStatusId(settings?.defaultForgeStatusId ?? null)
-                                if (forgeDetailProjects.length === 0) {
-                                  void forgeListProjects(settings)
-                                    .then((projects) => {
-                                      setForgeDetailProjects(projects)
-                                      setNewForgeIssueProjectId(
-                                        (current) =>
-                                          current ?? settings?.defaultForgeProjectId ?? null
-                                      )
-                                    })
-                                    .catch(() => toast.error('Failed to load Forge projects.'))
-                                }
-                                setNewForgeIssueOpen(true)
-                              }}
+                              onClick={openNewForgeIssueComposer}
                               aria-label="New Forge issue"
                               className="border-border/50 bg-transparent hover:bg-muted/50 backdrop-blur-md supports-[backdrop-filter]:bg-transparent"
                             >
@@ -5159,15 +5187,16 @@ export default function TaskPage(): React.JSX.Element {
               ) : null}
               {forgeViewMode === 'board' ? (
                 <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden">
-                  {forgeError ? (
+                  {forgeError && forgeIssueEmptyState?.kind !== 'setup' ? (
                     <div className="border-b border-border px-4 py-4 text-sm text-destructive">
                       {forgeError}
                     </div>
                   ) : null}
-                  {!forgeError && forgeBoardSections.length === 0 ? (
-                    <div className="px-4 py-10 text-center text-sm text-muted-foreground">
-                      No statuses available.
-                    </div>
+                  {forgeIssueEmptyState ? (
+                    <ForgeIssueEmptyStatePanel
+                      state={forgeIssueEmptyState}
+                      onAction={handleForgeEmptyStateAction}
+                    />
                   ) : (
                     <div className="flex h-full min-w-full gap-3 p-3">
                       {forgeBoardSections.map(({ status, issues }) => (
@@ -5299,7 +5328,7 @@ export default function TaskPage(): React.JSX.Element {
                 )}
                 style={{ scrollbarGutter: 'stable' }}
               >
-                {forgeError ? (
+                {forgeError && forgeIssueEmptyState?.kind !== 'setup' ? (
                   <div className="border-b border-border px-4 py-4 text-sm text-destructive">
                     {forgeError}
                   </div>
@@ -5314,15 +5343,11 @@ export default function TaskPage(): React.JSX.Element {
                     ))}
                   </div>
                 ) : null}
-                {!forgeLoading && forgeIssues.length === 0 && !forgeError ? (
-                  <div className="px-4 py-10 text-center">
-                    <p className="text-sm font-medium text-foreground">No Forge issues found</p>
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      {forgeSearchInput
-                        ? 'Try a different search query.'
-                        : 'No Forge issues match this filter.'}
-                    </p>
-                  </div>
+                {forgeIssueEmptyState ? (
+                  <ForgeIssueEmptyStatePanel
+                    state={forgeIssueEmptyState}
+                    onAction={handleForgeEmptyStateAction}
+                  />
                 ) : null}
                 <div className="divide-y divide-border/50">
                   {forgeIssues.map((issue) => {
