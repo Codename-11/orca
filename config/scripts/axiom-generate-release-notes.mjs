@@ -5,6 +5,17 @@ import { writeFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
 const API_VERSION = '2022-11-28'
+const MAX_RELEASE_NOTES_BODY_LENGTH = 120_000
+const MAX_UPSTREAM_NOTES_LENGTH = 70_000
+const MAX_FORK_DELTA_LENGTH = 35_000
+
+function truncateMarkdown(value, maxLength, label) {
+  if (value.length <= maxLength) {
+    return value
+  }
+  const omitted = value.length - maxLength
+  return `${value.slice(0, maxLength).trimEnd()}\n\n_Trimmed ${omitted.toLocaleString('en-US')} characters from ${label} to stay under GitHub release body limits._`
+}
 
 function envString(name, fallback = '') {
   const value = process.env[name]
@@ -12,7 +23,7 @@ function envString(name, fallback = '') {
 }
 
 function run(command, args) {
-  return execFileSync(command, args, { encoding: 'utf8' }).trim()
+  return execFileSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
 }
 
 function githubHeaders() {
@@ -81,33 +92,46 @@ async function main() {
   const range = previousTag ? `${previousTag}..HEAD` : 'HEAD'
   const axiomCommits = commitList(range)
 
-  const upstreamBody = upstreamRelease?.body?.trim()
+  const upstreamBody = truncateMarkdown(
+    upstreamRelease?.body?.trim() || '_No upstream release notes were provided._',
+    MAX_UPSTREAM_NOTES_LENGTH,
+    'upstream release notes'
+  )
   const upstreamUrl =
     upstreamRelease?.html_url ?? `https://github.com/${upstreamRepo}/releases/tag/${tag}`
-
-  const body = [
-    `# Axiom Orca ${tag}`,
-    '',
-    `This Axiom build is published from our fork release feed, not from upstream Orca's feed.`,
-    '',
-    `## Upstream Orca`,
-    '',
-    `- Upstream release: ${upstreamUrl}`,
-    upstreamRelease?.name ? `- Upstream title: ${upstreamRelease.name}` : null,
-    '',
-    upstreamBody ? upstreamBody : '_No upstream release notes were provided._',
-    '',
-    `## Axiom fork delta`,
-    '',
+  const forkDelta = truncateMarkdown(
     axiomCommits || '_No additional fork-local commits in this range._',
-    '',
-    `## Maintenance notes`,
-    '',
-    `- main remains a clean mirror of ${upstreamRepo}.`,
-    `- Axiom changes ship from the deploy branch and update against GitHub Releases in this repository.`
-  ]
-    .filter((line) => line !== null)
-    .join('\n')
+    MAX_FORK_DELTA_LENGTH,
+    'Axiom fork commit list'
+  )
+
+  const body = truncateMarkdown(
+    [
+      `# Axiom Orca ${tag}`,
+      '',
+      `This Axiom build is published from our fork release feed, not from upstream Orca's feed.`,
+      '',
+      `## Upstream Orca`,
+      '',
+      `- Upstream release: ${upstreamUrl}`,
+      upstreamRelease?.name ? `- Upstream title: ${upstreamRelease.name}` : null,
+      '',
+      upstreamBody,
+      '',
+      `## Axiom fork delta`,
+      '',
+      forkDelta,
+      '',
+      `## Maintenance notes`,
+      '',
+      `- main remains a clean mirror of ${upstreamRepo}.`,
+      `- Axiom changes ship from the deploy branch and update against GitHub Releases in this repository.`
+    ]
+      .filter((line) => line !== null)
+      .join('\n'),
+    MAX_RELEASE_NOTES_BODY_LENGTH,
+    'combined release notes'
+  )
 
   writeFileSync(output, `${body}\n`)
   console.log(`Wrote ${output}`)

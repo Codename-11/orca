@@ -31,6 +31,10 @@ Verification:
 - Parsed `.github/workflows/axiom-upstream-sync-release.yml` with PyYAML → passed.
 - Manual dry-run dispatch on `axiom/deploy` for upstream `v1.4.13-rc.2` → run
   `26182708728` completed successfully without publishing release assets.
+- Follow-up scheduled run for upstream `v1.4.13` verified/merged successfully, then
+  failed while creating the draft release because GitHub rejected oversized
+  upstream release notes. Capped generated release notes below GitHub's release
+  body limit and verified the generated notes for `v1.4.13` are under 125 KB.
 
 ---
 

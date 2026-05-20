@@ -101,6 +101,11 @@ merges the upstream release tag into `axiom/deploy`, updates `package.json` to t
 selected fork version, tags the result as `axiom-v<version>`, and then builds from
 that tag.
 
+The generated release notes include upstream notes plus fork-local commit deltas,
+but they are capped below GitHub's 125 KB release body limit. If upstream ships a
+very large changelog, the workflow trims long sections and leaves a note in the
+release body instead of failing at `gh release create`.
+
 Failures are noisy and durable: merge conflicts, guard failures, test failures,
 and build/publish failures upsert a single `axiom-upstream-sync` GitHub issue with
 conflicted files, upstream tag/ref, fork tag/version, deploy branch, and Actions

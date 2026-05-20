@@ -12,6 +12,7 @@ const workflow = readFileSync('.github/workflows/axiom-upstream-sync-release.yml
 const checkScript = readFileSync('config/scripts/axiom-check-upstream-release.mjs', 'utf8')
 const syncScript = readFileSync('config/scripts/axiom-sync-upstream-release.mjs', 'utf8')
 const notifyScript = readFileSync('config/scripts/axiom-report-sync-failure.mjs', 'utf8')
+const notesScript = readFileSync('config/scripts/axiom-generate-release-notes.mjs', 'utf8')
 
 describe('Axiom release versioning', () => {
   it('derives fork-specific app versions and release tags from upstream tags', () => {
@@ -80,6 +81,13 @@ describe('Axiom upstream sync release workflow', () => {
     expect(workflow).toContain('-u ORCA_UPDATE_OWNER')
     expect(workflow).toContain('-u ORCA_PUBLISH_REPOSITORY')
     expect(workflow).toContain('config/scripts/axiom-upstream-sync-release.test.mjs')
+  })
+
+  it('caps generated release notes below GitHub release body limits', () => {
+    expect(notesScript).toContain('MAX_RELEASE_NOTES_BODY_LENGTH = 120_000')
+    expect(notesScript).toContain('MAX_UPSTREAM_NOTES_LENGTH')
+    expect(notesScript).toContain('MAX_FORK_DELTA_LENGTH')
+    expect(notesScript).toContain('truncateMarkdown')
   })
 
   it('notifies durably only when sync/build/publish fails', () => {
