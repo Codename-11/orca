@@ -28,6 +28,26 @@ const ORCA_POSTHOG_WRITE_KEY_LITERAL =
     ? JSON.stringify(orcaPostHogWriteKey)
     : 'null'
 
+function optionalBuildString(value: string | undefined): string {
+  return typeof value === 'string' && value.trim().length > 0
+    ? JSON.stringify(value.trim())
+    : 'null'
+}
+
+const ORCA_UPDATE_OWNER_LITERAL = optionalBuildString(process.env.ORCA_UPDATE_OWNER)
+const ORCA_UPDATE_REPO_LITERAL = optionalBuildString(process.env.ORCA_UPDATE_REPO)
+const ORCA_UPDATE_NUDGE_URL_LITERAL = optionalBuildString(process.env.ORCA_UPDATE_NUDGE_URL)
+const ORCA_UPDATE_CHANGELOG_URL_LITERAL = optionalBuildString(process.env.ORCA_UPDATE_CHANGELOG_URL)
+const ORCA_UPDATE_CHANGELOG_JSON_URL_LITERAL = optionalBuildString(
+  process.env.ORCA_UPDATE_CHANGELOG_JSON_URL
+)
+const ORCA_APP_NAME_LITERAL = optionalBuildString(
+  process.env.ORCA_APP_NAME ?? process.env.ORCA_PRODUCT_NAME
+)
+const ORCA_APP_USER_MODEL_ID_LITERAL = optionalBuildString(
+  process.env.ORCA_APP_USER_MODEL_ID ?? process.env.ORCA_APP_ID
+)
+
 export default defineConfig({
   main: {
     build: {
@@ -51,7 +71,14 @@ export default defineConfig({
     // above for the full rationale.
     define: {
       ORCA_BUILD_IDENTITY: ORCA_BUILD_IDENTITY_LITERAL,
-      ORCA_POSTHOG_WRITE_KEY: ORCA_POSTHOG_WRITE_KEY_LITERAL
+      ORCA_POSTHOG_WRITE_KEY: ORCA_POSTHOG_WRITE_KEY_LITERAL,
+      ORCA_UPDATE_OWNER: ORCA_UPDATE_OWNER_LITERAL,
+      ORCA_UPDATE_REPO: ORCA_UPDATE_REPO_LITERAL,
+      ORCA_UPDATE_NUDGE_URL: ORCA_UPDATE_NUDGE_URL_LITERAL,
+      ORCA_UPDATE_CHANGELOG_URL: ORCA_UPDATE_CHANGELOG_URL_LITERAL,
+      ORCA_UPDATE_CHANGELOG_JSON_URL: ORCA_UPDATE_CHANGELOG_JSON_URL_LITERAL,
+      ORCA_APP_NAME: ORCA_APP_NAME_LITERAL,
+      ORCA_APP_USER_MODEL_ID: ORCA_APP_USER_MODEL_ID_LITERAL
     },
     // Why: @xterm/headless declares "exports": null in package.json, which
     // prevents Vite's default resolver from finding the CJS entry. Point

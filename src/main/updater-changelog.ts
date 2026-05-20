@@ -1,6 +1,7 @@
 import { net } from 'electron'
 import type { ChangelogData } from '../shared/types'
 import { compareVersions } from './updater-fallback'
+import { getChangelogJsonUrl, getChangelogPageUrl } from './updater-endpoints'
 
 type ChangelogEntry = {
   version: string
@@ -9,8 +10,6 @@ type ChangelogEntry = {
   mediaUrl?: string
   releaseNotesUrl: string
 }
-
-const CHANGELOG_URL = 'https://onorca.dev/changelog'
 
 function isValidEntry(entry: ChangelogEntry): boolean {
   return (
@@ -46,7 +45,11 @@ export async function fetchChangelog(
   const timeout = setTimeout(() => controller.abort(), 5000)
 
   try {
-    const res = await net.fetch('https://onorca.dev/whats-new/changelog.json', {
+    const changelogJsonUrl = getChangelogJsonUrl()
+    if (!changelogJsonUrl) {
+      return null
+    }
+    const res = await net.fetch(changelogJsonUrl, {
       signal: controller.signal
     })
     if (!res.ok) {
@@ -131,7 +134,7 @@ export async function fetchChangelog(
       const { version: _, ...release } = candidate
       // Why: the shown content is from an older entry, not the incoming version.
       // Point to the generic changelog page so the link doesn't mislead.
-      return { release: { ...release, releaseNotesUrl: CHANGELOG_URL }, releasesBehind }
+      return { release: { ...release, releaseNotesUrl: getChangelogPageUrl() }, releasesBehind }
     }
 
     return null

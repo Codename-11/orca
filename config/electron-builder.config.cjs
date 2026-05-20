@@ -3,6 +3,42 @@ const { execFileSync } = require('node:child_process')
 const { join, resolve } = require('node:path')
 
 const isMacRelease = process.env.ORCA_MAC_RELEASE === '1'
+
+function envString(name, fallback) {
+  const value = process.env[name]
+  return typeof value === 'string' && value.trim() ? value.trim() : fallback
+}
+
+function optionalEnvString(name) {
+  const value = process.env[name]
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function envRepository() {
+  const raw = envString(
+    'ORCA_PUBLISH_REPOSITORY',
+    envString('ORCA_UPDATE_REPOSITORY', envString('GITHUB_REPOSITORY', 'stablyai/orca'))
+  )
+  const [owner, repo] = raw
+    .split('/')
+    .map((part) => part.trim())
+    .filter(Boolean)
+  return { owner: owner || 'stablyai', repo: repo || 'orca' }
+}
+
+const appId = envString('ORCA_APP_ID', 'com.stablyai.orca')
+const productName = envString('ORCA_PRODUCT_NAME', 'Orca')
+const packageName = envString('ORCA_PACKAGE_NAME', 'orca')
+const windowsExecutableName = envString('ORCA_WINDOWS_EXECUTABLE_NAME', productName)
+const artifactBaseName = envString('ORCA_ARTIFACT_BASENAME', 'orca')
+const nsisGuid = optionalEnvString('ORCA_NSIS_GUID')
+const electronBuilderArchMacro = '${arch}'
+const electronBuilderExtMacro = '${ext}'
+const electronBuilderVersionMacro = '${version}'
+const linuxExecutableName = envString('ORCA_LINUX_EXECUTABLE_NAME', 'orca-ide')
+const linuxDebPackageName = envString('ORCA_LINUX_DEB_PACKAGE_NAME', linuxExecutableName)
+const linuxMaintainer = envString('ORCA_LINUX_MAINTAINER', 'stablyai')
+const publishRepository = envRepository()
 const featureWallResources = {
   from: 'resources/onboarding/feature-wall',
   to: 'onboarding/feature-wall'
@@ -17,8 +53,14 @@ const relayExtraResource = {
 
 /** @type {import('electron-builder').Configuration} */
 module.exports = {
-  appId: 'com.stablyai.orca',
-  productName: 'Orca',
+  appId,
+  productName,
+  // Why: one-click NSIS installers derive the install directory from the
+  // package metadata name, not productName. Fork builds must not install into
+  // upstream's `%LocalAppData%\\Programs\\orca` directory.
+  extraMetadata: {
+    name: packageName
+  },
   directories: {
     buildResources: 'resources/build'
   },
@@ -90,7 +132,7 @@ module.exports = {
     }
   },
   win: {
-    executableName: 'Orca',
+    executableName: windowsExecutableName,
     extraResources: [
       relayExtraResource,
       {
@@ -109,7 +151,17 @@ module.exports = {
     ]
   },
   nsis: {
-    artifactName: 'orca-windows-setup.${ext}',
+    // Why: appId/productName changes are not enough for Windows upgrade
+    // isolation in forked builds. A fork-owned NSIS GUID prevents the Axiom
+    // installer from treating upstream Orca as the app to replace/close.
+    ...(nsisGuid ? { guid: nsisGuid } : {}),
+    // Why: these names intentionally keep electron-builder's `${ext}` macro as
+    // a literal while still allowing the fork to override the basename.
+    artifactName: `${artifactBaseName}-windows-setup.${electronBuilderExtMacro}`,
+    // Why: upstream electron-builder's running-app check matches any process
+    // under $INSTDIR. The Axiom fork must only ever close its exact executable
+    // so side-by-side installs cannot trip over upstream Orca processes.
+    include: 'resources/build/installer.nsh',
     shortcutName: '${productName}',
     uninstallDisplayName: '${productName}',
     createDesktopShortcut: 'always'
@@ -176,12 +228,12 @@ module.exports = {
   // silently downgrading to ad-hoc artifacts that look shippable in CI logs.
   forceCodeSigning: isMacRelease,
   dmg: {
-    artifactName: 'orca-macos-${arch}.${ext}'
+    artifactName: `${artifactBaseName}-macos-${electronBuilderArchMacro}.${electronBuilderExtMacro}`
   },
   linux: {
     // Why: Ubuntu 26 ships GNOME Orca as the `orca` package and /usr/bin/orca.
     // The Linux installer should not claim those system package/file names.
-    executableName: 'orca-ide',
+    executableName: linuxExecutableName,
     // Why: pin the Linux app icon source so AppImage/deb icon payloads stay
     // deterministic if electron-builder defaults or resource discovery change.
     icon: 'resources/build/icon.png',
@@ -202,15 +254,15 @@ module.exports = {
       featureWallResources
     ],
     target: ['AppImage', 'deb'],
-    maintainer: 'stablyai',
+    maintainer: linuxMaintainer,
     category: 'Utility'
   },
   appImage: {
-    artifactName: 'orca-linux.${ext}'
+    artifactName: `${artifactBaseName}-linux.${electronBuilderExtMacro}`
   },
   deb: {
-    packageName: 'orca-ide',
-    artifactName: 'orca-ide_${version}_${arch}.${ext}',
+    packageName: linuxDebPackageName,
+    artifactName: `${linuxDebPackageName}_${electronBuilderVersionMacro}_${electronBuilderArchMacro}.${electronBuilderExtMacro}`,
     depends: ['python3', 'python3-gi', 'gir1.2-atspi-2.0', 'at-spi2-core', 'xdotool', 'xclip']
   },
   // Why: must be true so that electron-builder rebuilds native modules
@@ -221,8 +273,8 @@ module.exports = {
   npmRebuild: true,
   publish: {
     provider: 'github',
-    owner: 'stablyai',
-    repo: 'orca',
+    owner: publishRepository.owner,
+    repo: publishRepository.repo,
     releaseType: 'release'
   }
 }

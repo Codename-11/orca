@@ -6,6 +6,27 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-20 — Wave 9 Axiom updater and release hardening
+
+Hardened the fork build and updater path so Axiom Orca releases stay isolated
+from upstream Orca. Desktop packaging now supports env-driven app/package
+identity, fork-owned artifact names, the Axiom NSIS GUID
+`b6c06723-a52f-5004-ad9f-f39666f5e928`, and a narrowed Windows running-app
+check that only targets the exact Axiom executable. The updater/changelog/nudge
+paths now resolve through a repository/endpoint abstraction so Axiom builds can
+consume `Codename-11/orca` releases without falling back to upstream assets, and
+Android now uses the fork-owned `com.axiomlabs.orca.mobile` package for
+side-by-side installs.
+
+Verification:
+- `pnpm exec vitest run --config config/vitest.config.ts src/main/axiom-release-hardening.test.ts src/main/updater-endpoints.test.ts src/main/updater-prerelease-feed.test.ts src/main/updater.test.ts src/main/updater-nudge.test.ts src/main/updater-changelog.test.ts`
+- `pnpm run typecheck`
+- `pnpm exec oxlint config/electron-builder.config.cjs electron.vite.config.ts mobile/app.json resources/build/installer.nsh src/main/axiom-release-hardening.test.ts src/main/updater-changelog.ts src/main/updater-endpoints.ts src/main/updater-endpoints.test.ts src/main/updater-nudge.ts src/main/updater-prerelease-feed.ts src/main/updater.ts src/types/build-constants.d.ts`
+- `pnpm exec oxfmt --check config/electron-builder.config.cjs electron.vite.config.ts mobile/app.json resources/build/installer.nsh src/main/axiom-release-hardening.test.ts src/main/updater-changelog.ts src/main/updater-endpoints.ts src/main/updater-endpoints.test.ts src/main/updater-nudge.ts src/main/updater-prerelease-feed.ts src/main/updater.ts src/types/build-constants.d.ts`
+- `git diff --check`
+
+---
+
 ## 2026-05-20 — Forge provider Wave 8 agent-oriented filters
 
 Added agent-oriented Forge issue filtering across the renderer, runtime client,
