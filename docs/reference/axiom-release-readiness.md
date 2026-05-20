@@ -49,10 +49,12 @@ fork-owned prerelease versions and tags:
 | `v1.4.10`        | `1.4.10-axiom.1`  | `axiom-v1.4.10-axiom.1`   |
 | Axiom hotfix     | `1.4.10-axiom.2`  | `axiom-v1.4.10-axiom.2`   |
 
-Scheduled upstream sync skips once the matching fork tag exists. Manual
-Axiom-only update builds should use `bump_axiom_revision` or `axiom_revision` so
-the Electron updater sees a semantically newer fork version from the
-`Codename-11/orca` release feed.
+The workflow tracks upstream prerelease cuts (`AXIOM_INCLUDE_PRERELEASES=1`) so
+Axiom's release lane follows the same automated RC cadence as upstream rather
+than rebuilding older stable tags from newer `main` code. Scheduled upstream sync
+skips once the matching fork tag exists. Manual Axiom-only update builds should
+use `bump_axiom_revision` or `axiom_revision` so the Electron updater sees a
+semantically newer fork version from the `Codename-11/orca` release feed.
 
 ## Pre-release checklist
 

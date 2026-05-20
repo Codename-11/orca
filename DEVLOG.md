@@ -12,8 +12,10 @@ Converted Axiom upstream sync from upstream-tag reuse to fork-owned release
 versions/tags. Upstream releases now resolve to `1.4.x-axiom.N` app versions and
 `axiom-v1.4.x-axiom.N` release tags, while manual Axiom-only builds can publish
 the next revision with `bump_axiom_revision` or a specific `axiom_revision`. The
-workflow continues to mirror `upstream/main` into `main`, releases only from
-`axiom/deploy`, and points packaged update feeds at `Codename-11/orca`.
+workflow tracks upstream prereleases so RC automation stays aligned with the code
+merged from upstream `main`, continues to mirror `upstream/main` into `main`,
+releases only from `axiom/deploy`, and points packaged update feeds at
+`Codename-11/orca`.
 
 Added a durable failure reporter that upserts one `axiom-upstream-sync` GitHub
 issue, with optional Discord webhook support, when merge/test/build/publish fails.

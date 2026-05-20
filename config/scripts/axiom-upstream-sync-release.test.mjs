@@ -45,6 +45,7 @@ describe('Axiom upstream sync release workflow', () => {
   it('keeps fork builds isolated to the deploy branch and fork identity', () => {
     expect(workflow).toContain('AXIOM_DEPLOY_BRANCH: axiom/deploy')
     expect(workflow).toContain('AXIOM_UPSTREAM_BRANCH: main')
+    expect(workflow).toContain("AXIOM_INCLUDE_PRERELEASES: '1'")
     expect(workflow).toContain('ORCA_APP_ID: com.axiomlabs.orca')
     expect(workflow).toContain('ORCA_APP_USER_MODEL_ID: com.axiomlabs.orca')
     expect(workflow).toContain('ORCA_PRODUCT_NAME: Axiom Orca')
