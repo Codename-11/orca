@@ -92,7 +92,7 @@ describe('Axiom upstream sync script hardening', () => {
     expect(syncScript).toContain('printConflictDiagnostics')
     expect(syncScript).toContain('assertAxiomIdentityFiles')
     expect(syncScript).toContain('Upstream merge conflicted')
-    expect(syncScript).toContain('b6c06723-a52f-5004-ad9f-f39666f5e928')
+    expect(syncScript).toContain('ORCA_NSIS_GUID')
     expect(syncScript).toContain('com.axiomlabs.orca.mobile')
     expect(syncScript).toContain('ORCA_UPDATE_OWNER')
     expect(syncScript).toContain('ORCA_UPDATE_REPO')

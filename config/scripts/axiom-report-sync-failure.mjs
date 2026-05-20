@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync } from 'node:child_process'
+import { appendFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
 const API_VERSION = '2022-11-28'
@@ -175,9 +176,26 @@ async function postDiscordIfConfigured() {
   })
 }
 
+function writeStepSummary(message) {
+  const summaryPath = envString('GITHUB_STEP_SUMMARY')
+  if (!summaryPath) {
+    return
+  }
+  appendFileSync(summaryPath, `${message}\n`)
+}
+
 async function main() {
-  await upsertIssue()
+  let issueError = null
+  try {
+    await upsertIssue()
+  } catch (error) {
+    issueError = error
+    console.error(`::warning::Could not upsert Axiom sync failure issue: ${error.message}`)
+  }
   await postDiscordIfConfigured()
+  if (issueError) {
+    writeStepSummary(`## Axiom upstream sync notification fallback\n\n${issueBody()}`)
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

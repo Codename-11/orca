@@ -31,9 +31,11 @@ function branchExists(ref) {
 }
 
 const AXIOM_IDENTITY_EXPECTATIONS = [
-  ['config/electron-builder.config.cjs', 'com.axiomlabs.orca'],
-  ['config/electron-builder.config.cjs', 'Axiom Orca'],
-  ['config/electron-builder.config.cjs', 'b6c06723-a52f-5004-ad9f-f39666f5e928'],
+  ['config/electron-builder.config.cjs', 'ORCA_APP_ID'],
+  ['config/electron-builder.config.cjs', 'ORCA_PRODUCT_NAME'],
+  ['config/electron-builder.config.cjs', 'ORCA_PACKAGE_NAME'],
+  ['config/electron-builder.config.cjs', 'ORCA_NSIS_GUID'],
+  ['config/electron-builder.config.cjs', 'ORCA_PUBLISH_REPOSITORY'],
   ['electron.vite.config.ts', 'ORCA_UPDATE_OWNER'],
   ['electron.vite.config.ts', 'ORCA_UPDATE_REPO'],
   ['electron.vite.config.ts', 'ORCA_APP_NAME'],
