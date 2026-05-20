@@ -48,12 +48,14 @@ describe('GeneralPane build identity label', () => {
 })
 
 describe('GeneralPane desktop platform detection', () => {
-  it('detects macOS, Windows, and other desktop platforms from user agents', () => {
-    expect(getDesktopPlatformFromUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)')).toBe(
+  it('keeps Windows available for Windows-only CLI settings', () => {
+    expect(
+      getDesktopPlatformFromUserAgent(
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      )
+    ).toBe('win32')
+    expect(getDesktopPlatformFromUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)')).toBe(
       'darwin'
-    )
-    expect(getDesktopPlatformFromUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64)')).toBe(
-      'win32'
     )
     expect(getDesktopPlatformFromUserAgent('Mozilla/5.0 (X11; Linux x86_64)')).toBe('other')
   })
