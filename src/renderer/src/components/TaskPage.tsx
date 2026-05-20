@@ -1865,6 +1865,7 @@ export default function TaskPage(): React.JSX.Element {
   const [newForgeIssueTitle, setNewForgeIssueTitle] = useState('')
   const [newForgeIssueBody, setNewForgeIssueBody] = useState('')
   const [newForgeIssueProjectId, setNewForgeIssueProjectId] = useState<string | null>(null)
+  const [newForgeIssueStatusId, setNewForgeIssueStatusId] = useState<string | null>(null)
   const [newForgeIssuePriority, setNewForgeIssuePriority] = useState<ForgeIssue['priority']>('NONE')
   const [newForgeIssueSubmitting, setNewForgeIssueSubmitting] = useState(false)
   const forgeDetailRequestRef = useRef(0)
@@ -3760,6 +3761,7 @@ export default function TaskPage(): React.JSX.Element {
         title,
         description: newForgeIssueBody.trim() || undefined,
         projectId: newForgeIssueProjectId ?? undefined,
+        statusId: newForgeIssueStatusId ?? undefined,
         priority: newForgeIssuePriority === 'NONE' ? undefined : newForgeIssuePriority
       })
       if (!result.ok) {
@@ -3769,6 +3771,7 @@ export default function TaskPage(): React.JSX.Element {
       setNewForgeIssueOpen(false)
       setNewForgeIssueTitle('')
       setNewForgeIssueBody('')
+      setNewForgeIssueStatusId(settings?.defaultForgeStatusId ?? null)
       setNewForgeIssuePriority('NONE')
       setForgeIssues((current) => {
         const exists = current.some((candidate) => candidate.id === result.issue.id)
@@ -3788,6 +3791,7 @@ export default function TaskPage(): React.JSX.Element {
     newForgeIssueBody,
     newForgeIssuePriority,
     newForgeIssueProjectId,
+    newForgeIssueStatusId,
     newForgeIssueSubmitting,
     newForgeIssueTitle,
     openForgeIssueDetail,
@@ -4235,13 +4239,15 @@ export default function TaskPage(): React.JSX.Element {
                                 setNewForgeIssueTitle('')
                                 setNewForgeIssueBody('')
                                 setNewForgeIssuePriority('NONE')
-                                setNewForgeIssueProjectId(forgeDetailProjects[0]?.id ?? null)
+                                setNewForgeIssueProjectId(settings?.defaultForgeProjectId ?? null)
+                                setNewForgeIssueStatusId(settings?.defaultForgeStatusId ?? null)
                                 if (forgeDetailProjects.length === 0) {
                                   void forgeListProjects(settings)
                                     .then((projects) => {
                                       setForgeDetailProjects(projects)
                                       setNewForgeIssueProjectId(
-                                        (current) => current ?? projects[0]?.id ?? null
+                                        (current) =>
+                                          current ?? settings?.defaultForgeProjectId ?? null
                                       )
                                     })
                                     .catch(() => toast.error('Failed to load Forge projects.'))
@@ -6122,9 +6128,13 @@ export default function TaskPage(): React.JSX.Element {
                 <label className="text-[11px] font-medium text-muted-foreground">Project</label>
                 <Select
                   value={newForgeIssueProjectId ?? '__none__'}
-                  onValueChange={(value) =>
-                    setNewForgeIssueProjectId(value === '__none__' ? null : value)
-                  }
+                  onValueChange={(value) => {
+                    const projectId = value === '__none__' ? null : value
+                    setNewForgeIssueProjectId(projectId)
+                    void updateSettings({ defaultForgeProjectId: projectId }).catch(() => {
+                      toast.error('Failed to save Forge project preference.')
+                    })
+                  }}
                   disabled={newForgeIssueSubmitting}
                 >
                   <SelectTrigger>
@@ -6136,6 +6146,32 @@ export default function TaskPage(): React.JSX.Element {
                       <SelectItem key={project.id} value={project.id}>
                         {project.key ? `${project.key} — ` : ''}
                         {project.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] font-medium text-muted-foreground">Status</label>
+                <Select
+                  value={newForgeIssueStatusId ?? '__none__'}
+                  onValueChange={(value) => {
+                    const statusId = value === '__none__' ? null : value
+                    setNewForgeIssueStatusId(statusId)
+                    void updateSettings({ defaultForgeStatusId: statusId }).catch(() => {
+                      toast.error('Failed to save Forge status preference.')
+                    })
+                  }}
+                  disabled={newForgeIssueSubmitting}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Server default</SelectItem>
+                    {forgeStatuses.map((status) => (
+                      <SelectItem key={status.id} value={status.id}>
+                        {status.name}
                       </SelectItem>
                     ))}
                   </SelectContent>

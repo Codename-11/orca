@@ -1562,6 +1562,10 @@ export type GlobalSettings = {
    *  Same nullable-array pattern as `defaultRepoSelection`: `null` = sticky-all,
    *  `string[]` = frozen subset of team IDs. */
   defaultLinearTeamSelection: string[] | null
+  /** Default Forge project for issue creation. Null means no project. */
+  defaultForgeProjectId?: string | null
+  /** Default Forge status to apply after issue creation. Null keeps Forge server default. */
+  defaultForgeStatusId?: string | null
   /** Session cookie for OpenCode Go rate-limit fetching. Stored encrypted. */
   opencodeSessionCookie: string
   /** Optional workspace ID override for OpenCode Go. When set, skips the

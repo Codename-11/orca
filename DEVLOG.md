@@ -6,6 +6,22 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-20 — Forge provider Wave 5 default project/status preferences
+
+Persisted Forge issue-creation defaults in global settings (`defaultForgeProjectId`,
+`defaultForgeStatusId`). The Forge composer now initializes from those preferences,
+lets users adjust project/status inline, saves changes server-side, and applies the
+default status after issue creation via the existing Forge transition path.
+
+Verification:
+- `pnpm run typecheck`
+- `pnpm exec vitest run --config config/vitest.config.ts src/main/forge/issues.test.ts src/renderer/src/lib/forge-links.test.ts src/renderer/src/components/forge/ForgeIssueDetailDrawer.test.tsx`
+- `pnpm exec oxlint src/renderer/src/components/TaskPage.tsx src/shared/types.ts src/shared/constants.ts`
+- `pnpm exec oxfmt --check src/renderer/src/components/TaskPage.tsx src/shared/types.ts src/shared/constants.ts`
+- `git diff --check`
+
+---
+
 ## 2026-05-20 — Forge provider Wave 4 issue creation
 
 Added a Forge issue composer to the Forge task source toolbar. The composer

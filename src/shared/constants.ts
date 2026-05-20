@@ -231,6 +231,8 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     visibleTaskProviders: [...TASK_PROVIDERS],
     defaultRepoSelection: null,
     defaultLinearTeamSelection: null,
+    defaultForgeProjectId: null,
+    defaultForgeStatusId: null,
     opencodeSessionCookie: '',
     opencodeWorkspaceId: '',
     geminiCliOAuthEnabled: false,
