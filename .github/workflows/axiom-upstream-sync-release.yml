@@ -146,7 +146,22 @@ jobs:
         if: steps.check.outputs.should_release == 'true'
         run: |
           pnpm run typecheck
-          pnpm exec vitest run --config config/vitest.config.ts \
+          # Tests assert both upstream defaults and fork-specific env overrides.
+          # Release jobs export fork env globally, so run Vitest with those values unset.
+          env \
+            -u GITHUB_REPOSITORY \
+            -u ORCA_APP_ID \
+            -u ORCA_APP_USER_MODEL_ID \
+            -u ORCA_PRODUCT_NAME \
+            -u ORCA_PACKAGE_NAME \
+            -u ORCA_APP_NAME \
+            -u ORCA_WINDOWS_EXECUTABLE_NAME \
+            -u ORCA_NSIS_GUID \
+            -u ORCA_ARTIFACT_BASENAME \
+            -u ORCA_PUBLISH_REPOSITORY \
+            -u ORCA_UPDATE_OWNER \
+            -u ORCA_UPDATE_REPO \
+            pnpm exec vitest run --config config/vitest.config.ts \
             src/shared/task-providers.test.ts \
             src/main/axiom-release-hardening.test.ts \
             src/main/updater-endpoints.test.ts \

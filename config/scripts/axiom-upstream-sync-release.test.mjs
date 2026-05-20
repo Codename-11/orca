@@ -75,6 +75,13 @@ describe('Axiom upstream sync release workflow', () => {
     expect(syncScript).toContain("!args.forkTag.startsWith('axiom-v')")
   })
 
+  it('runs verification tests without globally injected fork build env', () => {
+    expect(workflow).toContain('env \\\n            -u GITHUB_REPOSITORY')
+    expect(workflow).toContain('-u ORCA_UPDATE_OWNER')
+    expect(workflow).toContain('-u ORCA_PUBLISH_REPOSITORY')
+    expect(workflow).toContain('config/scripts/axiom-upstream-sync-release.test.mjs')
+  })
+
   it('notifies durably only when sync/build/publish fails', () => {
     expect(workflow).toContain('issues: write')
     expect(workflow).toContain('Notify upstream sync failure')
