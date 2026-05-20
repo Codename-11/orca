@@ -28,6 +28,7 @@ function envRepository() {
 
 const appId = envString('ORCA_APP_ID', 'com.stablyai.orca')
 const productName = envString('ORCA_PRODUCT_NAME', 'Orca')
+const packageName = envString('ORCA_PACKAGE_NAME', 'orca')
 const windowsExecutableName = envString('ORCA_WINDOWS_EXECUTABLE_NAME', productName)
 const artifactBaseName = envString('ORCA_ARTIFACT_BASENAME', 'orca')
 const nsisGuid = optionalEnvString('ORCA_NSIS_GUID')
@@ -54,6 +55,12 @@ const relayExtraResource = {
 module.exports = {
   appId,
   productName,
+  // Why: one-click NSIS installers derive the install directory from the
+  // package metadata name, not productName. Fork builds must not install into
+  // upstream's `%LocalAppData%\\Programs\\orca` directory.
+  extraMetadata: {
+    name: packageName
+  },
   directories: {
     buildResources: 'resources/build'
   },
@@ -151,6 +158,10 @@ module.exports = {
     // Why: these names intentionally keep electron-builder's `${ext}` macro as
     // a literal while still allowing the fork to override the basename.
     artifactName: `${artifactBaseName}-windows-setup.${electronBuilderExtMacro}`,
+    // Why: upstream electron-builder's running-app check matches any process
+    // under $INSTDIR. The Axiom fork must only ever close its exact executable
+    // so side-by-side installs cannot trip over upstream Orca processes.
+    include: 'resources/build/installer.nsh',
     shortcutName: '${productName}',
     uninstallDisplayName: '${productName}',
     createDesktopShortcut: 'always'

@@ -6,6 +6,23 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-19 — Axiom installer running-app check narrowed
+
+Added a fork-specific NSIS include so the Windows installer only detects and
+closes the exact Axiom executable path (`$INSTDIR\\Axiom Orca.exe`).
+electron-builder's default macro checks for any process whose path starts with
+`$INSTDIR`, which is too broad for side-by-side fork installs and can surface
+an `Axiom Orca is running` prompt when the process is not actually the Axiom
+app.
+
+Also split the package metadata name for fork builds (`ORCA_PACKAGE_NAME=axiom-orca`).
+One-click NSIS derives `APP_FILENAME` / install dir from package name, not
+`productName`; without this, Axiom builds still resolved to `%LocalAppData%\\Programs\\orca`,
+colliding with upstream Orca even though the visible product/exe name was
+`Axiom Orca`. The fork should now install under `%LocalAppData%\\Programs\\axiom-orca`.
+
+---
+
 ## 2026-05-19 — Scheduled releases update the upstream mirror branch
 
 Added a normal-release workflow step that fast-forwards the fork's upstream

@@ -43,6 +43,7 @@ env:
   ORCA_APP_ID: com.axiomlabs.orca
   ORCA_APP_USER_MODEL_ID: com.axiomlabs.orca
   ORCA_PRODUCT_NAME: Axiom Orca
+  ORCA_PACKAGE_NAME: axiom-orca
   ORCA_APP_NAME: Axiom Orca
   ORCA_WINDOWS_EXECUTABLE_NAME: Axiom Orca
   ORCA_NSIS_GUID: b6c06723-a52f-5004-ad9f-f39666f5e928
