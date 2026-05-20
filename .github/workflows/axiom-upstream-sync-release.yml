@@ -109,6 +109,10 @@ jobs:
         if: steps.check.outputs.should_release == 'true' && !inputs.force_rebuild
         run: node config/scripts/axiom-sync-upstream-release.mjs --upstream-tag "${{ steps.check.outputs.upstream_tag }}"
 
+      - name: Fast-forward upstream mirror branch
+        if: steps.check.outputs.should_release == 'true' && !inputs.force_rebuild && !inputs.dry_run
+        run: git push origin "refs/remotes/upstream/${AXIOM_UPSTREAM_BRANCH}:refs/heads/${AXIOM_UPSTREAM_BRANCH}"
+
       - name: Install dependencies
         if: steps.check.outputs.should_release == 'true'
         run: pnpm install --frozen-lockfile

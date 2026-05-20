@@ -6,6 +6,18 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-19 — Scheduled releases update the upstream mirror branch
+
+Added a normal-release workflow step that fast-forwards the fork's upstream
+mirror branch (`main`) to `upstream/main` after the deploy sync succeeds. This
+keeps the branch contract true: `main` mirrors upstream, fork work remains on
+feature branches plus `axiom/deploy`, and release automation builds the Axiom
+variant from the isolated deploy branch. Forced rebuilds skip this step because
+they intentionally republish the current deployed tree instead of pulling new
+upstream commits.
+
+---
+
 ## 2026-05-19 — Forced rebuild skips upstream merge
 
 Forced rebuilds now skip the upstream merge step. The republish path is for
