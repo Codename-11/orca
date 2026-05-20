@@ -6,6 +6,19 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-19 — Forge provider Wave 0 audit
+
+Added `docs/reference/task-provider-surface-map.md` to capture the current
+hardcoded provider seams and the smallest upstream-compatible abstraction path:
+start with provider UI metadata/capabilities, keep provider auth/RPC concrete,
+and leave Axiom release/update identity outside any upstream PR shape.
+
+Verification:
+- `pnpm run typecheck`
+- `pnpm exec vitest run --config config/vitest.config.ts src/shared/task-providers.test.ts src/main/forge src/renderer/src/store/slices/forge.test.ts src/renderer/src/runtime/runtime-forge-client.test.ts`
+
+---
+
 ## 2026-05-19 — Forge provider enhancement plan
 
 Added `docs/plans/2026-05-19-forge-provider-enhancements.md` to sequence the
