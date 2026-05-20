@@ -32,6 +32,10 @@ Verification:
 - `pnpm exec oxlint ...` on touched workflow/scripts/updater tests → passed.
 - `pnpm exec oxfmt --check ...` on touched workflow/scripts/updater tests → passed.
 - `git diff --check` → passed.
+- Follow-up publish gate fix: release asset verification now honors
+  `ORCA_RELEASE_PLATFORMS=win,android` and `ORCA_ARTIFACT_BASENAME=axiom-orca`, so
+  Axiom releases require only the intended fork Windows assets plus APK when mobile
+  is requested instead of upstream macOS/Linux/orca-named assets.
 - Live detector smoke checks against GitHub returned `should_release=true` for both
   upstream `v1.4.13` and manual `axiom-v1.4.13-axiom.1` without exposing secrets.
 

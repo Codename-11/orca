@@ -9,6 +9,11 @@ import {
   resolveForkReleaseVersion
 } from './axiom-release-versioning.mjs'
 
+import {
+  getRequiredReleaseAssetNames,
+  parseReleasePlatforms
+} from './verify-release-required-assets.mjs'
+
 const workflow = readFileSync('.github/workflows/axiom-upstream-sync-release.yml', 'utf8')
 const checkScript = readFileSync('config/scripts/axiom-check-upstream-release.mjs', 'utf8')
 const syncScript = readFileSync('config/scripts/axiom-sync-upstream-release.mjs', 'utf8')
@@ -96,6 +101,17 @@ describe('Axiom upstream sync release workflow', () => {
     expect(checkScript).toContain('parseAxiomReleaseTag')
     expect(checkScript).toContain('/tags?per_page=100')
     expect(checkScript).toContain("source', 'axiom_tag'")
+  })
+
+  it('verifies only intended Axiom platform assets for fork releases', () => {
+    expect(parseReleasePlatforms('win,android')).toEqual(['win', 'android'])
+    expect(
+      getRequiredReleaseAssetNames('axiom-v1.4.13-axiom.1', {
+        platforms: ['win', 'android'],
+        artifactBasename: 'axiom-orca'
+      })
+    ).toEqual(['latest.yml', 'axiom-orca-windows-setup.exe', 'axiom-orca-windows-setup.exe.blockmap', 'app-release.apk'])
+    expect(workflow).toContain("inputs.build_mobile && 'win,android' || env.ORCA_RELEASE_PLATFORMS")
   })
 
   it('supports Axiom-only revisions without clobbering upstream release tags', () => {

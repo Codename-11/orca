@@ -368,7 +368,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          ORCA_RELEASE_PLATFORMS: ${{ env.ORCA_RELEASE_PLATFORMS }}
+          ORCA_RELEASE_PLATFORMS: ${{ inputs.build_mobile && 'win,android' || env.ORCA_RELEASE_PLATFORMS }}
         run: node config/scripts/verify-release-required-assets.mjs "${{ needs.sync.outputs.tag }}"
 
       - name: Publish draft release

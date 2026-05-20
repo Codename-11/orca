@@ -3,26 +3,64 @@
 import { pathToFileURL } from 'node:url'
 
 const API_VERSION = '2022-11-28'
+const ALL_RELEASE_PLATFORMS = ['linux', 'mac', 'win']
 
-export function getRequiredReleaseAssetNames(tag) {
+export function parseReleasePlatforms(value) {
+  return String(value ?? '')
+    .split(',')
+    .map((platform) => platform.trim().toLowerCase())
+    .filter(Boolean)
+}
+
+function releasePlatformsFromEnv() {
+  const configured = parseReleasePlatforms(process.env.ORCA_RELEASE_PLATFORMS)
+  return configured.length > 0 ? configured : ALL_RELEASE_PLATFORMS
+}
+
+function artifactBasenameFromEnv() {
+  const value = process.env.ORCA_ARTIFACT_BASENAME
+  return typeof value === 'string' && value.trim() ? value.trim() : 'orca'
+}
+
+export function getRequiredReleaseAssetNames(
+  tag,
+  { platforms = releasePlatformsFromEnv(), artifactBasename = artifactBasenameFromEnv() } = {}
+) {
   const version = tag.replace(/^v/i, '')
-  return [
-    'latest-linux.yml',
-    'latest-mac.yml',
-    'latest.yml',
-    'orca-linux.AppImage',
-    `orca-ide_${version}_amd64.deb`,
-    'orca-windows-setup.exe',
-    'orca-windows-setup.exe.blockmap',
-    `Orca-${version}-mac.zip`,
-    `Orca-${version}-mac.zip.blockmap`,
-    `Orca-${version}-arm64-mac.zip`,
-    `Orca-${version}-arm64-mac.zip.blockmap`,
-    'orca-macos-x64.dmg',
-    'orca-macos-x64.dmg.blockmap',
-    'orca-macos-arm64.dmg',
-    'orca-macos-arm64.dmg.blockmap'
-  ]
+  const names = []
+  const selectedPlatforms = new Set(platforms)
+
+  if (selectedPlatforms.has('linux')) {
+    names.push('latest-linux.yml', 'orca-linux.AppImage', `orca-ide_${version}_amd64.deb`)
+  }
+
+  if (selectedPlatforms.has('mac')) {
+    names.push(
+      'latest-mac.yml',
+      `Orca-${version}-mac.zip`,
+      `Orca-${version}-mac.zip.blockmap`,
+      `Orca-${version}-arm64-mac.zip`,
+      `Orca-${version}-arm64-mac.zip.blockmap`,
+      'orca-macos-x64.dmg',
+      'orca-macos-x64.dmg.blockmap',
+      'orca-macos-arm64.dmg',
+      'orca-macos-arm64.dmg.blockmap'
+    )
+  }
+
+  if (selectedPlatforms.has('win')) {
+    names.push(
+      'latest.yml',
+      `${artifactBasename}-windows-setup.exe`,
+      `${artifactBasename}-windows-setup.exe.blockmap`
+    )
+  }
+
+  if (selectedPlatforms.has('android')) {
+    names.push('app-release.apk')
+  }
+
+  return names
 }
 
 export function extractManifestAssetNames(manifestText) {
