@@ -27,7 +27,7 @@ function getReleaseManifestUrl(tag: string): string {
 }
 
 export function normalizeTagToVersion(tag: string): string {
-  return tag.replace(/^v/i, '')
+  return tag.replace(/^axiom-v/i, '').replace(/^v/i, '')
 }
 
 type ReleaseFeedTag = {

@@ -2,7 +2,7 @@
 
 import { appendFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
-import { resolveForkReleaseVersion } from './axiom-release-versioning.mjs'
+import { parseAxiomReleaseTag, resolveForkReleaseVersion } from './axiom-release-versioning.mjs'
 
 const API_VERSION = '2022-11-28'
 
@@ -44,6 +44,7 @@ function setOutput(name, value) {
 function parseArgs(argv) {
   const args = {
     upstreamTag: '',
+    axiomTag: '',
     includePrereleases: false,
     forceRebuild: false,
     bumpAxiomRevision: false,
@@ -53,6 +54,8 @@ function parseArgs(argv) {
     const arg = argv[i]
     if (arg === '--upstream-tag') {
       args.upstreamTag = argv[++i] ?? ''
+    } else if (arg === '--axiom-tag') {
+      args.axiomTag = argv[++i] ?? ''
     } else if (arg === '--include-prereleases') {
       args.includePrereleases = true
     } else if (arg === '--force-rebuild') {
@@ -68,27 +71,123 @@ function parseArgs(argv) {
 
 async function getCandidateRelease({ upstreamRepo, upstreamTag, includePrereleases }) {
   if (upstreamTag) {
-    return githubJson(
-      `https://api.github.com/repos/${upstreamRepo}/releases/tags/${encodeURIComponent(upstreamTag)}`
+    const release = await githubJson(
+      `https://api.github.com/repos/${upstreamRepo}/releases/tags/${encodeURIComponent(upstreamTag)}`,
+      true
     )
+    if (release) {
+      return release
+    }
+    const tagRef = await githubJson(
+      `https://api.github.com/repos/${upstreamRepo}/git/ref/tags/${encodeURIComponent(upstreamTag)}`,
+      true
+    )
+    if (!tagRef) {
+      throw new Error(`Upstream tag not found in ${upstreamRepo}: ${upstreamTag}`)
+    }
+    return getSyntheticTagRelease(upstreamRepo, upstreamTag)
   }
 
-  const releases = await githubJson(
-    `https://api.github.com/repos/${upstreamRepo}/releases?per_page=20`
-  )
-  if (!Array.isArray(releases)) {
-    throw new Error(`GitHub releases response for ${upstreamRepo} was not an array`)
+  const tags = await githubJson(`https://api.github.com/repos/${upstreamRepo}/tags?per_page=100`)
+  if (!Array.isArray(tags)) {
+    throw new Error(`GitHub tags response for ${upstreamRepo} was not an array`)
   }
-  return (
-    releases.find(
-      (release) =>
-        release &&
-        release.draft !== true &&
-        (includePrereleases || release.prerelease !== true) &&
-        typeof release.tag_name === 'string' &&
-        /^v\d/.test(release.tag_name)
-    ) ?? null
+  const tag = newestSemverTag(
+    tags
+      .map((entry) => (typeof entry?.name === 'string' ? entry.name : ''))
+      .filter((name) => /^v\d/.test(name)),
+    { includePrereleases }
   )
+  return tag ? getSyntheticTagRelease(upstreamRepo, tag) : null
+}
+
+function normalizeVersion(tag) {
+  return String(tag ?? '')
+    .trim()
+    .replace(/^v/i, '')
+}
+
+function parseVersion(tag) {
+  const match = normalizeVersion(tag).match(
+    /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-.]+))?(?:\+([0-9A-Za-z-.]+))?$/
+  )
+  if (!match) {
+    return null
+  }
+  return {
+    core: [Number(match[1]), Number(match[2]), Number(match[3])],
+    prerelease: match[4]?.split('.') ?? []
+  }
+}
+
+function compareIdentifiers(left, right) {
+  const leftNumeric = /^\d+$/.test(left)
+  const rightNumeric = /^\d+$/.test(right)
+  if (leftNumeric && rightNumeric) {
+    return Number(left) - Number(right)
+  }
+  if (leftNumeric) {
+    return -1
+  }
+  if (rightNumeric) {
+    return 1
+  }
+  return left.localeCompare(right)
+}
+
+function compareVersions(left, right) {
+  const leftVersion = parseVersion(left)
+  const rightVersion = parseVersion(right)
+  if (!leftVersion || !rightVersion) {
+    return 0
+  }
+  for (let index = 0; index < leftVersion.core.length; index += 1) {
+    const delta = leftVersion.core[index] - rightVersion.core[index]
+    if (delta !== 0) {
+      return delta
+    }
+  }
+  const leftPrerelease = leftVersion.prerelease
+  const rightPrerelease = rightVersion.prerelease
+  if (leftPrerelease.length === 0 && rightPrerelease.length === 0) {
+    return 0
+  }
+  if (leftPrerelease.length === 0) {
+    return 1
+  }
+  if (rightPrerelease.length === 0) {
+    return -1
+  }
+  for (let index = 0; index < Math.max(leftPrerelease.length, rightPrerelease.length); index += 1) {
+    if (leftPrerelease[index] === undefined) {
+      return -1
+    }
+    if (rightPrerelease[index] === undefined) {
+      return 1
+    }
+    const delta = compareIdentifiers(leftPrerelease[index], rightPrerelease[index])
+    if (delta !== 0) {
+      return delta
+    }
+  }
+  return 0
+}
+
+function newestSemverTag(tags, { includePrereleases }) {
+  return tags
+    .filter((tag) => parseVersion(tag))
+    .filter((tag) => includePrereleases || parseVersion(tag).prerelease.length === 0)
+    .sort((left, right) => compareVersions(right, left))[0]
+}
+
+function getSyntheticTagRelease(upstreamRepo, tag) {
+  return {
+    tag_name: tag,
+    name: tag,
+    html_url: `https://github.com/${upstreamRepo}/releases/tag/${tag}`,
+    prerelease: normalizeVersion(tag).includes('-'),
+    draft: false
+  }
 }
 
 async function listForkReleaseTags(forkRepo) {
@@ -112,6 +211,47 @@ async function main() {
   }
   const includePrereleases =
     args.includePrereleases || envString('AXIOM_INCLUDE_PRERELEASES', '0') === '1'
+
+  if (args.axiomTag) {
+    const parsedTag = parseAxiomReleaseTag(args.axiomTag)
+    if (!parsedTag) {
+      throw new Error(`Invalid Axiom release tag: ${args.axiomTag}`)
+    }
+    const existingForkRelease = await githubJson(
+      `https://api.github.com/repos/${forkRepo}/releases/tags/${encodeURIComponent(parsedTag.forkTag)}`,
+      true
+    )
+
+    setOutput('source', 'axiom_tag')
+    setOutput('upstream_tag', parsedTag.upstreamTag)
+    setOutput('upstream_name', parsedTag.upstreamTag)
+    setOutput(
+      'upstream_url',
+      `https://github.com/${upstreamRepo}/releases/tag/${parsedTag.upstreamTag}`
+    )
+    setOutput('upstream_prerelease', parsedTag.upstreamVersion.includes('-') ? 'true' : 'false')
+    setOutput('fork_version', parsedTag.forkVersion)
+    setOutput('fork_tag', parsedTag.forkTag)
+    setOutput('axiom_revision', String(parsedTag.axiomRevision))
+    setOutput('previous_axiom_revision', String(Math.max(0, parsedTag.axiomRevision - 1)))
+
+    if (existingForkRelease && existingForkRelease.draft !== true && !args.forceRebuild) {
+      setOutput('should_release', 'false')
+      setOutput('reason', `fork_release_exists:${parsedTag.forkTag}`)
+      return
+    }
+
+    setOutput('should_release', 'true')
+    setOutput(
+      'reason',
+      existingForkRelease?.draft === true
+        ? `fork_draft_release_exists:${parsedTag.forkTag}`
+        : existingForkRelease && args.forceRebuild
+          ? `forced_rebuild:${parsedTag.forkTag}`
+          : `manual_axiom_tag:${parsedTag.forkTag}`
+    )
+    return
+  }
 
   const release = await getCandidateRelease({
     upstreamRepo,
@@ -138,6 +278,7 @@ async function main() {
     true
   )
 
+  setOutput('source', 'upstream_tag')
   setOutput('upstream_tag', upstreamTag)
   setOutput('upstream_name', release.name || upstreamTag)
   setOutput(

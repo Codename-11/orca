@@ -1,10 +1,17 @@
 name: Axiom Upstream Sync Release
 
 on:
+  push:
+    tags:
+      - 'axiom-v*'
   workflow_dispatch:
     inputs:
       upstream_tag:
         description: Optional upstream Orca release tag to force, e.g. v1.4.9
+        required: false
+        type: string
+      axiom_tag:
+        description: Optional existing Axiom fork tag to build/publish, e.g. axiom-v1.4.13-axiom.2
         required: false
         type: string
       dry_run:
@@ -70,7 +77,7 @@ env:
 jobs:
   sync:
     name: Detect, sync, verify, and tag
-    if: github.event_name == 'workflow_dispatch' || vars.AXIOM_AUTO_RELEASES == 'true'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || vars.AXIOM_AUTO_RELEASES == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     outputs:
@@ -78,12 +85,13 @@ jobs:
       tag: ${{ steps.check.outputs.fork_tag }}
       upstream_tag: ${{ steps.check.outputs.upstream_tag }}
       fork_version: ${{ steps.check.outputs.fork_version }}
+      source: ${{ steps.check.outputs.source }}
       release_notes: axiom-release-notes.md
     steps:
-      - name: Checkout Axiom deploy branch
+      - name: Checkout release source
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.AXIOM_DEPLOY_BRANCH }}
+          ref: ${{ inputs.axiom_tag || (github.ref_type == 'tag' && github.ref_name) || env.AXIOM_DEPLOY_BRANCH }}
           fetch-depth: 0
 
       - name: Setup Node.js
@@ -104,8 +112,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          AXIOM_EVENT_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         run: |
           args=()
+          axiom_tag="${{ inputs.axiom_tag || '' }}"
+          if [[ -z "$axiom_tag" && "$AXIOM_EVENT_TAG" == axiom-v* ]]; then
+            axiom_tag="$AXIOM_EVENT_TAG"
+          fi
+          if [[ -n "$axiom_tag" ]]; then
+            args+=(--axiom-tag "$axiom_tag")
+          fi
           if [[ -n "${{ inputs.upstream_tag || '' }}" ]]; then
             args+=(--upstream-tag "${{ inputs.upstream_tag }}")
           fi
@@ -127,7 +143,7 @@ jobs:
 
       - name: Merge upstream into isolated deploy branch
         id: merge
-        if: steps.check.outputs.should_release == 'true' && !inputs.force_rebuild
+        if: steps.check.outputs.should_release == 'true' && !inputs.force_rebuild && steps.check.outputs.source != 'axiom_tag'
         run: >-
           node config/scripts/axiom-sync-upstream-release.mjs
           --upstream-tag "${{ steps.check.outputs.upstream_tag }}"
@@ -135,12 +151,16 @@ jobs:
           --fork-tag "${{ steps.check.outputs.fork_tag }}"
 
       - name: Fast-forward upstream mirror branch
-        if: steps.check.outputs.should_release == 'true' && !inputs.force_rebuild && !inputs.dry_run
+        if: steps.check.outputs.should_release == 'true' && !inputs.force_rebuild && steps.check.outputs.source != 'axiom_tag' && !inputs.dry_run
         run: git push origin "refs/remotes/upstream/${AXIOM_UPSTREAM_BRANCH}:refs/heads/${AXIOM_UPSTREAM_BRANCH}"
 
       - name: Install dependencies
         if: steps.check.outputs.should_release == 'true'
         run: pnpm install --frozen-lockfile
+
+      - name: Verify Axiom release version
+        if: steps.check.outputs.should_release == 'true'
+        run: node config/scripts/verify-axiom-release-version.mjs "${{ steps.check.outputs.fork_version }}" "${{ steps.check.outputs.fork_tag }}"
 
       - name: Verify combined fork
         if: steps.check.outputs.should_release == 'true'
@@ -178,7 +198,7 @@ jobs:
         run: node config/scripts/axiom-generate-release-notes.mjs "${{ steps.check.outputs.upstream_tag }}" --output axiom-release-notes.md
 
       - name: Create release tag
-        if: steps.check.outputs.should_release == 'true' && !inputs.dry_run
+        if: steps.check.outputs.should_release == 'true' && steps.check.outputs.source != 'axiom_tag' && !inputs.dry_run
         run: |
           tag="${{ steps.check.outputs.fork_tag }}"
           git tag -f "$tag"

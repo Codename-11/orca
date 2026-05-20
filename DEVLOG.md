@@ -6,6 +6,37 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-20 — Tag-only Axiom release triggers and updater tag parsing
+
+Hardened the Axiom release lane so it only reacts to intentional release tags:
+upstream release detection now polls semver `stablyai/orca` tags instead of arbitrary
+branch changes, and the workflow also accepts pushed/manual `axiom-v*` fork tags for
+fork-only revisions. Axiom tag builds checkout the tag, skip upstream merge/main
+mirror mutation, verify the tag-encoded fork version matches `package.json`, then
+build/publish assets from that exact tag. Upstream-derived releases still merge the
+upstream tag into `axiom/deploy`, fast-forward the clean `main` mirror from upstream,
+and create the next `axiom-v<version>-axiom.N` tag only outside dry runs.
+
+The updater feed parser now normalizes `axiom-v...` tags to semver while preserving
+the actual tag URL, so packaged Axiom builds can pin directly to fork releases rather
+than relying only on GitHub's `/latest` redirect. The fork update endpoint remains
+`Codename-11/orca` via `ORCA_UPDATE_OWNER`/`ORCA_UPDATE_REPO`.
+
+Verification:
+
+- `pnpm exec vitest run --config config/vitest.config.ts src/main/updater-prerelease-feed.test.ts src/main/updater-endpoints.test.ts config/scripts/axiom-upstream-sync-release.test.mjs` → 31 tests passed.
+- `pnpm run typecheck` → passed.
+- `node --check` on changed Axiom release scripts → passed.
+- `node config/scripts/verify-axiom-release-version.mjs 1.4.13-axiom.1 axiom-v1.4.13-axiom.1` → passed.
+- Parsed `.github/workflows/axiom-upstream-sync-release.yml` with PyYAML → passed.
+- `pnpm exec oxlint ...` on touched workflow/scripts/updater tests → passed.
+- `pnpm exec oxfmt --check ...` on touched workflow/scripts/updater tests → passed.
+- `git diff --check` → passed.
+- Live detector smoke checks against GitHub returned `should_release=true` for both
+  upstream `v1.4.13` and manual `axiom-v1.4.13-axiom.1` without exposing secrets.
+
+---
+
 ## 2026-05-20 — Fork-versioned Axiom upstream releases
 
 Converted Axiom upstream sync from upstream-tag reuse to fork-owned release

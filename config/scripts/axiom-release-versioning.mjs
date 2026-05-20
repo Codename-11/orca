@@ -34,6 +34,37 @@ export function forkTagForVersion(forkVersion) {
   return `${AXIOM_RELEASE_TAG_PREFIX}${version}`
 }
 
+export function parseAxiomReleaseTag(tag) {
+  const forkTag = String(tag ?? '').trim()
+  if (!forkTag.startsWith(AXIOM_RELEASE_TAG_PREFIX)) {
+    return null
+  }
+
+  const forkVersion = forkTag.slice(AXIOM_RELEASE_TAG_PREFIX.length)
+  const stableMatch = forkVersion.match(/^(\d+\.\d+\.\d+)-axiom\.(\d+)(\+[0-9A-Za-z-.]+)?$/)
+  const prereleaseMatch = forkVersion.match(
+    /^(\d+\.\d+\.\d+-[0-9A-Za-z-.]+)\.axiom\.(\d+)(\+[0-9A-Za-z-.]+)?$/
+  )
+  const match = stableMatch ?? prereleaseMatch
+  if (!match) {
+    return null
+  }
+
+  const axiomRevision = Number.parseInt(match[2], 10)
+  if (!Number.isSafeInteger(axiomRevision) || axiomRevision < 1) {
+    return null
+  }
+
+  const upstreamVersion = `${match[1]}${match[3] ?? ''}`
+  return {
+    upstreamTag: `v${upstreamVersion}`,
+    upstreamVersion,
+    forkTag,
+    forkVersion,
+    axiomRevision
+  }
+}
+
 export function forkReleasePrefixForUpstreamTag(upstreamTag) {
   return forkTagForVersion(forkVersionForRevision(upstreamTag, 1)).replace(/\.1(?:\+.*)?$/, '.')
 }

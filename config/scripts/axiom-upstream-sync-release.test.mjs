@@ -5,6 +5,7 @@ import {
   forkTagForVersion,
   forkVersionForRevision,
   maxAxiomRevision,
+  parseAxiomReleaseTag,
   resolveForkReleaseVersion
 } from './axiom-release-versioning.mjs'
 
@@ -40,6 +41,24 @@ describe('Axiom release versioning', () => {
       forkTag: 'axiom-v1.4.10-axiom.3'
     })
   })
+
+  it('parses manually-created Axiom release tags back to upstream tags and fork revisions', () => {
+    expect(parseAxiomReleaseTag('axiom-v1.4.13-axiom.2')).toEqual({
+      upstreamTag: 'v1.4.13',
+      upstreamVersion: '1.4.13',
+      forkTag: 'axiom-v1.4.13-axiom.2',
+      forkVersion: '1.4.13-axiom.2',
+      axiomRevision: 2
+    })
+    expect(parseAxiomReleaseTag('axiom-v1.4.13-rc.2.axiom.3')).toEqual({
+      upstreamTag: 'v1.4.13-rc.2',
+      upstreamVersion: '1.4.13-rc.2',
+      forkTag: 'axiom-v1.4.13-rc.2.axiom.3',
+      forkVersion: '1.4.13-rc.2.axiom.3',
+      axiomRevision: 3
+    })
+    expect(parseAxiomReleaseTag('v1.4.13')).toBeNull()
+  })
 })
 
 describe('Axiom upstream sync release workflow', () => {
@@ -64,6 +83,19 @@ describe('Axiom upstream sync release workflow', () => {
     expect(workflow).not.toContain('git push origin "HEAD:refs/heads/main"')
     expect(workflow).toContain('tag: ${{ steps.check.outputs.fork_tag }}')
     expect(workflow).toContain('ref: ${{ needs.sync.outputs.tag }}')
+  })
+
+  it('supports manually-created Axiom tags without reacting to arbitrary branch pushes', () => {
+    expect(workflow).toContain('push:')
+    expect(workflow).toContain("- 'axiom-v*'")
+    expect(workflow).not.toContain('branches:')
+    expect(workflow).toContain('axiom_tag:')
+    expect(workflow).toContain('--axiom-tag')
+    expect(workflow).toContain('node config/scripts/verify-axiom-release-version.mjs')
+    expect(workflow).toContain("steps.check.outputs.source != 'axiom_tag'")
+    expect(checkScript).toContain('parseAxiomReleaseTag')
+    expect(checkScript).toContain('/tags?per_page=100')
+    expect(checkScript).toContain("source', 'axiom_tag'")
   })
 
   it('supports Axiom-only revisions without clobbering upstream release tags', () => {

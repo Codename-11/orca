@@ -56,6 +56,17 @@ describe('fetchNewerReleaseTag', () => {
     setPlatformForTest(ORIGINAL_PLATFORM)
   })
 
+  it('normalizes Axiom fork release tags to semver versions while preserving tag URLs', async () => {
+    respondWithAtom(['axiom-v1.4.13-axiom.1', 'v1.4.12'])
+    const { fetchNewerReleaseTag, normalizeTagToVersion } =
+      await import('./updater-prerelease-feed')
+
+    expect(normalizeTagToVersion('axiom-v1.4.13-axiom.1')).toBe('1.4.13-axiom.1')
+    expect(await fetchNewerReleaseTag('1.4.9', { includePrerelease: true })).toBe(
+      'axiom-v1.4.13-axiom.1'
+    )
+  })
+
   it('returns the newest stable tag when the user is on an RC and a newer stable exists', async () => {
     respondWithAtom(['v1.3.19', 'v1.3.19-rc.6', 'v1.3.19-rc.4', 'v1.3.18'])
     const { fetchNewerReleaseTag } = await import('./updater-prerelease-feed')

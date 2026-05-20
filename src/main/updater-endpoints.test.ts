@@ -64,8 +64,8 @@ describe('updater endpoint resolution', () => {
     expect(endpoints.getLatestReleaseDownloadUrl()).toBe(
       'https://github.com/Codename-11/orca/releases/latest/download'
     )
-    expect(endpoints.getReleaseDownloadUrl('v1.4.0-axiom.1')).toBe(
-      'https://github.com/Codename-11/orca/releases/download/v1.4.0-axiom.1'
+    expect(endpoints.getReleaseDownloadUrl('axiom-v1.4.0-axiom.1')).toBe(
+      'https://github.com/Codename-11/orca/releases/download/axiom-v1.4.0-axiom.1'
     )
     expect(endpoints.getNudgeUrl()).toBe('https://updates.axiom-labs.dev/orca/nudge.json')
     expect(endpoints.getChangelogPageUrl()).toBe('https://updates.axiom-labs.dev/orca/changelog')
@@ -81,11 +81,11 @@ describe('updater endpoint resolution', () => {
     const { getReleaseTagHrefPattern } = await import('./updater-endpoints')
     const atom = [
       '<link href="https://github.com/stablyai/orca/releases/tag/v1.4.0"/>',
-      '<link href="https://github.com/Codename-11/orca/releases/tag/v1.4.0-axiom.1"/>'
+      '<link href="https://github.com/Codename-11/orca/releases/tag/axiom-v1.4.0-axiom.1"/>'
     ].join('')
 
     expect(Array.from(atom.matchAll(getReleaseTagHrefPattern()), (match) => match[1])).toEqual([
-      'v1.4.0-axiom.1'
+      'axiom-v1.4.0-axiom.1'
     ])
   })
 })
