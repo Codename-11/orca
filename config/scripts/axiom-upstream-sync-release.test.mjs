@@ -248,6 +248,18 @@ describe('Axiom upstream sync release workflow', () => {
     ).toMatchObject({ action: 'auto_remediate' })
   })
 
+  it('routes fork identity file conflicts through policy-guided agent PR remediation', () => {
+    expect(
+      classifyMergeRemediation({
+        conflicts: ['config/electron-builder.config.cjs'],
+        statusRecords: [
+          { status: 'UU', path: 'config/electron-builder.config.cjs', deleted: false }
+        ],
+        policy: JSON.parse(remediationPolicy)
+      })
+    ).toMatchObject({ action: 'auto_remediate', severity: 'noncritical' })
+  })
+
   it('requires human review when upstream deletes protected Axiom files', () => {
     expect(
       classifyMergeRemediation({

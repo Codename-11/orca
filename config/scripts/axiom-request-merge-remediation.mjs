@@ -95,9 +95,9 @@ export function classifyMergeRemediation({ conflicts, statusRecords, policy }) {
   )
   if (identityConflicts.length) {
     return {
-      action: 'review_required',
-      severity: 'critical',
-      reason: `Fork identity/update-feed files conflicted: ${identityConflicts.join(', ')}`,
+      action: 'auto_remediate',
+      severity: 'noncritical',
+      reason: `Fork identity/update-feed files need policy-guided agent remediation: ${identityConflicts.join(', ')}`,
       identityConflicts
     }
   }
