@@ -1,13 +1,13 @@
 import React from 'react'
-import { Bell, CalendarClock, Github, Gitlab, List, Search } from 'lucide-react'
+import { Bell, CalendarClock, List, Search } from 'lucide-react'
 import { useAppStore } from '@/store'
 import { useRepoMap } from '@/store/selectors'
 import { cn } from '@/lib/utils'
 import { isGitRepoKind } from '../../../../shared/repo-kind'
-import type { GlobalSettings } from '../../../../shared/types'
+import type { GlobalSettings, TaskProvider } from '../../../../shared/types'
 import { getTaskPresetQuery, PER_REPO_FETCH_LIMIT } from '@/lib/new-workspace'
-import { LinearIcon } from '@/components/icons/LinearIcon'
 import { migrationUnsupportedToAgentStatusEntry } from '@/lib/migration-unsupported-agent-entry'
+import { TASK_PROVIDER_UI_OPTIONS } from '@/components/task-providers/provider-ui-registry'
 import {
   normalizeVisibleTaskProviders,
   restoreAvailableDefaultTaskProvider,
@@ -20,6 +20,52 @@ export function shouldShowAgentsButton(
   settings: Pick<GlobalSettings, 'experimentalActivity'> | null | undefined
 ): boolean {
   return settings?.experimentalActivity === true
+}
+
+type SidebarTaskProviderShortcutsProps = {
+  visibleTaskProviders: readonly TaskProvider[]
+  canBrowseTasks: boolean
+  openTaskPage: (options?: { taskSource: TaskProvider }) => void
+}
+
+export function SidebarTaskProviderShortcuts({
+  visibleTaskProviders,
+  canBrowseTasks,
+  openTaskPage
+}: SidebarTaskProviderShortcutsProps): React.JSX.Element | null {
+  const visibleProviderOptions = TASK_PROVIDER_UI_OPTIONS.filter((provider) =>
+    visibleTaskProviders.includes(provider.id)
+  )
+
+  if (visibleProviderOptions.length === 0) {
+    return null
+  }
+
+  return (
+    <span className="flex items-center gap-1">
+      {visibleProviderOptions.map((provider) => {
+        const Icon = provider.Icon
+        return (
+          <span
+            key={provider.id}
+            role="button"
+            tabIndex={-1}
+            onClick={(e) => {
+              e.stopPropagation()
+              if (!canBrowseTasks) {
+                return
+              }
+              openTaskPage({ taskSource: provider.id })
+            }}
+            className="rounded p-0.5 text-muted-foreground/70 transition-colors hover:text-foreground"
+            aria-label={`Open ${provider.label} tasks`}
+          >
+            <Icon className="size-3.5" />
+          </span>
+        )
+      })}
+    </span>
+  )
 }
 
 const SidebarNav = React.memo(function SidebarNav() {
@@ -181,59 +227,11 @@ const SidebarNav = React.memo(function SidebarNav() {
             strokeWidth={tasksActive ? 2.25 : 1.75}
           />
           <span className="flex-1">Tasks</span>
-          <span className="flex items-center gap-1">
-            {visibleTaskProviders.includes('github') ? (
-              <span
-                role="button"
-                tabIndex={-1}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  if (!canBrowseTasks) {
-                    return
-                  }
-                  openTaskPage({ taskSource: 'github' })
-                }}
-                className="rounded p-0.5 text-muted-foreground/70 transition-colors hover:text-foreground"
-                aria-label="Open GitHub tasks"
-              >
-                <Github className="size-3.5" aria-hidden />
-              </span>
-            ) : null}
-            {visibleTaskProviders.includes('gitlab') ? (
-              <span
-                role="button"
-                tabIndex={-1}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  if (!canBrowseTasks) {
-                    return
-                  }
-                  openTaskPage({ taskSource: 'gitlab' })
-                }}
-                className="rounded p-0.5 text-muted-foreground/70 transition-colors hover:text-foreground"
-                aria-label="Open GitLab tasks"
-              >
-                <Gitlab className="size-3.5" aria-hidden />
-              </span>
-            ) : null}
-            {visibleTaskProviders.includes('linear') ? (
-              <span
-                role="button"
-                tabIndex={-1}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  if (!canBrowseTasks) {
-                    return
-                  }
-                  openTaskPage({ taskSource: 'linear' })
-                }}
-                className="rounded p-0.5 text-muted-foreground/70 transition-colors hover:text-foreground"
-                aria-label="Open Linear tasks"
-              >
-                <LinearIcon className="size-3.5" />
-              </span>
-            ) : null}
-          </span>
+          <SidebarTaskProviderShortcuts
+            visibleTaskProviders={visibleTaskProviders}
+            canBrowseTasks={canBrowseTasks}
+            openTaskPage={openTaskPage}
+          />
         </button>
       ) : null}
       <button

@@ -1,6 +1,19 @@
-import { describe, expect, it } from 'vitest'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { describe, expect, it, vi } from 'vitest'
 import { getDefaultSettings } from '../../../../shared/constants'
-import { shouldShowAgentsButton } from './SidebarNav'
+import { shouldShowAgentsButton, SidebarTaskProviderShortcuts } from './SidebarNav'
+
+function renderShortcuts(
+  providers: Parameters<typeof SidebarTaskProviderShortcuts>[0]['visibleTaskProviders']
+): string {
+  return renderToStaticMarkup(
+    <SidebarTaskProviderShortcuts
+      canBrowseTasks
+      visibleTaskProviders={providers}
+      openTaskPage={vi.fn()}
+    />
+  )
+}
 
 describe('SidebarNav', () => {
   it('hides the Agents entry while settings are loading', () => {
@@ -23,5 +36,24 @@ describe('SidebarNav', () => {
         experimentalActivity: true
       })
     ).toBe(true)
+  })
+})
+
+describe('SidebarTaskProviderShortcuts', () => {
+  it('renders a shortcut icon for every visible task provider including Forge', () => {
+    const markup = renderShortcuts(['github', 'gitlab', 'linear', 'forge'])
+
+    expect(markup).toContain('Open GitHub tasks')
+    expect(markup).toContain('Open GitLab tasks')
+    expect(markup).toContain('Open Linear tasks')
+    expect(markup).toContain('Open Forge tasks')
+  })
+
+  it('does not render shortcuts for hidden providers', () => {
+    const markup = renderShortcuts(['forge'])
+
+    expect(markup).toContain('Open Forge tasks')
+    expect(markup).not.toContain('Open GitHub tasks')
+    expect(markup).not.toContain('Open Linear tasks')
   })
 })
