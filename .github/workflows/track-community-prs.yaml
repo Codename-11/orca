@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   track-community-pr:
-    if: github.repository_owner == 'stablyai' && secrets.BUFO_BOT_PRIVATE_KEY != ''
+    if: github.repository_owner == 'stablyai'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
