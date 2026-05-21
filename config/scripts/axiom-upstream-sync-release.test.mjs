@@ -199,6 +199,8 @@ describe('Axiom upstream sync release workflow', () => {
     expect(workflow).toContain('AXIOM_SYNC_REMEDIATION_WEBHOOK')
     expect(workflow).toContain('AXIOM_REMEDIATION_MODE')
     expect(remediationScript).toContain('classifyMergeRemediation')
+    expect(remediationScript).toContain('X-Hub-Signature-256')
+    expect(remediationScript).toContain('createHmac')
     expect(remediationScript).toContain("action: 'auto_remediate'")
     expect(remediationScript).toContain("action: 'review_required'")
     expect(remediationPolicy).toContain('protectedDeletionPaths')

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync } from 'node:child_process'
+import { createHmac } from 'node:crypto'
 import { appendFileSync, readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
@@ -144,16 +145,19 @@ async function postWebhook(payload) {
     return false
   }
 
-  const token = envString('AXIOM_SYNC_REMEDIATION_TOKEN')
+  const body = JSON.stringify(payload)
+  const secret = envString('AXIOM_SYNC_REMEDIATION_TOKEN')
   const headers = { 'Content-Type': 'application/json' }
-  if (token) {
-    headers.Authorization = `Bearer ${token}`
+  if (secret) {
+    // Hermes webhook subscriptions validate GitHub-style HMAC signatures.
+    headers['X-Hub-Signature-256'] =
+      `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`
   }
 
   const res = await fetch(webhook, {
     method: 'POST',
     headers,
-    body: JSON.stringify(payload)
+    body
   })
   if (!res.ok) {
     const body = await res.text().catch(() => '')
