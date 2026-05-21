@@ -74,6 +74,32 @@ describe('updater endpoint resolution', () => {
     )
   })
 
+  it('builds release notes URLs against the configured update repository', async () => {
+    process.env.ORCA_UPDATE_OWNER = 'Codename-11'
+    process.env.ORCA_UPDATE_REPO = 'orca'
+
+    const endpoints = await import('./updater-endpoints')
+
+    expect(endpoints.getReleasePageUrlForVersion('1.4.14-rc.0.axiom.1')).toBe(
+      'https://github.com/Codename-11/orca/releases/tag/axiom-v1.4.14-rc.0.axiom.1'
+    )
+    expect(endpoints.getReleasePageUrlForVersion('1.4.14-axiom.2')).toBe(
+      'https://github.com/Codename-11/orca/releases/tag/axiom-v1.4.14-axiom.2'
+    )
+    expect(endpoints.getReleaseListingUrl()).toBe('https://github.com/Codename-11/orca/releases')
+    expect(endpoints.getChangelogPageUrl()).toBe('https://github.com/Codename-11/orca/releases')
+    expect(endpoints.getChangelogJsonUrl()).toBeNull()
+  })
+
+  it('keeps upstream release notes URLs on upstream builds', async () => {
+    const endpoints = await import('./updater-endpoints')
+
+    expect(endpoints.getReleasePageUrlForVersion('1.4.14-rc.0')).toBe(
+      'https://github.com/stablyai/orca/releases/tag/v1.4.14-rc.0'
+    )
+    expect(endpoints.getReleaseListingUrl()).toBe('https://github.com/stablyai/orca/releases')
+  })
+
   it('matches release tags only from the configured update repository', async () => {
     process.env.ORCA_UPDATE_OWNER = 'Codename-11'
     process.env.ORCA_UPDATE_REPO = 'orca'

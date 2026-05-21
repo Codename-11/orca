@@ -1336,10 +1336,8 @@ export type UpdateStatus =
       state: 'available'
       version: string
       activeNudgeId?: string
-      // Why: releaseUrl is not currently populated by the update-available handler
-      // (it always sends undefined). Kept on the type for the Settings page's
-      // release-notes link fallback and for potential future use if the main
-      // process starts extracting release URLs from electron-updater metadata.
+      // Why: main computes this from the configured update repository so fork
+      // builds link to fork-owned GitHub release notes instead of upstream Orca.
       releaseUrl?: string
       // Why: changelog is always explicitly set by the main process — null means
       // the fetch failed or the version wasn't in the JSON (simple mode), and a

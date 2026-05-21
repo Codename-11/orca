@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync } from 'node:child_process'
-import { writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
 const API_VERSION = '2022-11-28'
@@ -49,12 +49,18 @@ async function fetchUpstreamRelease(upstreamRepo, tag) {
 }
 
 function parseArgs(argv) {
-  const args = { tag: '', output: 'axiom-release-notes.md' }
+  const args = {
+    tag: '',
+    output: 'axiom-release-notes.md',
+    deviationNotes: envString('AXIOM_RELEASE_DEVIATION_NOTES_FILE')
+  }
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--tag') {
       args.tag = argv[++i] ?? ''
     } else if (argv[i] === '--output') {
       args.output = argv[++i] ?? args.output
+    } else if (argv[i] === '--deviation-notes') {
+      args.deviationNotes = argv[++i] ?? args.deviationNotes
     } else if (!args.tag) {
       args.tag = argv[i]
     }
@@ -78,11 +84,22 @@ function commitList(range) {
   }
 }
 
+function readOptionalMarkdown(filePath) {
+  if (!filePath) {
+    return ''
+  }
+  try {
+    return readFileSync(filePath, 'utf8').trim()
+  } catch {
+    return ''
+  }
+}
+
 async function main() {
-  const { tag, output } = parseArgs(process.argv.slice(2))
+  const { tag, output, deviationNotes } = parseArgs(process.argv.slice(2))
   if (!tag) {
     throw new Error(
-      'Usage: node config/scripts/axiom-generate-release-notes.mjs <tag> [--output file]'
+      'Usage: node config/scripts/axiom-generate-release-notes.mjs <tag> [--output file] [--deviation-notes file]'
     )
   }
 
@@ -104,6 +121,12 @@ async function main() {
     MAX_FORK_DELTA_LENGTH,
     'Axiom fork commit list'
   )
+  const patchNotes = truncateMarkdown(
+    readOptionalMarkdown(deviationNotes) ||
+      '_No agent-generated Axiom patch notes were provided for this release._',
+    MAX_FORK_DELTA_LENGTH,
+    'Axiom patch notes'
+  )
 
   const body = truncateMarkdown(
     [
@@ -118,7 +141,13 @@ async function main() {
       '',
       upstreamBody,
       '',
-      `## Axiom fork delta`,
+      `## Axiom patch notes`,
+      '',
+      patchNotes,
+      '',
+      `## Axiom commit fallback`,
+      '',
+      `This section is generated from fork commits when no richer patch/deviation notes are available.`,
       '',
       forkDelta,
       '',

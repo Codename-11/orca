@@ -6,6 +6,24 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-20 — Fork release notes and updater re-check polish
+
+Enhanced the Axiom release-notes pipeline so fork releases can combine upstream Orca release notes with optional agent-generated Axiom patch/deviation notes, then fall back to a generated fork commit list when no richer notes file is provided. The release notes generator now accepts `--deviation-notes` / `AXIOM_RELEASE_DEVIATION_NOTES_FILE`, keeps upstream attribution, and still caps body sections below GitHub release limits.
+
+Updated the in-app updater surfaces to point release-note links at the configured update repository. Axiom builds now resolve available-update URLs to `https://github.com/Codename-11/orca/releases/tag/axiom-v...`, while upstream builds continue to resolve to `stablyai/orca` tags. Fork builds without a configured changelog JSON now fall back to GitHub Releases instead of upstream `onorca.dev` changelog content.
+
+Broadened automatic update checks to common desktop app triggers: startup/interval behavior is unchanged, and stale checks now also run on app activation and main-window show in addition to resume/focus, with existing in-flight dedupe and retry cadence preserved.
+
+Verification:
+
+- `pnpm exec vitest run --config config/vitest.config.ts src/main/updater-endpoints.test.ts src/main/updater.test.ts config/scripts/axiom-upstream-sync-release.test.mjs` → 64 tests passed.
+- `pnpm run typecheck` → passed. Node engine warning only: project wants Node 24; local runtime is Node v25.6.0.
+- `pnpm exec oxlint src/main/updater.ts src/main/updater-events.ts src/main/updater-endpoints.ts src/main/updater.test.ts src/main/updater-endpoints.test.ts src/renderer/src/components/UpdateCard.tsx src/shared/types.ts` → 0 warnings / 0 errors.
+- `pnpm exec oxfmt --check ...` on touched scripts/updater files → passed after formatting.
+- `git diff --check` → passed.
+
+---
+
 ## 2026-05-20 — Restored Axiom upstream auto-deploy path
 
 Resolved the protected `v1.4.14-rc.0` upstream merge into `axiom/deploy` while preserving both sides of the settings UI collision: Axiom's visible build identity label remains in the Updates section, and upstream's desktop platform detection now powers the CLI section with Windows support. The Axiom package version for the deploy lane is now `1.4.14-rc.0.axiom.1`.

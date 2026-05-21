@@ -10,6 +10,7 @@ import {
 } from './updater-mac-install'
 import { compareVersions } from './updater-fallback'
 import { fetchChangelog } from './updater-changelog'
+import { getReleasePageUrlForVersion } from './updater-endpoints'
 import type { ElectronAutoUpdater } from './electron-updater-loader'
 
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
@@ -165,7 +166,7 @@ export function registerAutoUpdaterHandlers({
       // set without a matching 'available' broadcast, or a completed-check
       // timestamp persisted for a check that never showed a result.
       setAvailableVersion(info.version)
-      setAvailableReleaseUrl(null)
+      setAvailableReleaseUrl(getReleasePageUrlForVersion(info.version))
       if (missingManifestFallback) {
         // Why: offering the previous good release is only a temporary fallback;
         // keep probing soon so users can move to the newest tag once its
@@ -178,7 +179,12 @@ export function registerAutoUpdaterHandlers({
         }
       }
 
-      sendStatus({ state: 'available', version: info.version, changelog })
+      sendStatus({
+        state: 'available',
+        version: info.version,
+        releaseUrl: getReleasePageUrlForVersion(info.version),
+        changelog
+      })
     })()
   })
 

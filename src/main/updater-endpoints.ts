@@ -62,6 +62,20 @@ export function getReleaseDownloadUrl(tag: string): string {
   return `${getReleaseDownloadBaseUrl()}/${encodeURIComponent(tag)}`
 }
 
+export function getReleaseListingUrl(): string {
+  return `${getUpdateGitHubBaseUrl()}/releases`
+}
+
+export function getReleaseTagForVersion(version: string): string {
+  return version.includes('axiom.') || version.includes('-axiom.')
+    ? `axiom-v${version}`
+    : `v${version}`
+}
+
+export function getReleasePageUrlForVersion(version: string): string {
+  return `${getReleaseListingUrl()}/tag/${encodeURIComponent(getReleaseTagForVersion(version))}`
+}
+
 export function getLatestReleaseDownloadUrl(): string {
   return `${getUpdateGitHubBaseUrl()}/releases/latest/download`
 }
@@ -83,19 +97,29 @@ export function getNudgeUrl(): string | null {
 }
 
 export function getChangelogPageUrl(): string {
-  return (
-    readBuildConstant('ORCA_UPDATE_CHANGELOG_URL') ??
-    readEnv('ORCA_UPDATE_CHANGELOG_URL') ??
-    'https://onorca.dev/changelog'
-  )
+  const configured =
+    readBuildConstant('ORCA_UPDATE_CHANGELOG_URL') ?? readEnv('ORCA_UPDATE_CHANGELOG_URL')
+  if (configured) {
+    return configured
+  }
+  const { owner, repo } = getUpdateRepository()
+  if (owner !== 'stablyai' || repo !== 'orca') {
+    return getReleaseListingUrl()
+  }
+  return 'https://onorca.dev/changelog'
 }
 
 export function getChangelogJsonUrl(): string | null {
-  return (
-    readBuildConstant('ORCA_UPDATE_CHANGELOG_JSON_URL') ??
-    readEnv('ORCA_UPDATE_CHANGELOG_JSON_URL') ??
-    'https://onorca.dev/whats-new/changelog.json'
-  )
+  const configured =
+    readBuildConstant('ORCA_UPDATE_CHANGELOG_JSON_URL') ?? readEnv('ORCA_UPDATE_CHANGELOG_JSON_URL')
+  if (configured) {
+    return configured
+  }
+  const { owner, repo } = getUpdateRepository()
+  if (owner !== 'stablyai' || repo !== 'orca') {
+    return null
+  }
+  return 'https://onorca.dev/whats-new/changelog.json'
 }
 
 function escapeRegExp(value: string): string {

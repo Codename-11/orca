@@ -125,8 +125,12 @@ export function UpdateCard() {
   // but the card needs the version for the "Download Manually" fallback URL
   // and for dismiss persistence. Cache it from states that do carry it.
   const versionRef = useRef<string | null>(null)
+  const releaseUrlRef = useRef<string | null>(null)
   if ('version' in status && status.version) {
     versionRef.current = status.version
+    if ('releaseUrl' in status && status.releaseUrl) {
+      releaseUrlRef.current = status.releaseUrl
+    }
   } else if (
     status.state === 'checking' ||
     status.state === 'idle' ||
@@ -136,6 +140,7 @@ export function UpdateCard() {
     // Clear the cached version so a later check failure cannot dismiss or link to
     // an unrelated older release that happened to be cached locally.
     versionRef.current = null
+    releaseUrlRef.current = null
   }
 
   // Why: reset component-local state when a new update cycle begins. Without
@@ -323,7 +328,7 @@ export function UpdateCard() {
             ? 'Could not complete the update.'
             : 'Could not check for updates.',
           message: status.message,
-          releaseUrl: releaseUrlForVersion(cachedVersion),
+          releaseUrl: releaseUrlRef.current ?? releaseUrlForVersion(cachedVersion),
           // Why: check-time failures are often transient (offline, GitHub
           // hiccup), so offer a Re-check next to "Download Manually" instead
           // of forcing the user into the manual fallback.
@@ -344,7 +349,7 @@ export function UpdateCard() {
             title: 'Update Error',
             summary: 'Could not restart to install the update.',
             message: installError,
-            releaseUrl: releaseUrlForVersion(cachedVersion),
+            releaseUrl: releaseUrlRef.current ?? releaseUrlForVersion(cachedVersion),
             primaryAction: {
               label: 'Try Again',
               onClick: handleInstallRetry
@@ -474,6 +479,7 @@ export function UpdateCard() {
           prefersReducedMotion={prefersReducedMotion}
           mediaFailed={mediaFailed}
           mediaLoaded={mediaLoaded}
+          releaseUrl={releaseUrlRef.current}
           onMediaError={() => setMediaFailed(true)}
           onMediaLoad={() => setMediaLoaded(true)}
           onCollapse={handleCollapseWithAnimation}
@@ -719,6 +725,7 @@ function DownloadingContent({
   prefersReducedMotion,
   mediaFailed,
   mediaLoaded,
+  releaseUrl,
   onMediaError,
   onMediaLoad,
   onCollapse
@@ -729,6 +736,7 @@ function DownloadingContent({
   prefersReducedMotion: boolean
   mediaFailed: boolean
   mediaLoaded: boolean
+  releaseUrl: string | null
   onMediaError: () => void
   onMediaLoad: () => void
   onCollapse: () => void
@@ -783,7 +791,7 @@ function DownloadingContent({
         className="text-xs text-muted-foreground underline hover:text-foreground self-start"
         onClick={() =>
           void window.api.shell.openUrl(
-            release ? release.releaseNotesUrl : releaseUrlForVersion(version)
+            release ? release.releaseNotesUrl : (releaseUrl ?? releaseUrlForVersion(version))
           )
         }
       >

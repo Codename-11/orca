@@ -410,6 +410,35 @@ describe('updater', () => {
     })
   })
 
+  it('checks for stale updates when the app is activated or the main window is shown', async () => {
+    let lastUpdateCheckAt = Date.now()
+    const windowHandlers = new Map<string, () => void>()
+    const mainWindow = {
+      webContents: { send: vi.fn() },
+      on: vi.fn((event: string, handler: () => void) => {
+        windowHandlers.set(event, handler)
+        return mainWindow
+      })
+    }
+
+    autoUpdaterMock.checkForUpdates.mockImplementation(() => new Promise(() => {}))
+
+    const { setupAutoUpdater } = await import('./updater')
+
+    setupAutoUpdater(mainWindow as never, {
+      getLastUpdateCheckAt: () => lastUpdateCheckAt
+    })
+
+    lastUpdateCheckAt = Date.now() - 25 * 60 * 60 * 1000
+    appMock.emit('activate')
+    windowHandlers.get('show')?.()
+
+    await vi.waitFor(() => {
+      expect(autoUpdaterMock.checkForUpdates).toHaveBeenCalledTimes(1)
+    })
+    expect(mainWindow.on).toHaveBeenCalledWith('show', expect.any(Function))
+  })
+
   it('does not persist lastUpdateCheckAt when a focus-triggered check fails benignly', async () => {
     let lastUpdateCheckAt = Date.now()
     const setLastUpdateCheckAt = vi.fn()
@@ -511,6 +540,7 @@ describe('updater', () => {
     expect(sendMock).toHaveBeenCalledWith('updater:status', {
       state: 'available',
       version: '1.0.61',
+      releaseUrl: 'https://github.com/stablyai/orca/releases/tag/v1.0.61',
       changelog: null
     })
 
@@ -521,6 +551,45 @@ describe('updater', () => {
     await vi.waitFor(() => {
       expect(autoUpdaterMock.checkForUpdates).toHaveBeenCalledTimes(2)
     })
+  })
+
+  it('sends fork release notes URLs for Axiom update-available statuses', async () => {
+    const previousOwner = process.env.ORCA_UPDATE_OWNER
+    const previousRepo = process.env.ORCA_UPDATE_REPO
+    process.env.ORCA_UPDATE_OWNER = 'Codename-11'
+    process.env.ORCA_UPDATE_REPO = 'orca'
+
+    try {
+      const sendMock = vi.fn()
+      const mainWindow = { webContents: { send: sendMock } }
+
+      const { setupAutoUpdater } = await import('./updater')
+
+      setupAutoUpdater(mainWindow as never, {
+        getLastUpdateCheckAt: () => Date.now()
+      })
+
+      autoUpdaterMock.emit('update-available', { version: '1.4.14-rc.0.axiom.1' })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      expect(sendMock).toHaveBeenCalledWith('updater:status', {
+        state: 'available',
+        version: '1.4.14-rc.0.axiom.1',
+        releaseUrl: 'https://github.com/Codename-11/orca/releases/tag/axiom-v1.4.14-rc.0.axiom.1',
+        changelog: null
+      })
+    } finally {
+      if (previousOwner === undefined) {
+        delete process.env.ORCA_UPDATE_OWNER
+      } else {
+        process.env.ORCA_UPDATE_OWNER = previousOwner
+      }
+      if (previousRepo === undefined) {
+        delete process.env.ORCA_UPDATE_REPO
+      } else {
+        process.env.ORCA_UPDATE_REPO = previousRepo
+      }
+    }
   })
 
   it('does not leak a nudge marker into a later ordinary update cycle', async () => {
@@ -549,6 +618,7 @@ describe('updater', () => {
     expect(sendMock).toHaveBeenCalledWith('updater:status', {
       state: 'available',
       version: '1.0.61',
+      releaseUrl: 'https://github.com/stablyai/orca/releases/tag/v1.0.61',
       changelog: null,
       activeNudgeId: 'campaign-1'
     })
@@ -570,6 +640,7 @@ describe('updater', () => {
     expect(sendMock).toHaveBeenCalledWith('updater:status', {
       state: 'available',
       version: '1.0.62',
+      releaseUrl: 'https://github.com/stablyai/orca/releases/tag/v1.0.62',
       changelog: null
     })
     expect(sendMock).not.toHaveBeenCalledWith(
@@ -601,6 +672,7 @@ describe('updater', () => {
     expect(sendMock).toHaveBeenCalledWith('updater:status', {
       state: 'available',
       version: '1.0.61',
+      releaseUrl: 'https://github.com/stablyai/orca/releases/tag/v1.0.61',
       changelog: null,
       activeNudgeId: 'campaign-1'
     })
@@ -1487,6 +1559,7 @@ describe('updater', () => {
       expect(statuses).toContainEqual({
         state: 'available',
         version: '1.3.51-rc.6',
+        releaseUrl: 'https://github.com/stablyai/orca/releases/tag/v1.3.51-rc.6',
         changelog: null
       })
     })

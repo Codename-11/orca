@@ -829,6 +829,8 @@ export function setupAutoUpdater(
 
   powerMonitor.on('resume', checkDailyOnWake)
   app.on('browser-window-focus', checkDailyOnWake)
+  app.on('activate', checkDailyOnWake)
+  ;(mainWindow as { on?: BrowserWindow['on'] }).on?.('show', checkDailyOnWake)
 
   const lastUpdateCheckAt = opts?.getLastUpdateCheckAt?.() ?? null
   const msSinceLastCheck =

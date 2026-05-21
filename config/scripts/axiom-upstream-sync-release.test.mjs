@@ -171,6 +171,14 @@ describe('Axiom upstream sync release workflow', () => {
     expect(notesScript).toContain('truncateMarkdown')
   })
 
+  it('combines upstream notes with optional Axiom deviation notes and commit fallback', () => {
+    expect(notesScript).toContain('--deviation-notes')
+    expect(notesScript).toContain('readOptionalMarkdown')
+    expect(notesScript).toContain('## Axiom patch notes')
+    expect(notesScript).toContain('## Axiom commit fallback')
+    expect(notesScript).toContain('This section is generated from fork commits')
+  })
+
   it('notifies durably only when sync/build/publish fails', () => {
     expect(workflow).toContain('issues: write')
     expect(workflow).toContain('Notify upstream sync failure')
