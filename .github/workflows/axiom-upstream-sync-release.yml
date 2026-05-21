@@ -164,7 +164,7 @@ jobs:
 
       - name: Fast-forward upstream mirror branch
         if: steps.check.outputs.should_release == 'true' && steps.merge.outputs.merge_result != 'agent_remediate' && !inputs.force_rebuild && steps.check.outputs.source != 'axiom_tag' && !inputs.dry_run
-        run: git push origin "refs/remotes/upstream/${AXIOM_UPSTREAM_BRANCH}:refs/heads/${AXIOM_UPSTREAM_BRANCH}"
+        run: git push origin "+refs/remotes/upstream/${AXIOM_UPSTREAM_BRANCH}:refs/heads/${AXIOM_UPSTREAM_BRANCH}"
 
       - name: Install dependencies
         if: steps.check.outputs.should_release == 'true' && steps.merge.outputs.merge_result != 'agent_remediate'

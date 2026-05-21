@@ -87,7 +87,7 @@ describe('Axiom upstream sync release workflow', () => {
 
   it('updates main only from upstream/main and releases from axiom/deploy fork tags', () => {
     expect(workflow).toContain(
-      'git push origin "refs/remotes/upstream/${AXIOM_UPSTREAM_BRANCH}:refs/heads/${AXIOM_UPSTREAM_BRANCH}"'
+      'git push origin "+refs/remotes/upstream/${AXIOM_UPSTREAM_BRANCH}:refs/heads/${AXIOM_UPSTREAM_BRANCH}"'
     )
     expect(workflow).toContain('git push origin "HEAD:${AXIOM_DEPLOY_BRANCH}"')
     expect(workflow).not.toContain('git push origin "HEAD:refs/heads/main"')
@@ -142,10 +142,11 @@ describe('Axiom upstream sync release workflow', () => {
     expect(mirrorWorkflow).toContain('- upstream_push')
     expect(mirrorWorkflow).toContain('workflow_dispatch:')
     expect(mirrorWorkflow).toContain("vars.AXIOM_AUTO_MAIN_MIRROR == 'true'")
-    expect(mirrorWorkflow).toContain('ref: ${{ env.AXIOM_UPSTREAM_BRANCH }}')
+    expect(mirrorWorkflow).toContain('AXIOM_WORKFLOW_BRANCH: axiom/deploy')
+    expect(mirrorWorkflow).toContain('ref: ${{ env.AXIOM_WORKFLOW_BRANCH }}')
     expect(mirrorWorkflow).toContain('github.event.client_payload.ref')
     expect(mirrorWorkflow).toContain(
-      'git push origin "refs/remotes/upstream/${AXIOM_UPSTREAM_BRANCH}:refs/heads/${AXIOM_UPSTREAM_BRANCH}"'
+      'git push origin "+refs/remotes/upstream/${AXIOM_UPSTREAM_BRANCH}:refs/heads/${AXIOM_UPSTREAM_BRANCH}"'
     )
     expect(mirrorWorkflow).toContain(
       'token: ${{ secrets.AXIOM_MIRROR_TOKEN || secrets.AXIOM_AUTOMATION_TOKEN || github.token }}'

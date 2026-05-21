@@ -24,6 +24,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  AXIOM_WORKFLOW_BRANCH: axiom/deploy
   AXIOM_UPSTREAM_BRANCH: main
   AXIOM_UPSTREAM_REPOSITORY: stablyai/orca
   AXIOM_UPSTREAM_REPOSITORY_URL: https://github.com/stablyai/orca.git
@@ -39,10 +40,10 @@ jobs:
       before: ${{ steps.sync.outputs.before }}
       after: ${{ steps.sync.outputs.after }}
     steps:
-      - name: Checkout fork mirror branch
+      - name: Checkout Axiom workflow branch
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.AXIOM_UPSTREAM_BRANCH }}
+          ref: ${{ env.AXIOM_WORKFLOW_BRANCH }}
           fetch-depth: 0
           token: ${{ secrets.AXIOM_MIRROR_TOKEN || secrets.AXIOM_AUTOMATION_TOKEN || github.token }}
 
@@ -71,8 +72,9 @@ jobs:
         if: steps.ref.outputs.should_sync == 'true'
         run: |
           git remote add upstream "$AXIOM_UPSTREAM_REPOSITORY_URL" 2>/dev/null || git remote set-url upstream "$AXIOM_UPSTREAM_REPOSITORY_URL"
+          git fetch origin "$AXIOM_UPSTREAM_BRANCH" --prune
           git fetch upstream "$AXIOM_UPSTREAM_BRANCH" --prune
-          before="$(git rev-parse HEAD)"
+          before="$(git rev-parse "refs/remotes/origin/${AXIOM_UPSTREAM_BRANCH}")"
           after="$(git rev-parse "refs/remotes/upstream/${AXIOM_UPSTREAM_BRANCH}")"
           echo "before=$before" >> "$GITHUB_OUTPUT"
           echo "after=$after" >> "$GITHUB_OUTPUT"
@@ -80,8 +82,8 @@ jobs:
             echo "Fork main is already aligned with upstream/$AXIOM_UPSTREAM_BRANCH at $after."
             exit 0
           fi
-          git push origin "refs/remotes/upstream/${AXIOM_UPSTREAM_BRANCH}:refs/heads/${AXIOM_UPSTREAM_BRANCH}"
-          echo "Fast-forwarded fork main: $before -> $after"
+          git push origin "+refs/remotes/upstream/${AXIOM_UPSTREAM_BRANCH}:refs/heads/${AXIOM_UPSTREAM_BRANCH}"
+          echo "Force-mirrored fork main from upstream: $before -> $after"
 
       - name: Summarize mirror result
         if: always()
