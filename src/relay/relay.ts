@@ -22,7 +22,7 @@
 import { createServer, createConnection, type Socket, type Server } from 'net'
 import { homedir } from 'os'
 import { resolve, join } from 'path'
-import { unlinkSync, existsSync } from 'fs'
+import { unlinkSync, existsSync, statSync } from 'fs'
 import { RELAY_SENTINEL } from './protocol'
 import { readLaunchVersion, runConnectHandshake, setupDaemonHandshake } from './relay-handshake'
 import { RelayDispatcher } from './dispatcher'
@@ -54,6 +54,12 @@ const EMPTY_DETACHED_STARTUP_GRACE_MS = parseNonNegativeIntEnv(
   60_000
 )
 
+type SocketIdentity = {
+  dev: bigint
+  ino: bigint
+  ctimeNs: bigint
+}
+
 function parseNonNegativeIntEnv(name: string, fallback: number): number {
   const raw = process.env[name]
   if (raw === undefined) {
@@ -61,6 +67,15 @@ function parseNonNegativeIntEnv(name: string, fallback: number): number {
   }
   const parsed = Number.parseInt(raw, 10)
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback
+}
+
+function readSocketIdentity(sockPath: string): SocketIdentity | null {
+  try {
+    const stat = statSync(sockPath, { bigint: true })
+    return { dev: stat.dev, ino: stat.ino, ctimeNs: stat.ctimeNs }
+  } catch {
+    return null
+  }
 }
 
 function parseArgs(argv: string[]): {
@@ -174,11 +189,24 @@ async function main(): Promise<void> {
   }
 
   let ownsSocketPath = false
+  let ownedSocketIdentity: SocketIdentity | null = null
+  const ownsCurrentSocketPath = (): boolean => {
+    const currentIdentity = readSocketIdentity(sockPath)
+    return (
+      ownsSocketPath &&
+      ownedSocketIdentity !== null &&
+      currentIdentity !== null &&
+      currentIdentity.dev === ownedSocketIdentity.dev &&
+      currentIdentity.ino === ownedSocketIdentity.ino &&
+      currentIdentity.ctimeNs === ownedSocketIdentity.ctimeNs
+    )
+  }
   const cleanupOwnedSocket = (): void => {
-    if (ownsSocketPath) {
+    if (ownsCurrentSocketPath()) {
       cleanupSocket(sockPath)
-      ownsSocketPath = false
     }
+    ownsSocketPath = false
+    ownedSocketIdentity = null
   }
 
   // Why: After an uncaught exception Node's internal state may be corrupted
@@ -302,7 +330,7 @@ async function main(): Promise<void> {
   // treated as soft: log and continue, the augmenter returns {} and agent
   // status simply does not flow.
   try {
-    await hookServer.start()
+    await hookServer.start({ publishEndpoint: false })
   } catch (err) {
     process.stderr.write(
       `[relay] agent-hook server failed to start: ${err instanceof Error ? err.message : String(err)}\n`
@@ -536,6 +564,7 @@ async function main(): Promise<void> {
       const onListening = (): void => {
         restoreUmask()
         ownsSocketPath = true
+        ownedSocketIdentity = readSocketIdentity(sockPath)
         server.off('error', onInitialError)
         server.on('error', (err) => {
           process.stderr.write(`[relay] Socket server error: ${err.message}\n`)
@@ -567,6 +596,10 @@ async function main(): Promise<void> {
 
   try {
     socketServer = await startSocketServer()
+    // Why: endpoint.env is shared by PTYs under this relay socket path. Publish
+    // it only after socket ownership is proven so a refused duplicate daemon
+    // cannot poison the active relay's hook coordinates.
+    hookServer.publishEndpointFile()
   } catch {
     process.exit(1)
   }
@@ -648,7 +681,10 @@ async function main(): Promise<void> {
     ptyHandler.dispose()
     fsHandler.dispose()
     hookServer.stop()
-    if (socketServer) {
+    // Why: Node's Unix server.close() can unlink the listen path. If the path
+    // was externally removed and rebound by a newer relay, closing this older
+    // server would strand the newer daemon behind a missing socket.
+    if (socketServer && ownsCurrentSocketPath()) {
       socketServer.close()
     }
     cleanupOwnedSocket()

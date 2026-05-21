@@ -1,12 +1,13 @@
 /* oxlint-disable max-lines -- Why: subprocess coverage shares one bundled relay artifact; splitting this file would rebuild the same daemon bundle across suites and make these lifecycle tests slower/flakier. */
 import { afterAll, beforeAll, describe, expect, it, afterEach } from 'vitest'
-import { mkdtempSync, writeFileSync } from 'fs'
+import { mkdtempSync, readFileSync, unlinkSync, writeFileSync } from 'fs'
 import { rm } from 'fs/promises'
 import * as path from 'path'
 import { tmpdir } from 'os'
 import { execFileSync, spawn as spawnChild } from 'child_process'
 import { build } from 'esbuild'
 import { spawnRelay, type RelayProcess } from './subprocess-test-utils'
+import { getEndpointFileName } from '../shared/agent-hook-listener'
 
 const RELAY_TS_ENTRY = path.resolve(__dirname, 'relay.ts')
 let bundleDir: string
@@ -228,6 +229,8 @@ describe('Subprocess: Relay entry point', () => {
       const sockPath = path.join(tmpDir, 'relay.sock')
       relay = spawn(['--detached', '--grace-time', '10', '--sock-path', sockPath])
       await relay.sentinelReceived
+      const endpointFile = path.join(tmpDir, 'agent-hooks', 'relay.sock', getEndpointFileName())
+      const endpointBeforeDuplicate = readFileSync(endpointFile, 'utf8')
 
       let duplicateStderr = ''
       const duplicate = spawnChild(
@@ -242,6 +245,7 @@ describe('Subprocess: Relay entry point', () => {
       const duplicateExit = await waitForChildExit(duplicate, 5000)
       expect(duplicateExit.code).toBe(1)
       expect(duplicateStderr).toContain('Socket path already in use')
+      expect(readFileSync(endpointFile, 'utf8')).toBe(endpointBeforeDuplicate)
 
       const bridge = spawn(['--connect', '--sock-path', sockPath])
       try {
@@ -264,6 +268,42 @@ describe('Subprocess: Relay entry point', () => {
   )
 
   it.skipIf(process.platform === 'win32')(
+    'does not unlink a newer relay socket when an older relay exits',
+    async () => {
+      tmpDir = mkdtempSync(path.join(tmpdir(), 'relay-rebound-'))
+      const sockPath = path.join(tmpDir, 'relay.sock')
+      const first = spawn(['--detached', '--grace-time', '10', '--sock-path', sockPath])
+      let second: RelayProcess | null = null
+      let bridge: RelayProcess | null = null
+      try {
+        await first.sentinelReceived
+        unlinkSync(sockPath)
+
+        second = spawn(['--detached', '--grace-time', '10', '--sock-path', sockPath])
+        await second.sentinelReceived
+
+        first.kill('SIGTERM')
+        await first.waitForExit(2000)
+
+        bridge = spawn(['--connect', '--sock-path', sockPath])
+        await bridge.sentinelReceived
+        const id = bridge.send('relay.status')
+        const resp = await bridge.waitForResponse(id)
+        expect(resp.error).toBeUndefined()
+        expect((resp.result as { pid: number }).pid).toBe(second.proc.pid)
+      } finally {
+        bridge?.kill('SIGTERM')
+        await bridge?.waitForExit().catch(() => {})
+        first.kill('SIGTERM')
+        await first.waitForExit().catch(() => {})
+        second?.kill('SIGTERM')
+        await second?.waitForExit().catch(() => {})
+      }
+    },
+    10_000
+  )
+
+  it.skipIf(process.platform === 'win32')(
     'uses a short startup grace for empty detached relays before any client connects',
     async () => {
       tmpDir = mkdtempSync(path.join(tmpdir(), 'relay-empty-'))
@@ -274,6 +314,34 @@ describe('Subprocess: Relay entry point', () => {
       await relay.sentinelReceived
 
       await relay.waitForExit(3000)
+      expect(relay.proc.exitCode).toBe(0)
+    },
+    10_000
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'uses configured grace after a detached relay has accepted a socket client',
+    async () => {
+      tmpDir = mkdtempSync(path.join(tmpdir(), 'relay-connected-'))
+      const sockPath = path.join(tmpDir, 'relay.sock')
+      relay = spawn(['--detached', '--grace-time', '1', '--sock-path', sockPath], {
+        ...process.env,
+        ORCA_RELAY_EMPTY_STARTUP_GRACE_MS: '500'
+      })
+      await relay.sentinelReceived
+
+      const bridge = spawn(['--connect', '--sock-path', sockPath])
+      try {
+        await bridge.sentinelReceived
+      } finally {
+        bridge.kill('SIGTERM')
+        await bridge.waitForExit().catch(() => {})
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 650))
+      expect(relay.proc.exitCode).toBeNull()
+
+      await relay.waitForExit(2000)
       expect(relay.proc.exitCode).toBe(0)
     },
     10_000
