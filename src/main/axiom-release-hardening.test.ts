@@ -14,7 +14,8 @@ const ENV_KEYS = [
   'ORCA_ARTIFACT_BASENAME',
   'ORCA_NSIS_GUID',
   'ORCA_PUBLISH_REPOSITORY',
-  'ORCA_UPDATE_REPOSITORY'
+  'ORCA_UPDATE_REPOSITORY',
+  'GITHUB_REPOSITORY'
 ] as const
 
 const originalEnv = new Map<string, string | undefined>()

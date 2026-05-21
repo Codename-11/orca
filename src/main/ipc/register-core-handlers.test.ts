@@ -41,6 +41,7 @@ const {
   registerLinearHandlersMock,
   registerGitLabHandlersMock,
   registerHostedReviewHandlersMock,
+  registerForgeHandlersMock,
   registerExportHandlersMock,
   registerOnboardingHandlersMock,
   registerSpeechHandlersMock,
@@ -86,6 +87,7 @@ const {
   registerLinearHandlersMock: vi.fn(),
   registerGitLabHandlersMock: vi.fn(),
   registerHostedReviewHandlersMock: vi.fn(),
+  registerForgeHandlersMock: vi.fn(),
   registerExportHandlersMock: vi.fn(),
   registerOnboardingHandlersMock: vi.fn(),
   registerSpeechHandlersMock: vi.fn(),
@@ -264,6 +266,10 @@ vi.mock('./hosted-review', () => ({
   registerHostedReviewHandlers: registerHostedReviewHandlersMock
 }))
 
+vi.mock('./forge', () => ({
+  registerForgeHandlers: registerForgeHandlersMock
+}))
+
 import { registerCoreHandlers } from './register-core-handlers'
 
 describe('registerCoreHandlers', () => {
@@ -306,6 +312,7 @@ describe('registerCoreHandlers', () => {
     registerLinearHandlersMock.mockReset()
     registerGitLabHandlersMock.mockReset()
     registerHostedReviewHandlersMock.mockReset()
+    registerForgeHandlersMock.mockReset()
     registerExportHandlersMock.mockReset()
     registerSpeechHandlersMock.mockReset()
     registerSkillsHandlersMock.mockReset()
@@ -354,6 +361,7 @@ describe('registerCoreHandlers', () => {
     expect(registerLinearHandlersMock).toHaveBeenCalled()
     expect(registerGitLabHandlersMock).toHaveBeenCalledWith(store)
     expect(registerHostedReviewHandlersMock).toHaveBeenCalledWith(store, stats)
+    expect(registerForgeHandlersMock).toHaveBeenCalled()
     expect(registerFeedbackHandlersMock).toHaveBeenCalled()
     expect(registerStatsHandlersMock).toHaveBeenCalledWith(stats)
     expect(registerMemoryHandlersMock).toHaveBeenCalledWith(store)
