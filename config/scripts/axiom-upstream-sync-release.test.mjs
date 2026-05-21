@@ -14,11 +14,15 @@ import {
   parseReleasePlatforms
 } from './verify-release-required-assets.mjs'
 
+import { classifyMergeRemediation } from './axiom-request-merge-remediation.mjs'
+
 const workflow = readFileSync('.github/workflows/axiom-upstream-sync-release.yml', 'utf8')
 const mirrorWorkflow = readFileSync('.github/workflows/axiom-upstream-main-sync.yml', 'utf8')
 const checkScript = readFileSync('config/scripts/axiom-check-upstream-release.mjs', 'utf8')
 const syncScript = readFileSync('config/scripts/axiom-sync-upstream-release.mjs', 'utf8')
 const notifyScript = readFileSync('config/scripts/axiom-report-sync-failure.mjs', 'utf8')
+const remediationScript = readFileSync('config/scripts/axiom-request-merge-remediation.mjs', 'utf8')
+const remediationPolicy = readFileSync('config/axiom-merge-remediation-policy.json', 'utf8')
 const notesScript = readFileSync('config/scripts/axiom-generate-release-notes.mjs', 'utf8')
 
 describe('Axiom release versioning', () => {
@@ -188,6 +192,46 @@ describe('Axiom upstream sync release workflow', () => {
     expect(notifyScript).toContain('axiom-upstream-sync')
     expect(notifyScript).toContain('Conflicted files')
     expect(notifyScript).toContain('AXIOM_SYNC_DISCORD_WEBHOOK')
+  })
+
+  it('requests agent remediation for unsafe merge conflicts without publishing', () => {
+    expect(workflow).toContain('Request Hermes merge remediation')
+    expect(workflow).toContain('AXIOM_SYNC_REMEDIATION_WEBHOOK')
+    expect(workflow).toContain('AXIOM_REMEDIATION_MODE')
+    expect(remediationScript).toContain('classifyMergeRemediation')
+    expect(remediationScript).toContain("action: 'auto_remediate'")
+    expect(remediationScript).toContain("action: 'review_required'")
+    expect(remediationPolicy).toContain('protectedDeletionPaths')
+    expect(remediationPolicy).toContain('src/**/forge/**')
+    expect(remediationPolicy).toContain('config/electron-builder.config.cjs')
+  })
+
+  it('classifies regular code conflicts for agent PR remediation', () => {
+    expect(
+      classifyMergeRemediation({
+        conflicts: ['src/renderer/src/components/TaskPage.tsx'],
+        statusRecords: [
+          { status: 'UU', path: 'src/renderer/src/components/TaskPage.tsx', deleted: false }
+        ],
+        policy: JSON.parse(remediationPolicy)
+      })
+    ).toMatchObject({ action: 'auto_remediate' })
+  })
+
+  it('requires human review when upstream deletes protected Axiom files', () => {
+    expect(
+      classifyMergeRemediation({
+        conflicts: ['src/renderer/src/components/forge/ForgeIssueDetailDrawer.tsx'],
+        statusRecords: [
+          {
+            status: 'DU',
+            path: 'src/renderer/src/components/forge/ForgeIssueDetailDrawer.tsx',
+            deleted: true
+          }
+        ],
+        policy: JSON.parse(remediationPolicy)
+      })
+    ).toMatchObject({ action: 'review_required' })
   })
 })
 

@@ -255,6 +255,18 @@ jobs:
           AXIOM_FAILED_STEP: Detect, sync, verify, and tag
         run: node config/scripts/axiom-report-sync-failure.mjs
 
+      - name: Request Hermes merge remediation
+        if: failure() && steps.check.outputs.should_release == 'true'
+        env:
+          AXIOM_SYNC_REMEDIATION_WEBHOOK: ${{ secrets.AXIOM_SYNC_REMEDIATION_WEBHOOK }}
+          AXIOM_SYNC_REMEDIATION_TOKEN: ${{ secrets.AXIOM_SYNC_REMEDIATION_TOKEN }}
+          AXIOM_REMEDIATION_MODE: agent_pr
+          AXIOM_UPSTREAM_TAG: ${{ steps.check.outputs.upstream_tag }}
+          AXIOM_FORK_TAG: ${{ steps.check.outputs.fork_tag }}
+          AXIOM_FORK_VERSION: ${{ steps.check.outputs.fork_version }}
+          AXIOM_FAILED_STEP: Detect, sync, verify, and tag
+        run: node config/scripts/axiom-request-merge-remediation.mjs
+
   build:
     name: Build and publish Windows desktop
     needs: sync

@@ -1,0 +1,32 @@
+{
+  "protectedDeletionPaths": [
+    "src/**/forge/**",
+    "src/shared/forge-types.ts",
+    "src/shared/task-providers.ts",
+    "src/shared/task-providers.test.ts",
+    "src/renderer/src/components/task-providers/**",
+    "src/renderer/src/components/forge/**",
+    "config/electron-builder.config.cjs",
+    "electron.vite.config.ts",
+    "resources/build/installer.nsh",
+    "mobile/app.json",
+    ".github/workflows/**"
+  ],
+  "protectedIdentityPaths": [
+    "config/electron-builder.config.cjs",
+    "electron.vite.config.ts",
+    "resources/build/installer.nsh",
+    "mobile/app.json",
+    ".github/workflows/axiom-upstream-sync-release.yml"
+  ],
+  "requiredChecks": [
+    "pnpm install --frozen-lockfile",
+    "pnpm run typecheck",
+    "pnpm exec vitest run --config config/vitest.config.ts src/shared/task-providers.test.ts src/main/axiom-release-hardening.test.ts src/main/updater-endpoints.test.ts src/main/app-build-identity.test.ts config/scripts/axiom-upstream-sync-release.test.mjs",
+    "pnpm exec oxlint config/scripts/axiom-request-merge-remediation.mjs .github/workflows/axiom-upstream-sync-release.yml",
+    "pnpm exec oxfmt --check config/scripts/axiom-request-merge-remediation.mjs .github/workflows/axiom-upstream-sync-release.yml config/axiom-merge-remediation-policy.json",
+    "git diff --check"
+  ],
+  "branchPrefix": "bot/upstream-sync-",
+  "targetBranch": "axiom/deploy"
+}

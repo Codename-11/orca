@@ -130,6 +130,26 @@ describe('WslCliInstaller', () => {
     })
   })
 
+  it('reports WSL probe failures as unsupported status instead of throwing', async () => {
+    const installer = new WslCliInstaller({
+      platform: 'win32',
+      distro: 'Ubuntu',
+      hostInstaller: { getStatus: async () => makeHostStatus() },
+      wslRunner: async (_distro, command) => {
+        if (command.includes('printf %s "$HOME"')) {
+          throw new Error('Command failed: wsl.exe -d Ubuntu -- bash -lc printf %s "$HOME"')
+        }
+        return ''
+      }
+    })
+
+    await expect(installer.getStatus()).resolves.toMatchObject({
+      state: 'unsupported',
+      supported: false,
+      detail: expect.stringContaining('Unable to inspect WSL CLI registration in Ubuntu')
+    })
+  })
+
   it('refuses to replace an unmanaged WSL command', async () => {
     const wsl = createWslRunner('#!/usr/bin/env bash\necho elsewhere\n')
     const installer = new WslCliInstaller({

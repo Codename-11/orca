@@ -6,6 +6,23 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-21 — Agent-assisted upstream remediation and WSL status hardening
+
+Added the next layer of Axiom upstream-sync automation: when the release sync workflow fails after `should_release`, it now runs `config/scripts/axiom-request-merge-remediation.mjs`. The script classifies merge failures against `config/axiom-merge-remediation-policy.json`, requests Hermes/agent PR remediation via `AXIOM_SYNC_REMEDIATION_WEBHOOK` for eligible conflicts, and treats protected Axiom deletions or fork identity/update-feed conflicts as review-required true blocks. The generated remediation prompt explicitly requires a bot branch/PR into `axiom/deploy` and forbids direct deploy-branch pushes.
+
+Fixed the random Settings toast for `cli:getWslInstallStatus`: WSL CLI status probes now convert failed WSL inspection commands such as `$HOME` resolution into an inline unsupported status instead of throwing through IPC and surfacing a raw Electron remote-method error toast.
+
+Verification:
+
+- `pnpm exec vitest run --config config/vitest.config.ts config/scripts/axiom-upstream-sync-release.test.mjs src/main/cli/wsl-cli-installer.test.ts` → 26 tests passed.
+- `pnpm run typecheck` → passed. Node engine warning only: project wants Node 24; local runtime is Node v25.6.0.
+- `pnpm exec oxlint config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-upstream-sync-release.test.mjs src/main/cli/wsl-cli-installer.ts src/main/cli/wsl-cli-installer.test.ts` → 0 warnings / 0 errors.
+- `pnpm exec oxfmt --check .github/workflows/axiom-upstream-sync-release.yml config/axiom-merge-remediation-policy.json config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-upstream-sync-release.test.mjs src/main/cli/wsl-cli-installer.ts src/main/cli/wsl-cli-installer.test.ts` → passed.
+- `node --check config/scripts/axiom-request-merge-remediation.mjs && node --check config/scripts/axiom-upstream-sync-release.test.mjs` → passed.
+- `git diff --check` → passed.
+
+---
+
 ## 2026-05-21 — Merged upstream v1.4.16 into Axiom deploy lane
 
 Resolved the upstream `v1.4.16` merge blockage on `axiom/deploy` while preserving the Axiom fork identity and Forge task-provider work. The deploy package version is now `1.4.16-axiom.1`; the conflict resolution kept upstream relay/socket-safety changes, upstream GitLab task-list refinements, and Axiom's Forge provider surface together.

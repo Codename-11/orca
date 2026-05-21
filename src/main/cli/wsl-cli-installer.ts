@@ -48,76 +48,80 @@ export class WslCliInstaller {
       return ready.status
     }
 
-    const content = await this.readCommandFile(ready.distro, ready.commandPath)
-    if (content === null) {
-      return this.buildStatus({
-        distro: ready.distro,
-        commandPath: ready.commandPath,
-        launcherPath: ready.launcherPath,
-        state: 'not_installed',
-        currentTarget: null,
-        pathConfigured: ready.pathConfigured,
-        detail: `Register ${ready.commandPath} to use Orca from WSL.`
-      })
-    }
-
-    if (content === 'not_file') {
-      return this.buildStatus({
-        distro: ready.distro,
-        commandPath: ready.commandPath,
-        launcherPath: ready.launcherPath,
-        state: 'conflict',
-        currentTarget: null,
-        pathConfigured: ready.pathConfigured,
-        detail: `${ready.commandPath} exists but is not an Orca launcher script.`
-      })
-    }
-
-    const expected = buildWslLauncher(ready.launcherPath, ready.bridgePath)
-    const managed = content.includes(MANAGED_MARKER)
-    const currentTarget = managed ? parseManagedLauncherTarget(content) : null
-    if (content === expected) {
-      const bridgeContent = await this.readCommandFile(ready.distro, ready.bridgePath)
-      const expectedBridge = buildWslBridgeScript()
-      if (bridgeContent === expectedBridge) {
+    try {
+      const content = await this.readCommandFile(ready.distro, ready.commandPath)
+      if (content === null) {
         return this.buildStatus({
           distro: ready.distro,
           commandPath: ready.commandPath,
           launcherPath: ready.launcherPath,
-          state: 'installed',
-          currentTarget,
+          state: 'not_installed',
+          currentTarget: null,
           pathConfigured: ready.pathConfigured,
-          detail: `Registered in ${ready.distro} at ${ready.commandPath}.`
+          detail: `Register ${ready.commandPath} to use Orca from WSL.`
         })
       }
 
-      const bridgeManaged =
-        typeof bridgeContent === 'string' && bridgeContent.includes(BRIDGE_MANAGED_MARKER)
+      if (content === 'not_file') {
+        return this.buildStatus({
+          distro: ready.distro,
+          commandPath: ready.commandPath,
+          launcherPath: ready.launcherPath,
+          state: 'conflict',
+          currentTarget: null,
+          pathConfigured: ready.pathConfigured,
+          detail: `${ready.commandPath} exists but is not an Orca launcher script.`
+        })
+      }
+
+      const expected = buildWslLauncher(ready.launcherPath, ready.bridgePath)
+      const managed = content.includes(MANAGED_MARKER)
+      const currentTarget = managed ? parseManagedLauncherTarget(content) : null
+      if (content === expected) {
+        const bridgeContent = await this.readCommandFile(ready.distro, ready.bridgePath)
+        const expectedBridge = buildWslBridgeScript()
+        if (bridgeContent === expectedBridge) {
+          return this.buildStatus({
+            distro: ready.distro,
+            commandPath: ready.commandPath,
+            launcherPath: ready.launcherPath,
+            state: 'installed',
+            currentTarget,
+            pathConfigured: ready.pathConfigured,
+            detail: `Registered in ${ready.distro} at ${ready.commandPath}.`
+          })
+        }
+
+        const bridgeManaged =
+          typeof bridgeContent === 'string' && bridgeContent.includes(BRIDGE_MANAGED_MARKER)
+        return this.buildStatus({
+          distro: ready.distro,
+          commandPath: ready.commandPath,
+          launcherPath: ready.launcherPath,
+          state: bridgeContent === null || bridgeManaged ? 'stale' : 'conflict',
+          currentTarget,
+          pathConfigured: ready.pathConfigured,
+          detail:
+            bridgeContent === null || bridgeManaged
+              ? `${ready.commandPath} is missing its PowerShell bridge.`
+              : `${ready.bridgePath} exists but is not managed by Orca.`
+        })
+      }
+
       return this.buildStatus({
         distro: ready.distro,
         commandPath: ready.commandPath,
         launcherPath: ready.launcherPath,
-        state: bridgeContent === null || bridgeManaged ? 'stale' : 'conflict',
+        state: managed ? 'stale' : 'conflict',
         currentTarget,
         pathConfigured: ready.pathConfigured,
-        detail:
-          bridgeContent === null || bridgeManaged
-            ? `${ready.commandPath} is missing its PowerShell bridge.`
-            : `${ready.bridgePath} exists but is not managed by Orca.`
+        detail: managed
+          ? `${ready.commandPath} points to a different Orca launcher.`
+          : `${ready.commandPath} exists but is not managed by Orca.`
       })
+    } catch {
+      return this.wslProbeUnsupported(ready.distro)
     }
-
-    return this.buildStatus({
-      distro: ready.distro,
-      commandPath: ready.commandPath,
-      launcherPath: ready.launcherPath,
-      state: managed ? 'stale' : 'conflict',
-      currentTarget,
-      pathConfigured: ready.pathConfigured,
-      detail: managed
-        ? `${ready.commandPath} points to a different Orca launcher.`
-        : `${ready.commandPath} exists but is not managed by Orca.`
-    })
   }
 
   async install(): Promise<CliInstallStatus> {
@@ -216,7 +220,12 @@ export class WslCliInstaller {
       }
     }
 
-    const home = (await this.run(this.distro, 'printf %s "$HOME"')).trim()
+    let home = ''
+    try {
+      home = (await this.run(this.distro, 'printf %s "$HOME"')).trim()
+    } catch {
+      return { status: this.wslProbeUnsupported(this.distro) }
+    }
     if (!home.startsWith('/')) {
       return {
         status: this.unsupported('launcher_missing', 'Unable to resolve the WSL home directory.')
@@ -331,6 +340,13 @@ export class WslCliInstaller {
       unsupportedReason,
       detail
     }
+  }
+
+  private wslProbeUnsupported(distro: string): CliInstallStatus {
+    return this.unsupported(
+      'launcher_missing',
+      `Unable to inspect WSL CLI registration in ${distro}. Open the distro once or check WSL is healthy, then refresh.`
+    )
   }
 
   private async run(distro: string, command: string): Promise<string> {
