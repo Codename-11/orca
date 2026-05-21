@@ -6,13 +6,13 @@ import { cn } from '@/lib/utils'
 import { isGitRepoKind } from '../../../../shared/repo-kind'
 import type { GlobalSettings, TaskProvider } from '../../../../shared/types'
 import { getTaskPresetQuery, PER_REPO_FETCH_LIMIT } from '@/lib/new-workspace'
-import { migrationUnsupportedToAgentStatusEntry } from '@/lib/migration-unsupported-agent-entry'
 import { TASK_PROVIDER_UI_OPTIONS } from '@/components/task-providers/provider-ui-registry'
 import {
   normalizeVisibleTaskProviders,
   restoreAvailableDefaultTaskProvider,
   resolveVisibleTaskProvider
 } from '../../../../shared/task-providers'
+import { useActivityUnreadCount } from '@/components/activity/useActivityUnreadCount'
 
 const isMac = typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac')
 
@@ -162,42 +162,7 @@ const SidebarNav = React.memo(function SidebarNav() {
   const tasksActive = activeView === 'tasks'
   const automationsActive = activeView === 'automations'
   const activityActive = activeView === 'activity'
-  const activityUnreadCount = useAppStore((s) => {
-    let count = 0
-    for (const worktrees of Object.values(s.worktreesByRepo)) {
-      for (const worktree of worktrees) {
-        if (worktree.createdAt && worktree.isUnread) {
-          count += 1
-        }
-      }
-    }
-    for (const [paneKey, entry] of Object.entries(s.agentStatusByPaneKey)) {
-      if (entry.state !== 'done' && entry.state !== 'blocked' && entry.state !== 'waiting') {
-        continue
-      }
-      if ((s.acknowledgedAgentsByPaneKey[paneKey] ?? 0) < entry.stateStartedAt) {
-        count += 1
-      }
-    }
-    for (const [paneKey, retained] of Object.entries(s.retainedAgentsByPaneKey)) {
-      if (retained.entry.state !== 'done') {
-        continue
-      }
-      if ((s.acknowledgedAgentsByPaneKey[paneKey] ?? 0) < retained.entry.stateStartedAt) {
-        count += 1
-      }
-    }
-    for (const unsupported of Object.values(s.migrationUnsupportedByPtyId)) {
-      const entry = migrationUnsupportedToAgentStatusEntry(unsupported)
-      if (!entry) {
-        continue
-      }
-      if ((s.acknowledgedAgentsByPaneKey[entry.paneKey] ?? 0) < entry.stateStartedAt) {
-        count += 1
-      }
-    }
-    return count
-  })
+  const activityUnreadCount = useActivityUnreadCount(showAgentsButton, 'sidebar-badge')
 
   return (
     <div className="flex flex-col gap-0.5 px-2 pt-2 pb-1">

@@ -6,6 +6,30 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-21 — Agent PR remediation for upstream v1.4.18-rc.1
+
+Resolved the auto-remediable upstream release merge from `v1.4.18-rc.1` into the Axiom deploy lane on bot branch `bot/upstream-sync-axiom-v1.4.18-rc.1.axiom.1` for PR review instead of pushing directly to `axiom/deploy`. The bot branch was rebuilt on top of the latest `origin/axiom/deploy` after the deploy branch gained `fix(axiom): mark fork prereleases correctly`.
+
+Conflict summary:
+
+- `package.json`: kept the fork-owned app semver as `1.4.18-rc.1.axiom.1` instead of upstream's raw `1.4.18-rc.1`.
+- `src/renderer/src/components/sidebar/SidebarNav.tsx`: kept the Axiom task-provider registry shortcuts (including Forge provider support) while accepting upstream's activity unread-count hook; removed superseded provider/icon imports from the old upstream shortcut implementation.
+- `src/renderer/src/components/TaskPage.tsx`: added the required `scrollbar-sleek` class to the Forge issue description textarea after CI's styled-scrollbar guard flagged upstream's new vertical overflow check.
+- Full PR `pnpm test` follow-up: included `GITHUB_REPOSITORY` in the Axiom release-hardening test env reset so GitHub Actions' fork repo env cannot override upstream-default assertions, and mocked the Forge IPC registrar in the core handler registry test.
+
+Verification:
+
+- `pnpm install --frozen-lockfile` → passed. Node engine warning only: project wants Node 24; local runtime is Node v25.6.0.
+- `pnpm run typecheck` → passed.
+- `pnpm exec vitest run --config config/vitest.config.ts src/shared/task-providers.test.ts src/main/axiom-release-hardening.test.ts src/main/updater-endpoints.test.ts src/main/app-build-identity.test.ts config/scripts/axiom-upstream-sync-release.test.mjs` → 44 tests passed.
+- `pnpm exec oxlint config/scripts/axiom-request-merge-remediation.mjs .github/workflows/axiom-upstream-sync-release.yml` → 0 warnings / 0 errors.
+- `pnpm exec oxfmt --check config/scripts/axiom-request-merge-remediation.mjs .github/workflows/axiom-upstream-sync-release.yml config/axiom-merge-remediation-policy.json` → passed.
+- `git diff --check` → passed.
+
+Actions run being remediated: https://github.com/Codename-11/orca/actions/runs/26251974605
+
+---
+
 ## 2026-05-21 — Agent-assisted upstream remediation and WSL status hardening
 
 Added the next layer of Axiom upstream-sync automation: when the release sync workflow fails after `should_release`, it now runs `config/scripts/axiom-request-merge-remediation.mjs`. The script classifies merge failures against `config/axiom-merge-remediation-policy.json`, requests Hermes/agent PR remediation via `AXIOM_SYNC_REMEDIATION_WEBHOOK` for eligible conflicts, and treats protected Axiom deletions or fork identity/update-feed conflicts as review-required true blocks. The generated remediation prompt explicitly requires a bot branch/PR into `axiom/deploy` and forbids direct deploy-branch pushes.

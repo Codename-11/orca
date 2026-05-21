@@ -39,6 +39,7 @@ const {
   registerFilesystemWatcherHandlersMock,
   registerAppHandlersMock,
   registerLinearHandlersMock,
+  registerForgeHandlersMock,
   registerGitLabHandlersMock,
   registerHostedReviewHandlersMock,
   registerExportHandlersMock,
@@ -84,6 +85,7 @@ const {
   registerFilesystemWatcherHandlersMock: vi.fn(),
   registerAppHandlersMock: vi.fn(),
   registerLinearHandlersMock: vi.fn(),
+  registerForgeHandlersMock: vi.fn(),
   registerGitLabHandlersMock: vi.fn(),
   registerHostedReviewHandlersMock: vi.fn(),
   registerExportHandlersMock: vi.fn(),
@@ -256,6 +258,10 @@ vi.mock('./linear', () => ({
   registerLinearHandlers: registerLinearHandlersMock
 }))
 
+vi.mock('./forge', () => ({
+  registerForgeHandlers: registerForgeHandlersMock
+}))
+
 vi.mock('./gitlab', () => ({
   registerGitLabHandlers: registerGitLabHandlersMock
 }))
@@ -304,6 +310,7 @@ describe('registerCoreHandlers', () => {
     registerFilesystemWatcherHandlersMock.mockReset()
     registerAppHandlersMock.mockReset()
     registerLinearHandlersMock.mockReset()
+    registerForgeHandlersMock.mockReset()
     registerGitLabHandlersMock.mockReset()
     registerHostedReviewHandlersMock.mockReset()
     registerExportHandlersMock.mockReset()
@@ -356,6 +363,7 @@ describe('registerCoreHandlers', () => {
     expect(registerHostedReviewHandlersMock).toHaveBeenCalledWith(store, stats)
     expect(registerFeedbackHandlersMock).toHaveBeenCalled()
     expect(registerStatsHandlersMock).toHaveBeenCalledWith(stats)
+    expect(registerForgeHandlersMock).toHaveBeenCalled()
     expect(registerMemoryHandlersMock).toHaveBeenCalledWith(store)
     expect(registerNotebookHandlersMock).toHaveBeenCalledWith(store)
     expect(registerNotificationHandlersMock).toHaveBeenCalledWith(store, runtime)
