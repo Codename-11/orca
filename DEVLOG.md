@@ -6,6 +6,23 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-21 — Classified upstream-sync remediation pipeline
+
+Converted Axiom Orca upstream release conflicts from noisy workflow failures into classified remediation flow. `config/scripts/axiom-sync-upstream-release.mjs` now emits `merge_result=agent_remediate` for unsafe conflicts instead of failing the whole release job, causing publish/build steps to skip while `config/scripts/axiom-request-merge-remediation.mjs` creates/updates a `bot/upstream-sync-*` branch, writes a remediation metadata commit, opens/updates a PR into `axiom/deploy`, and then optionally dispatches Hermes via HMAC-signed webhook. The safe `package.json` top-level version auto-resolver remains the only automatic merge resolver.
+
+Hardened failure routing so non-critical sync state is durable rather than chat-noisy: GitHub issue upsert remains the fallback, `AXIOM_SYNC_FORGE_WEBHOOK` can receive Forge task payloads when configured, and Discord posts only when `AXIOM_SYNC_FAILURE_SEVERITY=critical` such as release build/publish or mirror infrastructure failures. The main mirror workflow now uses `AXIOM_MIRROR_TOKEN` / `AXIOM_AUTOMATION_TOKEN` fallback support so upstream workflow-file changes can be mirrored with a token that has workflow scope, while `main` stays a clean upstream mirror.
+
+Verification:
+
+- `node --check config/scripts/axiom-sync-upstream-release.mjs && node --check config/scripts/axiom-request-merge-remediation.mjs && node --check config/scripts/axiom-report-sync-failure.mjs` → passed.
+- `pnpm exec vitest run --config config/vitest.config.ts config/scripts/axiom-upstream-sync-release.test.mjs` → 19 tests passed.
+- `pnpm run typecheck` → passed. Node engine warning only: project wants Node 24; local runtime is Node v25.6.0.
+- `pnpm exec oxlint config/scripts/axiom-sync-upstream-release.mjs config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml` → 0 warnings / 0 errors.
+- `pnpm exec oxfmt --check config/scripts/axiom-sync-upstream-release.mjs config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs config/scripts/axiom-upstream-sync-release.test.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml config/axiom-merge-remediation-policy.json` → passed.
+- `git diff --check` → passed.
+
+---
+
 ## 2026-05-21 — Gated upstream dispatch automation after noisy failures
 
 Disabled unattended upstream repository-dispatch automation by default while preserving manual workflow dispatches and Axiom tag-triggered releases. `Axiom Upstream Sync Release` now only responds to upstream dispatch events when `AXIOM_AUTO_RELEASES=true`; `Axiom Upstream Main Mirror` now only responds to upstream dispatch events when `AXIOM_AUTO_MAIN_MIRROR=true`. Both repository variables were set to `false` to stop duplicate failure emails while upstream `v1.4.18-rc.2` conflicts await intentional remediation.

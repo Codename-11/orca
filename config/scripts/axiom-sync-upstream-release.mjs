@@ -1,12 +1,19 @@
 #!/usr/bin/env node
 
 import { execFileSync } from 'node:child_process'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
 function envString(name, fallback) {
   const value = process.env[name]
   return typeof value === 'string' && value.trim() ? value.trim() : fallback
+}
+
+function writeOutput(name, value) {
+  const outputPath = process.env.GITHUB_OUTPUT
+  if (outputPath) {
+    appendFileSync(outputPath, `${name}=${String(value).replace(/\n/g, '%0A')}\n`)
+  }
 }
 
 function run(command, args, options = {}) {
@@ -208,15 +215,22 @@ function main() {
         runInherited('git', ['commit', '--no-edit'])
       } else {
         printConflictDiagnostics(error)
-        throw new Error(
-          'Upstream merge still has unsafe conflicts after package.json version auto-resolution.'
+        writeOutput('merge_result', 'agent_remediate')
+        writeOutput('conflicted_files', conflicts.join(','))
+        console.log(
+          'Unsafe conflicts captured for bot-branch agent remediation; release publishing is skipped for this run.'
         )
+        return
       }
     } else {
       printConflictDiagnostics(error)
-      throw new Error(
-        'Upstream merge conflicted; resolve conflicts without clobbering Axiom identity/update settings.'
+      const conflicts = unresolvedConflictFiles()
+      writeOutput('merge_result', 'agent_remediate')
+      writeOutput('conflicted_files', conflicts.join(','))
+      console.log(
+        'Unsafe conflicts captured for bot-branch agent remediation; release publishing is skipped for this run.'
       )
+      return
     }
   }
   assertAxiomIdentityFiles()
@@ -232,6 +246,7 @@ function main() {
   assertAxiomIdentityFiles()
 
   const head = run('git', ['rev-parse', 'HEAD'])
+  writeOutput('merge_result', 'ready')
   console.log(
     `Axiom deploy branch ${deployBranch} synchronized at ${head} for ${args.forkTag || args.forkVersion}`
   )

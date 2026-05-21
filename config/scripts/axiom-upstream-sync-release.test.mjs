@@ -147,6 +147,11 @@ describe('Axiom upstream sync release workflow', () => {
     expect(mirrorWorkflow).toContain(
       'git push origin "refs/remotes/upstream/${AXIOM_UPSTREAM_BRANCH}:refs/heads/${AXIOM_UPSTREAM_BRANCH}"'
     )
+    expect(mirrorWorkflow).toContain(
+      'token: ${{ secrets.AXIOM_MIRROR_TOKEN || secrets.AXIOM_AUTOMATION_TOKEN || github.token }}'
+    )
+    expect(mirrorWorkflow).toContain('AXIOM_SYNC_FAILURE_SEVERITY: critical')
+    expect(mirrorWorkflow).toContain('AXIOM_SYNC_FORGE_WEBHOOK')
     expect(mirrorWorkflow).toContain('Notify mirror failure')
     expect(mirrorWorkflow).not.toContain('cron:')
   })
@@ -188,21 +193,43 @@ describe('Axiom upstream sync release workflow', () => {
     expect(workflow).toContain('Notify upstream sync failure')
     expect(workflow).toContain('Notify failed Axiom release')
     expect(workflow).toContain("if: failure() && steps.check.outputs.should_release == 'true'")
+    expect(workflow).toContain('pull-requests: write')
+    expect(workflow).toContain(
+      'token: ${{ secrets.AXIOM_MIRROR_TOKEN || secrets.AXIOM_AUTOMATION_TOKEN || github.token }}'
+    )
+    expect(workflow).toContain('GH_TOKEN: ${{ secrets.AXIOM_AUTOMATION_TOKEN || github.token }}')
+    expect(workflow).toContain('AXIOM_SYNC_FORGE_WEBHOOK')
+    expect(workflow).toContain('AXIOM_SYNC_FAILURE_SEVERITY: noncritical')
+    expect(workflow).toContain('AXIOM_SYNC_FAILURE_SEVERITY: critical')
     expect(notifyScript).toContain('ISSUE_LABEL')
     expect(notifyScript).toContain('axiom-upstream-sync')
     expect(notifyScript).toContain('Conflicted files')
-    expect(notifyScript).toContain('AXIOM_SYNC_DISCORD_WEBHOOK')
+    expect(notifyScript).toContain('AXIOM_SYNC_FORGE_WEBHOOK')
+    expect(notifyScript).toContain('postDiscordIfCritical')
+    expect(notifyScript).toContain("severity !== 'critical'")
   })
 
   it('requests agent remediation for unsafe merge conflicts without publishing', () => {
     expect(workflow).toContain('Request Hermes merge remediation')
     expect(workflow).toContain('AXIOM_SYNC_REMEDIATION_WEBHOOK')
     expect(workflow).toContain('AXIOM_REMEDIATION_MODE')
+    expect(workflow).toContain(
+      "should_release: ${{ steps.check.outputs.should_release == 'true' && steps.merge.outputs.merge_result != 'agent_remediate' }}"
+    )
+    expect(workflow).toContain("if: steps.merge.outputs.merge_result == 'agent_remediate'")
+    expect(syncScript).toContain("writeOutput('merge_result', 'agent_remediate')")
+    expect(syncScript).toContain('release publishing is skipped for this run')
+    expect(syncScript).toContain("writeOutput('merge_result', 'ready')")
     expect(remediationScript).toContain('classifyMergeRemediation')
     expect(remediationScript).toContain('X-Hub-Signature-256')
     expect(remediationScript).toContain('createHmac')
     expect(remediationScript).toContain("action: 'auto_remediate'")
     expect(remediationScript).toContain("action: 'review_required'")
+    expect(remediationScript).toContain('createBotBranchAndPr')
+    expect(remediationScript).toContain('config/axiom-remediations/')
+    expect(remediationScript).toContain("runRequired('git', ['push', '--force-with-lease'")
+    expect(remediationScript).toContain('pulls')
+    expect(remediationScript).toContain('do not push directly')
     expect(remediationPolicy).toContain('protectedDeletionPaths')
     expect(remediationPolicy).toContain('src/**/forge/**')
     expect(remediationPolicy).toContain('config/electron-builder.config.cjs')
@@ -238,7 +265,7 @@ describe('Axiom upstream sync release workflow', () => {
 })
 
 describe('Axiom upstream sync script hardening', () => {
-  it('fails loudly on unsafe merge conflicts and verifies Axiom identity after upstream sync', () => {
+  it('classifies unsafe merge conflicts for remediation and verifies Axiom identity after upstream sync', () => {
     expect(syncScript).toContain('printConflictDiagnostics')
     expect(syncScript).toContain('assertAxiomIdentityFiles')
     expect(syncScript).toContain('Upstream merge conflicted')

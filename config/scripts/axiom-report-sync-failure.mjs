@@ -153,9 +153,31 @@ async function upsertIssue() {
   console.log(`Created Axiom upstream sync issue #${created.number}`)
 }
 
-async function postDiscordIfConfigured() {
-  const webhook = envString('AXIOM_SYNC_DISCORD_WEBHOOK')
+async function postForgeIfConfigured() {
+  const webhook = envString('AXIOM_SYNC_FORGE_WEBHOOK')
   if (!webhook) {
+    return
+  }
+  const body = issueBody()
+  await fetch(webhook, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      source: 'axiom-orca-upstream-sync',
+      severity: envString('AXIOM_SYNC_FAILURE_SEVERITY', 'noncritical'),
+      title: ISSUE_TITLE,
+      body,
+      upstreamRef: envString('AXIOM_UPSTREAM_REF', envString('AXIOM_UPSTREAM_TAG', 'unknown')),
+      forkTag: envString('AXIOM_FORK_TAG', 'unknown'),
+      runUrl: getRunUrl()
+    })
+  })
+}
+
+async function postDiscordIfCritical() {
+  const severity = envString('AXIOM_SYNC_FAILURE_SEVERITY', 'noncritical')
+  const webhook = envString('AXIOM_SYNC_DISCORD_WEBHOOK')
+  if (!webhook || severity !== 'critical') {
     return
   }
   const runUrl = getRunUrl()
@@ -163,7 +185,7 @@ async function postDiscordIfConfigured() {
   const forkTag = envString('AXIOM_FORK_TAG', 'unknown')
   const conflicts = getConflictFiles()
   const content = [
-    `Axiom Orca upstream sync blocked: ${upstreamTag} -> ${forkTag}`,
+    `Critical Axiom Orca upstream sync failure: ${upstreamTag} -> ${forkTag}`,
     runUrl,
     conflicts.length > 0 ? `Conflicts: ${conflicts.join(', ')}` : 'No conflicted files captured.'
   ]
@@ -192,7 +214,12 @@ async function main() {
     issueError = error
     console.error(`::warning::Could not upsert Axiom sync failure issue: ${error.message}`)
   }
-  await postDiscordIfConfigured()
+  try {
+    await postForgeIfConfigured()
+  } catch (error) {
+    console.error(`::warning::Could not upsert Forge sync failure item: ${error.message}`)
+  }
+  await postDiscordIfCritical()
   if (issueError) {
     writeStepSummary(`## Axiom upstream sync notification fallback\n\n${issueBody()}`)
   }

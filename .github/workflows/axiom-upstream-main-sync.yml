@@ -44,6 +44,7 @@ jobs:
         with:
           ref: ${{ env.AXIOM_UPSTREAM_BRANCH }}
           fetch-depth: 0
+          token: ${{ secrets.AXIOM_MIRROR_TOKEN || secrets.AXIOM_AUTOMATION_TOKEN || github.token }}
 
       - name: Configure git author
         run: |
@@ -98,7 +99,8 @@ jobs:
       - name: Notify mirror failure
         if: failure()
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.AXIOM_AUTOMATION_TOKEN || github.token }}
+          GITHUB_TOKEN: ${{ secrets.AXIOM_AUTOMATION_TOKEN || github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           AXIOM_FAILED_STEP: Axiom upstream main mirror
           AXIOM_UPSTREAM_REF: refs/heads/main
@@ -107,4 +109,6 @@ jobs:
           AXIOM_FORK_VERSION: main
           AXIOM_DEPLOY_BRANCH: main
           AXIOM_SYNC_DISCORD_WEBHOOK: ${{ secrets.AXIOM_SYNC_DISCORD_WEBHOOK }}
+          AXIOM_SYNC_FORGE_WEBHOOK: ${{ secrets.AXIOM_SYNC_FORGE_WEBHOOK }}
+          AXIOM_SYNC_FAILURE_SEVERITY: critical
         run: node config/scripts/axiom-report-sync-failure.mjs
