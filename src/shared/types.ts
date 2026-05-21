@@ -167,6 +167,8 @@ export type Worktree = {
   isUnread: boolean
   isPinned: boolean
   sortOrder: number
+  /** User-authored sidebar ordering. Higher values render earlier in Manual sort. */
+  manualOrder?: number
   lastActivityAt: number
   /** Set once when Orca creates the worktree. Absent for worktrees discovered
    *  on disk or persisted before this field existed. Used by the sidebar to
@@ -194,6 +196,8 @@ export type GitPushTarget = {
   remoteName: string
   branchName: string
   remoteUrl?: string
+  /** True when Orca added this remote while preparing a fork-PR worktree. */
+  remoteCreated?: boolean
 }
 
 // ─── Worktree metadata (persisted user-authored fields only) ─────────
@@ -213,6 +217,8 @@ export type WorktreeMeta = {
   isUnread: boolean
   isPinned: boolean
   sortOrder: number
+  /** User-authored sidebar ordering. Higher values render earlier in Manual sort. */
+  manualOrder?: number
   lastActivityAt: number
   /** See {@link Worktree.createdAt}. Persisted to orca-data.json. */
   createdAt?: number
@@ -521,7 +527,7 @@ export type PersistedOpenFile = {
   worktreeId: string
   language: string
   isPreview?: boolean
-  runtimeEnvironmentId?: string
+  runtimeEnvironmentId?: string | null
 }
 
 export type WorkspaceSessionState = {
@@ -635,6 +641,7 @@ export type GitHubPRRefreshAlias = {
   repoPath: string
   branch: string
   worktreeId?: string
+  connectionId?: string | null
 }
 
 export type GitHubPRRefreshCandidate = GitHubPRRefreshAlias & {
@@ -664,6 +671,7 @@ type GitHubPRRefreshEventBase = {
   sequence: number
   reason: GitHubPRRefreshReason
   aliases: GitHubPRRefreshAlias[]
+  requestStartedAt?: number
 }
 
 export type GitHubPRRefreshEvent =
@@ -1263,8 +1271,11 @@ export type CreateWorktreeArgs = {
   linkedIssue?: number
   linkedPR?: number
   linkedLinearIssue?: string
+  linkedGitLabMR?: number
+  linkedGitLabIssue?: number
   pushTarget?: GitPushTarget
   workspaceStatus?: WorkspaceStatus
+  manualOrder?: number
   /** Agent selected in the create surface. Omitted for blank-shell creates. */
   createdWithAgent?: TuiAgent
   /** Telemetry-only: which UI surface initiated this create. Threaded from
@@ -1515,6 +1526,7 @@ export type SourceControlViewMode = 'list' | 'tree'
 
 export type FloatingTerminalCwdRequest = {
   path?: string
+  requireTrusted?: boolean
 }
 
 export type GlobalSettings = {
@@ -1623,17 +1635,23 @@ export type GlobalSettings = {
   /** Controls how Ctrl+Tab chooses the next visible tab. Optional for
    *  profiles saved before this setting existed; readers default to MRU. */
   ctrlTabOrderMode?: CtrlTabOrderMode
-  /** Why: Floating Terminal is the default global shell surface so users can
-   *  reach a terminal outside repo/worktree context immediately. */
+  /** Why: Floating Workspace is the default global surface so users can
+   *  reach terminal, browser, and markdown tabs outside repo/worktree context. */
   floatingTerminalEnabled: boolean
   /** One-shot migration flag for the default-on rollout. Before this field
-   *  landed, the floating terminal defaulted off and many profiles persisted
+   *  landed, the floating workspace defaulted off and many profiles persisted
    *  that inherited false. Once migrated, an explicit off choice sticks. */
   floatingTerminalDefaultedForAllUsers?: boolean
-  /** Where new Floating Terminal tabs start. Defaults to '~' so the visible
-   *  setting matches the shell-oriented directory users expect. */
+  /** Where new Floating Workspace terminal tabs start. Empty or '~' means
+   *  the user's home directory; markdown notes use Orca's app-owned
+   *  floating workspace under Electron userData. */
   floatingTerminalCwd: string
-  /** Where the Floating Terminal toggle is shown. Defaults to the floating
+  /** Picker-approved Floating Workspace directories that may be reauthorized
+   *  across restarts. Renderer-provided text alone must not populate this. */
+  floatingTerminalTrustedCwds?: string[]
+  /** One-shot migration marker for legacy floating workspace cwd trust grants. */
+  floatingTerminalCwdMigratedToAppWorkspace?: boolean
+  /** Where the Floating Workspace toggle is shown. Defaults to the floating
    *  button for discoverability. */
   floatingTerminalTriggerLocation: FloatingTerminalTriggerLocation
   diffDefaultView: 'inline' | 'side-by-side'
@@ -1864,6 +1882,8 @@ export type NotificationEventSource = 'agent-task-complete' | 'terminal-bell' | 
 
 export type NotificationDispatchRequest = {
   source: NotificationEventSource
+  /** Why: useful for fast native failures, but macOS can still drop notifications after 'show'. */
+  requireDisplayConfirmation?: boolean
   worktreeId?: string
   /** Stable `${tabId}:${leafId}` terminal pane key for click-to-focus routing. */
   paneKey?: string
@@ -1884,7 +1904,13 @@ export type NotificationDispatchRequest = {
 export type NotificationDispatchResult = {
   delivered: boolean
   /** Present when delivered is false. Tells the caller why delivery was skipped. */
-  reason?: 'disabled' | 'source-disabled' | 'suppressed-focus' | 'cooldown' | 'not-supported'
+  reason?:
+    | 'disabled'
+    | 'source-disabled'
+    | 'suppressed-focus'
+    | 'cooldown'
+    | 'not-supported'
+    | 'not-displayed'
 }
 
 export type NotificationSoundResult = {
@@ -1966,7 +1992,14 @@ export type WorktreeCardProperty =
   // view options.
   | 'inline-agents'
 
-export type StatusBarItem = 'claude' | 'codex' | 'gemini' | 'opencode-go' | 'ssh' | 'resource-usage'
+export type StatusBarItem =
+  | 'claude'
+  | 'codex'
+  | 'gemini'
+  | 'opencode-go'
+  | 'ssh'
+  | 'resource-usage'
+  | 'ports'
 export type FloatingTerminalTriggerLocation = 'floating-button' | 'status-bar'
 
 export type TaskResumeState = {
@@ -1983,13 +2016,19 @@ export type PersistedUIState = {
   sidebarWidth: number
   rightSidebarWidth: number
   groupBy: 'none' | 'workspace-status' | 'repo' | 'pr-status'
-  sortBy: 'name' | 'smart' | 'recent' | 'repo'
+  sortBy: 'name' | 'smart' | 'recent' | 'repo' | 'manual'
+  /** Deprecated; the Active only filter is retired and ignored on hydration. */
   showActiveOnly: boolean
+  /** Hide sleeping/inactive workspaces from workspace navigation. Off by default. */
+  hideSleepingWorkspaces?: boolean
+  /** Deprecated legacy positive-form setting. Ignored on hydration. */
+  showSleepingWorkspaces?: boolean
+  /** Deprecated legacy name used by a short-lived build. Ignored on hydration. */
+  showInactiveWorkspaces?: boolean
   /** Hide the repo's original checked-out branch from workspace navigation
    *  (sidebar and Cmd+J jump palette). Folder-mode repos are unaffected —
    *  the predicate in visible-worktrees.ts excludes worktrees with an empty
-   *  branch. Lives alongside showActiveOnly because both are user-facing
-   *  sidebar filters reached through the same dropdown. */
+   *  branch. */
   hideDefaultBranchWorkspace: boolean
   filterRepoIds: string[]
   collapsedGroups: string[]
@@ -2011,6 +2050,8 @@ export type PersistedUIState = {
   /** One-shot migration flag for the old default blue/violet/emerald status
    *  visuals. Once stamped, valid user-authored colors/icons are preserved. */
   _workspaceStatusesDefaultVisualsMigrated?: boolean
+  /** One-shot migration flag for adding the default-on Ports status item. */
+  _portsStatusBarDefaultAdded?: boolean
   statusBarItems: StatusBarItem[]
   statusBarVisible: boolean
   dismissedUpdateVersion: string | null
@@ -2083,6 +2124,7 @@ export type PersistedUIState = {
    *  suppress the nag — no further thresholds, no notifications. */
   starNagCompleted?: boolean
   trustedOrcaHooks?: PersistedTrustedOrcaHooks
+  setupScriptPromptDismissedRepoIds?: string[]
   /** Whether the experimental pet overlay is currently visible. Separate
    *  from the experimentalPet settings flag so "Hide pet" from the
    *  status-bar menu is a reversible dismiss (re-show without re-enabling the

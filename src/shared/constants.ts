@@ -26,6 +26,8 @@ export {
 
 export const SCHEMA_VERSION = 1
 export const DEFAULT_APP_FONT_FAMILY = 'Geist'
+export const DEFAULT_SHOW_SLEEPING_WORKSPACES = true
+export const DEFAULT_HIDE_SLEEPING_WORKSPACES = false
 
 // Why: the onboarding wizard's last step index. Centralized so backfill,
 // clamps, and UI step references all agree on the same upper bound.
@@ -94,7 +96,7 @@ export const STAR_NAG_INITIAL_THRESHOLD = 35
  *  the collector and the status-bar popover agree on the sentinel. */
 export const ORPHAN_WORKTREE_ID = '__orphan__'
 
-// Why: the floating terminal is a local synthetic workspace, so persistence
+// Why: the floating workspace is a local synthetic workspace, so persistence
 // pruning must classify it without consulting the repo catalog.
 export const FLOATING_TERMINAL_WORKTREE_ID = 'global-floating-terminal'
 
@@ -213,6 +215,8 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     floatingTerminalEnabled: true,
     floatingTerminalDefaultedForAllUsers: true,
     floatingTerminalCwd: '~',
+    floatingTerminalTrustedCwds: [],
+    floatingTerminalCwdMigratedToAppWorkspace: true,
     floatingTerminalTriggerLocation: 'floating-button',
     notifications: getDefaultNotificationSettings(),
     diffDefaultView: 'inline',
@@ -344,6 +348,8 @@ export function getDefaultUIState(): PersistedUIState {
     groupBy: 'workspace-status',
     sortBy: 'recent',
     showActiveOnly: false,
+    hideSleepingWorkspaces: DEFAULT_HIDE_SLEEPING_WORKSPACES,
+    showSleepingWorkspaces: DEFAULT_SHOW_SLEEPING_WORKSPACES,
     hideDefaultBranchWorkspace: false,
     filterRepoIds: [],
     collapsedGroups: [],
@@ -362,6 +368,7 @@ export function getDefaultUIState(): PersistedUIState {
     dismissedUpdateVersion: null,
     lastUpdateCheckAt: null,
     trustedOrcaHooks: {},
+    setupScriptPromptDismissedRepoIds: [],
     acknowledgedAgentsByPaneKey: {},
     workspaceCleanup: { dismissals: {} },
     featureTipsSeenIds: []

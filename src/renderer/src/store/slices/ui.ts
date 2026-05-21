@@ -1,11 +1,15 @@
 /* eslint-disable max-lines */
 import type { StateCreator } from 'zustand'
 import type { AppState } from '../types'
-import { findPrevLiveWorktreeHistoryIndex } from './worktree-nav-history'
+import {
+  findPrevLiveNonTaskStackHistoryIndex,
+  findPrevLiveWorktreeHistoryIndex
+} from './worktree-nav-history'
 import type {
   ChangelogData,
   CustomPet,
   GitHubWorkItem,
+  LinearIssue,
   PersistedTrustedOrcaHooks,
   PersistedUIState,
   StatusBarItem,
@@ -26,9 +30,12 @@ import { normalizeFeatureTipIds, type FeatureTipId } from '../../../../shared/fe
 import { PER_REPO_FETCH_LIMIT } from '../../../../shared/work-items'
 import {
   normalizeVisibleTaskProviders,
+  restoreAvailableDefaultTaskProvider,
   resolveVisibleTaskProvider
 } from '../../../../shared/task-providers'
 import {
+  DEFAULT_HIDE_SLEEPING_WORKSPACES,
+  DEFAULT_SHOW_SLEEPING_WORKSPACES,
   DEFAULT_STATUS_BAR_ITEMS,
   DEFAULT_WORKTREE_CARD_PROPERTIES,
   normalizeWorktreeCardProperties
@@ -46,6 +53,7 @@ import type { OrcaHookScriptKind } from '../../lib/orca-hook-trust'
 import { DEFAULT_PET_ID, isBundledPetId } from '../../components/pet/pet-models'
 import { revokeCustomPetBlobUrl } from '../../components/pet/pet-blob-cache'
 import { isGitRepoKind } from '../../../../shared/repo-kind'
+import type { WorkspacePortScanResult } from '../../../../shared/workspace-ports'
 
 export type PendingSidebarWorktreeReveal = {
   worktreeId: string
@@ -133,6 +141,19 @@ function filterTrustedOrcaHooksToValidRepos(
   for (const [repoId, entry] of Object.entries(trust)) {
     if (validRepoIds.has(repoId)) {
       next[repoId] = entry
+    }
+  }
+  return next
+}
+
+function filterRepoIdListToValidRepos(value: unknown, validRepoIds: Set<string>): string[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  const next: string[] = []
+  for (const repoId of value) {
+    if (typeof repoId === 'string' && validRepoIds.has(repoId) && !next.includes(repoId)) {
+      next.push(repoId)
     }
   }
   return next
@@ -268,6 +289,9 @@ export type UISlice = {
     preselectedRepoId?: string
     prefilledName?: string
     taskSource?: TaskProvider
+    openGitHubWorkItem?: GitHubWorkItem
+    openGitHubInitialTab?: 'conversation' | 'checks' | 'files'
+    openLinearIssue?: LinearIssue
   }
   taskResumeState: TaskResumeState | undefined
   setTaskResumeState: (updates: Partial<TaskResumeState>) => void
@@ -368,12 +392,16 @@ export type UISlice = {
   ) => void
   markOrcaHookRepoAlwaysTrusted: (repoId: string) => void
   clearOrcaHookTrustForRepo: (repoId: string) => void
+  setupScriptPromptDismissedRepoIds: string[]
+  dismissSetupScriptPrompt: (repoId: string) => void
   groupBy: 'none' | 'workspace-status' | 'repo' | 'pr-status'
   setGroupBy: (g: UISlice['groupBy']) => void
-  sortBy: 'name' | 'smart' | 'recent' | 'repo'
+  sortBy: 'name' | 'smart' | 'recent' | 'repo' | 'manual'
   setSortBy: (s: UISlice['sortBy']) => void
   showActiveOnly: boolean
   setShowActiveOnly: (v: boolean) => void
+  showSleepingWorkspaces: boolean
+  setShowSleepingWorkspaces: (v: boolean) => void
   hideDefaultBranchWorkspace: boolean
   setHideDefaultBranchWorkspace: (v: boolean) => void
   filterRepoIds: string[]
@@ -394,6 +422,10 @@ export type UISlice = {
   toggleStatusBarItem: (item: StatusBarItem) => void
   statusBarVisible: boolean
   setStatusBarVisible: (v: boolean) => void
+  workspacePortScan: { key: string; result: WorkspacePortScanResult } | null
+  workspacePortScanRefreshing: boolean
+  setWorkspacePortScan: (scan: { key: string; result: WorkspacePortScanResult } | null) => void
+  setWorkspacePortScanRefreshing: (refreshing: boolean) => void
   /** Whether the experimental pet overlay is currently visible. Persisted
    *  so "Hide pet" from the status-bar menu survives reload. Independent
    *  of the experimentalPet settings flag — the feature flag gates
@@ -526,7 +558,30 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
     // the slice's adjacent-entry dedupe drops re-opens. No isNavigatingHistory
     // guard needed — back-to-Tasks routes through setActiveView('tasks') and
     // never re-enters openTaskPage.
-    get().recordViewVisit('tasks')
+    const detailEntry = data.openGitHubWorkItem
+      ? ({
+          kind: 'task-detail',
+          source: 'github',
+          workItem: data.openGitHubWorkItem,
+          initialTab: data.openGitHubInitialTab
+        } as const)
+      : data.openLinearIssue
+        ? ({
+            kind: 'task-detail',
+            source: 'linear',
+            issue: data.openLinearIssue
+          } as const)
+        : null
+    const currentEntry = get().worktreeNavHistory[get().worktreeNavHistoryIndex]
+    const currentIsTaskStack =
+      currentEntry === 'tasks' ||
+      (typeof currentEntry === 'object' && currentEntry.kind === 'task-detail')
+    if (!detailEntry || !currentIsTaskStack) {
+      get().recordViewVisit('tasks')
+    }
+    if (detailEntry) {
+      get().recordViewVisit(detailEntry)
+    }
     set((state) => ({
       activeView: 'tasks',
       previousViewBeforeTasks:
@@ -539,7 +594,17 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
     // be deduped. This removes ~300–800ms of perceived latency on initial
     // page load.
     const state = get()
-    const visibleTaskProviders = normalizeVisibleTaskProviders(state.settings?.visibleTaskProviders)
+    const preferredVisibleTaskProviders = normalizeVisibleTaskProviders(
+      state.settings?.visibleTaskProviders
+    )
+    const visibleTaskProviders = restoreAvailableDefaultTaskProvider(
+      preferredVisibleTaskProviders,
+      {
+        gitlabInstalled: state.preflightStatus?.glab?.installed === true,
+        linearConnected: state.linearStatus?.connected === true
+      },
+      state.settings?.defaultTaskSource
+    )
     const resolvedSource = resolveVisibleTaskProvider(
       data.taskSource ?? state.settings?.defaultTaskSource,
       visibleTaskProviders
@@ -612,15 +677,21 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
       // isNavigatingHistory guard is needed.
       const currentEntry = state.worktreeNavHistory[state.worktreeNavHistoryIndex]
       let nextHistoryIndex = state.worktreeNavHistoryIndex
-      if (currentEntry === 'tasks') {
-        const prev = findPrevLiveWorktreeHistoryIndex(state)
+      if (
+        currentEntry === 'tasks' ||
+        (typeof currentEntry === 'object' && currentEntry.kind === 'task-detail')
+      ) {
+        const prev = findPrevLiveNonTaskStackHistoryIndex(state)
         if (prev !== null) {
           nextHistoryIndex = prev
+        } else if (typeof currentEntry === 'object' && state.worktreeNavHistory[0] === 'tasks') {
+          nextHistoryIndex = 0
         }
       }
       return {
         activeView: state.previousViewBeforeTasks,
         taskPageData: {},
+        githubTaskDrawerWorkItem: null,
         worktreeNavHistoryIndex: nextHistoryIndex
       }
     }),
@@ -790,6 +861,16 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
       window.api.ui.set({ trustedOrcaHooks: next }).catch(console.error)
       return { trustedOrcaHooks: next }
     }),
+  setupScriptPromptDismissedRepoIds: [],
+  dismissSetupScriptPrompt: (repoId) =>
+    set((s) => {
+      if (!repoId || s.setupScriptPromptDismissedRepoIds.includes(repoId)) {
+        return s
+      }
+      const next = [...s.setupScriptPromptDismissedRepoIds, repoId]
+      window.api.ui.set({ setupScriptPromptDismissedRepoIds: next }).catch(console.error)
+      return { setupScriptPromptDismissedRepoIds: next }
+    }),
 
   groupBy: 'workspace-status',
   // Why: group keys are mode-specific (e.g. repo id vs PR status), so
@@ -805,6 +886,9 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
 
   showActiveOnly: false,
   setShowActiveOnly: (v) => set({ showActiveOnly: v }),
+
+  showSleepingWorkspaces: DEFAULT_SHOW_SLEEPING_WORKSPACES,
+  setShowSleepingWorkspaces: (v) => set({ showSleepingWorkspaces: v }),
 
   hideDefaultBranchWorkspace: false,
   setHideDefaultBranchWorkspace: (v) => set({ hideDefaultBranchWorkspace: v }),
@@ -881,6 +965,10 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
     window.api.ui.set({ statusBarVisible: v }).catch(console.error)
     set({ statusBarVisible: v })
   },
+  workspacePortScan: null,
+  workspacePortScanRefreshing: false,
+  setWorkspacePortScan: (scan) => set({ workspacePortScan: scan }),
+  setWorkspacePortScanRefreshing: (refreshing) => set({ workspacePortScanRefreshing: refreshing }),
 
   // Why: default true so a user who enables experimentalPet sees the
   // pet immediately. Hide pet from the status-bar menu flips this
@@ -983,6 +1071,16 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
       //     flag — not here — so that users who intentionally select the new
       //     'recent' sort keep it across restarts.
       const sortBy = ui.sortBy
+      const migratedStatusBarItems = migrateStatusBarItems(ui.statusBarItems)
+      const statusBarItems =
+        ui._portsStatusBarDefaultAdded || migratedStatusBarItems.includes('ports')
+          ? migratedStatusBarItems
+          : [...migratedStatusBarItems, 'ports' as const]
+      if (!ui._portsStatusBarDefaultAdded && typeof window !== 'undefined') {
+        window.api.ui
+          .set({ statusBarItems, _portsStatusBarDefaultAdded: true })
+          .catch(console.error)
+      }
       return {
         // Why: persisted UI data comes from disk and may be stale, corrupted,
         // or manually edited. Clamp widths during hydration so invalid values
@@ -1000,10 +1098,13 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
         ),
         groupBy: (ui.groupBy as UISlice['groupBy'] | 'parent') === 'parent' ? 'repo' : ui.groupBy,
         sortBy,
-        // Why: "Active only" is part of the user's sidebar working set, not a
-        // transient render detail. Restoring it on launch keeps the filtered
-        // worktree list stable across restarts instead of silently widening it.
-        showActiveOnly: ui.showActiveOnly,
+        // Why: Active-only was retired. Force the old persisted flag off so an
+        // old profile cannot invisibly keep narrowing the workspace list.
+        showActiveOnly: false,
+        // Why: `hideSleepingWorkspaces` is the canonical negative-form filter.
+        // Older positive-form keys are intentionally ignored so old profiles
+        // start from the new default: sleeping workspaces visible.
+        showSleepingWorkspaces: !(ui.hideSleepingWorkspaces ?? DEFAULT_HIDE_SLEEPING_WORKSPACES),
         hideDefaultBranchWorkspace: ui.hideDefaultBranchWorkspace ?? false,
         filterRepoIds: (ui.filterRepoIds ?? []).filter((repoId) => validRepoIds.has(repoId)),
         collapsedGroups: new Set(ui.collapsedGroups ?? []),
@@ -1014,7 +1115,7 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
         workspaceBoardOpacity: clampWorkspaceBoardOpacity(ui.workspaceBoardOpacity),
         workspaceBoardCompact: normalizeWorkspaceBoardCompact(ui.workspaceBoardCompact),
         workspaceBoardColumnWidth: clampWorkspaceBoardColumnWidth(ui.workspaceBoardColumnWidth),
-        statusBarItems: migrateStatusBarItems(ui.statusBarItems),
+        statusBarItems,
         statusBarVisible: ui.statusBarVisible ?? true,
         // Why: absent → true so existing users see the pet the first time
         // they enable the experimental flag. Only an explicit Hide pet
@@ -1047,6 +1148,10 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
         featureTipsSeenIds: normalizeFeatureTipIds(ui.featureTipsSeenIds),
         trustedOrcaHooks: filterTrustedOrcaHooksToValidRepos(
           ui.trustedOrcaHooks ?? {},
+          validRepoIds
+        ),
+        setupScriptPromptDismissedRepoIds: filterRepoIdListToValidRepos(
+          ui.setupScriptPromptDismissedRepoIds,
           validRepoIds
         ),
         // Why: restore visited-row acks alongside the persisted hook entries

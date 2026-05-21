@@ -9,8 +9,8 @@ import { getTaskPresetQuery, PER_REPO_FETCH_LIMIT } from '@/lib/new-workspace'
 import { LinearIcon } from '@/components/icons/LinearIcon'
 import { migrationUnsupportedToAgentStatusEntry } from '@/lib/migration-unsupported-agent-entry'
 import {
-  filterAvailableTaskProviders,
   normalizeVisibleTaskProviders,
+  restoreAvailableDefaultTaskProvider,
   resolveVisibleTaskProvider
 } from '../../../../shared/task-providers'
 
@@ -49,11 +49,20 @@ const SidebarNav = React.memo(function SidebarNav() {
   )
   const visibleTaskProviders = React.useMemo(
     () =>
-      filterAvailableTaskProviders(preferredVisibleTaskProviders, {
-        gitlabInstalled: preflightStatus?.glab?.installed === true,
-        linearConnected: linearStatus.connected === true
-      }),
-    [linearStatus.connected, preferredVisibleTaskProviders, preflightStatus?.glab?.installed]
+      restoreAvailableDefaultTaskProvider(
+        preferredVisibleTaskProviders,
+        {
+          gitlabInstalled: preflightStatus?.glab?.installed === true,
+          linearConnected: linearStatus.connected === true
+        },
+        defaultTaskSource
+      ),
+    [
+      defaultTaskSource,
+      linearStatus.connected,
+      preferredVisibleTaskProviders,
+      preflightStatus?.glab?.installed
+    ]
   )
   const resolvedDefaultTaskSource = React.useMemo(
     () => resolveVisibleTaskProvider(defaultTaskSource, visibleTaskProviders),

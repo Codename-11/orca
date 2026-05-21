@@ -57,6 +57,7 @@ import {
 } from './components/floating-terminal/FloatingTerminalPanel'
 import { TOGGLE_FLOATING_TERMINAL_EVENT } from '@/lib/floating-terminal'
 import { DictationController } from './components/dictation/DictationController'
+import { WorkspacePortScanner } from './components/ports/WorkspacePortScanner'
 import { CrashReportDialog } from './components/crash-report/CrashReportDialog'
 import { ConfirmationDialogProvider } from './components/confirmation-dialog'
 import RecentTabSwitcher from './components/tab-bar/RecentTabSwitcher'
@@ -91,6 +92,10 @@ import {
 import { applyDocumentTheme } from './lib/document-theme'
 import { isEditableTarget } from './lib/editable-target'
 import { getSelectedTextForFileSearch } from './lib/file-search-selection'
+import {
+  folderRelativePathToIncludeGlob,
+  selectedExplorerFolderRelativePath
+} from './components/right-sidebar/file-search-include-pattern'
 import { shouldShowWorktreeHistoryControls } from './lib/titlebar-worktree-history-controls'
 import {
   canGoBackWorktreeHistory,
@@ -261,6 +266,7 @@ function App(): React.JSX.Element {
       setRightSidebarOpen: s.setRightSidebarOpen,
       setRightSidebarTab: s.setRightSidebarTab,
       seedFileSearchQuery: s.seedFileSearchQuery,
+      seedFileSearchIncludePattern: s.seedFileSearchIncludePattern,
       setActiveView: s.setActiveView,
       updateSettings: s.updateSettings,
       pruneLastVisitedTimestamps: s.pruneLastVisitedTimestamps,
@@ -290,7 +296,7 @@ function App(): React.JSX.Element {
   const showFloatingTerminalButton =
     floatingTerminalEnabled &&
     (floatingTerminalTriggerLocation === 'floating-button' || !statusBarVisible)
-  // Why: the floating terminal is a transient overlay; hotkey minimize should
+  // Why: the floating workspace is a transient overlay; hotkey minimize should
   // return keyboard focus to the surface the user was working in before it.
   const floatingTerminalReturnFocusRef = useRef<HTMLElement | null>(null)
 
@@ -354,7 +360,7 @@ function App(): React.JSX.Element {
   const sidebarOpen = useAppStore((s) => s.sidebarOpen)
   const groupBy = useAppStore((s) => s.groupBy)
   const sortBy = useAppStore((s) => s.sortBy)
-  const showActiveOnly = useAppStore((s) => s.showActiveOnly)
+  const showSleepingWorkspaces = useAppStore((s) => s.showSleepingWorkspaces)
   const hideDefaultBranchWorkspace = useAppStore((s) => s.hideDefaultBranchWorkspace)
   const filterRepoIds = useAppStore((s) => s.filterRepoIds)
   const acknowledgedAgentsByPaneKey = useAppStore((s) => s.acknowledgedAgentsByPaneKey)
@@ -871,7 +877,9 @@ function App(): React.JSX.Element {
         rightSidebarWidth,
         groupBy,
         sortBy,
-        showActiveOnly,
+        showActiveOnly: false,
+        hideSleepingWorkspaces: !showSleepingWorkspaces,
+        showSleepingWorkspaces,
         hideDefaultBranchWorkspace,
         filterRepoIds,
         // Why: rides the same debounced save so dashboard auto-acks (which fire
@@ -890,7 +898,7 @@ function App(): React.JSX.Element {
     rightSidebarWidth,
     groupBy,
     sortBy,
-    showActiveOnly,
+    showSleepingWorkspaces,
     hideDefaultBranchWorkspace,
     filterRepoIds,
     acknowledgedAgentsByPaneKey
@@ -1022,6 +1030,24 @@ function App(): React.JSX.Element {
       }
 
       if (mod && isSearchShortcut && canRevealRightSidebar) {
+        // Why: when focus is inside the file explorer and a folder is selected,
+        // Cmd/Ctrl+Shift+F means "Find in Folder" — seed the include pattern
+        // with that folder instead of treating the chord as a text-search seed.
+        const selectedFolderRelativePath =
+          document.activeElement instanceof Element
+            ? selectedExplorerFolderRelativePath(document.activeElement)
+            : null
+        if (selectedFolderRelativePath !== null && activeWorktreeId) {
+          e.preventDefault()
+          actions.seedFileSearchIncludePattern(
+            activeWorktreeId,
+            folderRelativePathToIncludeGlob(selectedFolderRelativePath)
+          )
+          actions.setRightSidebarTab('search')
+          actions.setRightSidebarOpen(true)
+          return
+        }
+
         const selectedText = getSelectedTextForFileSearch()
         if (selectedText) {
           e.preventDefault()
@@ -1121,16 +1147,6 @@ function App(): React.JSX.Element {
         }
         e.preventDefault()
         actions.setRightSidebarTab('source-control')
-        actions.setRightSidebarOpen(true)
-        return
-      }
-
-      // Cmd+Shift+I — toggle right sidebar / ports tab (macOS only).
-      // Why: Ctrl+Shift+I is the built-in DevTools accelerator on Windows/Linux;
-      // intercepting it would break an essential developer tool.
-      if (isMac && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'i') {
-        e.preventDefault()
-        actions.setRightSidebarTab('ports')
         actions.setRightSidebarOpen(true)
       }
     }
@@ -1357,6 +1373,7 @@ function App(): React.JSX.Element {
     >
       <TooltipProvider delayDuration={400}>
         <ConfirmationDialogProvider>
+          <WorkspacePortScanner />
           {/* Why: leaf-mounted retention sync keeps agent-status retention
             subscriptions from re-rendering the App tree. */}
           <RetainedAgentsSyncGate />
@@ -1522,7 +1539,7 @@ function App(): React.JSX.Element {
                     <FloatingTerminalToggleButton
                       // Why: anchor the floating trigger to the center surface so it
                       // cannot cover the worktree sidebar or right sidebar.
-                      className="absolute bottom-8 right-3"
+                      className="absolute bottom-3 right-3"
                       open={floatingTerminalOpen}
                       onToggle={() => setFloatingTerminalOpenWithFocus((open) => !open)}
                     />

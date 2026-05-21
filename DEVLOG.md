@@ -6,6 +6,22 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-21 — Merged upstream v1.4.16 into Axiom deploy lane
+
+Resolved the upstream `v1.4.16` merge blockage on `axiom/deploy` while preserving the Axiom fork identity and Forge task-provider work. The deploy package version is now `1.4.16-axiom.1`; the conflict resolution kept upstream relay/socket-safety changes, upstream GitLab task-list refinements, and Axiom's Forge provider surface together.
+
+Added a Hermes-side Discord safety net for release-sync failures: script-only cron job `Orca Axiom release failure Discord watcher` (`2fe5307843cb`) runs every 10 minutes and delivers to the originating Discord thread only when a new failed `Axiom Upstream Sync Release` run appears. The GitHub workflow still supports direct Discord webhooks via `AXIOM_SYNC_DISCORD_WEBHOOK` when that repository secret is configured.
+
+Verification:
+
+- `pnpm run typecheck` → passed. Node engine warning only: project wants Node 24; local runtime is Node v25.6.0.
+- `pnpm exec vitest run --config config/vitest.config.ts src/shared/task-providers.test.ts src/main/axiom-release-hardening.test.ts src/main/updater-endpoints.test.ts src/main/updater-prerelease-feed.test.ts src/main/updater-nudge.test.ts src/main/updater-changelog.test.ts src/main/app-build-identity.test.ts config/scripts/axiom-upstream-sync-release.test.mjs` → 90 tests passed.
+- `pnpm exec oxlint src/shared/task-providers.ts src/shared/task-providers.test.ts src/renderer/src/components/TaskPage.tsx` → 0 warnings / 0 errors.
+- `pnpm exec oxfmt --write` on touched conflict-resolution files → completed.
+- `git diff --cached --check` → passed.
+
+---
+
 ## 2026-05-20 — Fork release notes and updater re-check polish
 
 Enhanced the Axiom release-notes pipeline so fork releases can combine upstream Orca release notes with optional agent-generated Axiom patch/deviation notes, then fall back to a generated fork commit list when no richer notes file is provided. The release notes generator now accepts `--deviation-notes` / `AXIOM_RELEASE_DEVIATION_NOTES_FILE`, keeps upstream attribution, and still caps body sections below GitHub release limits.

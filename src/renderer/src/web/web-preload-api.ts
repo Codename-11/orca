@@ -85,7 +85,10 @@ function createWebPreloadApi(): Partial<PreloadApi> {
       reload: () => Promise.resolve(window.location.reload()),
       getKeyboardInputSourceId: () => Promise.resolve(null),
       setUnreadDockBadgeCount: () => Promise.resolve(),
-      getFloatingTerminalCwd: () => Promise.resolve('~')
+      getFloatingTerminalCwd: () => Promise.resolve(''),
+      getFloatingMarkdownDirectory: () => Promise.resolve(''),
+      pickFloatingMarkdownDocument: () => Promise.resolve(null),
+      pickFloatingWorkspaceDirectory: () => Promise.resolve(null)
     },
     e2e: {
       getConfig: () => createE2EConfig({})
@@ -347,11 +350,14 @@ function createWorktreesApi(): NonNullable<Partial<PreloadApi>['worktrees']> {
         branchNameOverride: args.branchNameOverride,
         linkedIssue: args.linkedIssue,
         linkedPR: args.linkedPR,
+        linkedLinearIssue: args.linkedLinearIssue,
         displayName: args.displayName,
         sparseCheckout: args.sparseCheckout,
         pushTarget: args.pushTarget,
         setupDecision: args.setupDecision,
-        createdWithAgent: args.createdWithAgent
+        createdWithAgent: args.createdWithAgent,
+        workspaceStatus: args.workspaceStatus,
+        manualOrder: args.manualOrder
       })
     },
     resolvePrBase: async ({ repoId, prNumber, headRefName, isCrossRepository }) =>
@@ -763,6 +769,8 @@ function createRuntimeNamespaceApi(prefix: string): never {
 function createHooksApi(): NonNullable<Partial<PreloadApi>['hooks']> {
   return {
     check: async ({ repoId }) => callRuntimeResult('repo.hooksCheck', { repo: repoId }),
+    inspectSetupScriptImports: async ({ repoId }) =>
+      callRuntimeResult('repo.setupScriptImports', { repo: repoId }),
     createIssueCommandRunner: async () => ({ launched: false }) as never,
     readIssueCommand: async ({ repoId }) =>
       callRuntimeResult('repo.issueCommandRead', { repo: repoId }),

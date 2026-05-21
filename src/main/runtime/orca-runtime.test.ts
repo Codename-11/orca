@@ -921,6 +921,8 @@ describe('OrcaRuntimeService', () => {
     const result = await runtime.createManagedWorktree({
       repoSelector: TEST_REPO_ID,
       name: 'mobile-feature',
+      linkedGitLabIssue: 321,
+      linkedGitLabMR: 654,
       startup: { command: 'claude' }
     })
 
@@ -932,7 +934,13 @@ describe('OrcaRuntimeService', () => {
     )
     expect(result.worktree).toMatchObject({
       id: `${TEST_REPO_ID}::${created.path}`,
-      path: created.path
+      path: created.path,
+      linkedGitLabIssue: 321,
+      linkedGitLabMR: 654
+    })
+    expect(metaById[result.worktree.id]).toMatchObject({
+      linkedGitLabIssue: 321,
+      linkedGitLabMR: 654
     })
     expect(addWorktree).not.toHaveBeenCalled()
     expect(listWorktrees).not.toHaveBeenCalled()
@@ -1021,7 +1029,7 @@ describe('OrcaRuntimeService', () => {
       unregisterSshFilesystemProvider('ssh-1')
     }
 
-    expect(fsProvider.readFile).toHaveBeenCalledWith('C:\\remote\\repo\\.orca.yaml')
+    expect(fsProvider.readFile).toHaveBeenCalledWith('C:\\remote\\repo\\orca.yaml')
     expect(hasHooksFile).not.toHaveBeenCalled()
     expect(getEffectiveHooks).not.toHaveBeenCalled()
   })
@@ -1042,7 +1050,7 @@ describe('OrcaRuntimeService', () => {
     }
     const fsProvider = {
       readFile: vi.fn(async (filePath: string) => ({
-        content: filePath.includes('.orca.yaml')
+        content: filePath.endsWith('orca.yaml')
           ? 'scripts:\n  setup: pnpm install\n'
           : filePath.endsWith('.gitignore')
             ? 'node_modules\n'
@@ -1073,7 +1081,7 @@ describe('OrcaRuntimeService', () => {
       unregisterSshFilesystemProvider('ssh-1')
     }
 
-    expect(fsProvider.readFile).toHaveBeenCalledWith('C:\\remote\\repo\\.orca.yaml')
+    expect(fsProvider.readFile).toHaveBeenCalledWith('C:\\remote\\repo\\orca.yaml')
     expect(fsProvider.readFile).toHaveBeenCalledWith('C:\\remote\\repo\\.orca\\issue-command')
     expect(fsProvider.createDir).toHaveBeenCalledWith('C:\\remote\\repo\\.orca')
     expect(fsProvider.writeFile).toHaveBeenCalledWith(
@@ -1677,6 +1685,34 @@ describe('OrcaRuntimeService', () => {
     )
   })
 
+  it('falls back to background terminal creation for renderer-backed requests without a renderer window', async () => {
+    const spawn = vi.fn().mockResolvedValue({ id: 'pty-bg' })
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn,
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+
+    await expect(
+      runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
+        command: 'codex',
+        rendererBacked: true
+      })
+    ).resolves.toMatchObject({
+      worktreeId: TEST_WORKTREE_ID,
+      surface: 'background'
+    })
+    expect(spawn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: 'codex',
+        cwd: TEST_WORKTREE_PATH,
+        worktreeId: TEST_WORKTREE_ID
+      })
+    )
+  })
+
   it('splits visible pty-backed terminal sessions through the parent renderer tab', async () => {
     const spawn = vi
       .fn()
@@ -1919,8 +1955,7 @@ describe('OrcaRuntimeService', () => {
       [
         ' >_ OpenAI Codex (v0.131.0)\n',
         ' model:       gpt-5.5 high   /model to change\n',
-        ' directory:   ~/orca/workspaces/orca/cli-debug\n',
-        ' permissions: YOLO mode\n'
+        ' directory:   ~/orca/workspaces/orca/cli-debug\n'
       ].join(''),
       Date.now()
     )
@@ -1950,7 +1985,6 @@ describe('OrcaRuntimeService', () => {
         ' >_ OpenAI Codex (v0.132.0)\n',
         ' model:       gpt-5.5 high   /model to change\n',
         ' directory:   ~/orca/workspaces/orca/cli-debug\n',
-        ' permissions: YOLO mode\n',
         [
           'Starting MCP servers (0/2): codex_apps, computer-use (2s  esc to interrupt)',
           'Run /review on my current changes gpt-5.5 high ~/orca/workspaces/orca/cli-debug',
@@ -1958,6 +1992,37 @@ describe('OrcaRuntimeService', () => {
           'Run /review on my current changes gpt-5.5 high ~/orca/workspaces/orca/cli-debug',
           'Run /review on my current changes gpt-5.5 high ~/orca/workspaces/orca/cli-debug\n'
         ].join('')
+      ].join(''),
+      Date.now()
+    )
+
+    await expect(
+      runtime.waitForTerminal(handle, { condition: 'tui-idle', timeoutMs: 1_000 })
+    ).resolves.toMatchObject({
+      handle,
+      condition: 'tui-idle',
+      satisfied: true,
+      status: 'running'
+    })
+  })
+
+  it('resolves tui-idle when a stale Codex prompt is followed by the ready header', async () => {
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+    const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
+    runtime.onPtyData(
+      'pty-bg',
+      [
+        'Choose working directory to resume this session\n',
+        'Press enter to continue\n',
+        ' >_ OpenAI Codex (v0.132.0)\n',
+        ' model:       gpt-5.5 high   /model to change\n',
+        ' directory:   ~/orca/workspaces/orca/cli-debug\n'
       ].join(''),
       Date.now()
     )
@@ -2027,6 +2092,157 @@ describe('OrcaRuntimeService', () => {
       status: 'running',
       blockedReason: 'codex-trust-workspace'
     })
+  })
+
+  it('returns a blocked wait result for Codex cwd selection prompts', async () => {
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => 'codex'
+    })
+    const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
+    runtime.onPtyData(
+      'pty-bg',
+      [
+        'Choose working directory to resume this session\n',
+        '  Session = latest cwd recorded in the resumed session\n',
+        '  Current = your current working directory\n',
+        '  Press enter to continue\n'
+      ].join(''),
+      Date.now()
+    )
+
+    await expect(
+      runtime.waitForTerminal(handle, { condition: 'tui-idle', timeoutMs: 1_000 })
+    ).resolves.toMatchObject({
+      handle,
+      condition: 'tui-idle',
+      satisfied: false,
+      status: 'running',
+      blockedReason: 'codex-cwd-prompt'
+    })
+  })
+
+  it('returns a blocked wait result for Codex model migration prompts', async () => {
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => 'codex'
+    })
+    const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
+    runtime.onPtyData(
+      'pty-bg',
+      [
+        'Codex just got an upgrade. Introducing gpt-5.1-codex-max.\n',
+        'We recommend switching from gpt-5-codex to gpt-5.1-codex-max.\n',
+        'Press enter to continue\n'
+      ].join(''),
+      Date.now()
+    )
+
+    await expect(
+      runtime.waitForTerminal(handle, { condition: 'tui-idle', timeoutMs: 1_000 })
+    ).resolves.toMatchObject({
+      handle,
+      condition: 'tui-idle',
+      satisfied: false,
+      status: 'running',
+      blockedReason: 'codex-model-migration-prompt'
+    })
+  })
+
+  it('returns a blocked wait result for Codex startup hook review prompts', async () => {
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => 'codex'
+    })
+    const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
+    runtime.onPtyData(
+      'pty-bg',
+      [
+        'Hooks need review\n',
+        '2 hooks are new or changed.\n',
+        '1. Review hooks\n',
+        '2. Trust all and continue\n',
+        'Press enter to confirm or esc to go back\n'
+      ].join(''),
+      Date.now()
+    )
+
+    await expect(
+      runtime.waitForTerminal(handle, { condition: 'tui-idle', timeoutMs: 1_000 })
+    ).resolves.toMatchObject({
+      handle,
+      condition: 'tui-idle',
+      satisfied: false,
+      status: 'running',
+      blockedReason: 'codex-hooks-review-prompt'
+    })
+  })
+
+  it('returns a blocked wait result for generic Codex interactive prompts', async () => {
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => 'codex'
+    })
+    const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
+    runtime.onPtyData(
+      'pty-bg',
+      [
+        'Would you like to grant these permissions?\n',
+        '1. Yes, grant these permissions for this turn\n',
+        '2. No, continue without permissions\n',
+        'Press enter to confirm or esc to cancel\n'
+      ].join(''),
+      Date.now()
+    )
+
+    await expect(
+      runtime.waitForTerminal(handle, { condition: 'tui-idle', timeoutMs: 1_000 })
+    ).resolves.toMatchObject({
+      handle,
+      condition: 'tui-idle',
+      satisfied: false,
+      status: 'running',
+      blockedReason: 'codex-interactive-prompt'
+    })
+  })
+
+  it('does not classify unrelated press-enter prompts as Codex blocked prompts', async () => {
+    vi.useFakeTimers()
+    try {
+      const runtime = new OrcaRuntimeService(store)
+      runtime.setPtyController({
+        spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+        write: () => true,
+        kill: () => true,
+        getForegroundProcess: async () => null
+      })
+      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
+      runtime.onPtyData('pty-bg', 'Press enter to continue\n', Date.now())
+
+      const waitPromise = runtime.waitForTerminal(handle, {
+        condition: 'tui-idle',
+        timeoutMs: 1_000
+      })
+      const timeoutAssertion = expect(waitPromise).rejects.toThrow('timeout')
+
+      await vi.advanceTimersByTimeAsync(2_000)
+
+      await timeoutAssertion
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('resolves tui-idle for quiet background PTY agents without OSC titles', async () => {
@@ -2544,9 +2760,7 @@ describe('OrcaRuntimeService', () => {
 
     runtime.onPtyData(
       'pty-bg',
-      ['OpenAI Codex', 'Model: gpt-5.4', 'Directory: /tmp/worktree-a', 'Permissions: full'].join(
-        '\n'
-      ),
+      ['OpenAI Codex', 'Model: gpt-5.4', 'Directory: /tmp/worktree-a'].join('\n'),
       100
     )
 

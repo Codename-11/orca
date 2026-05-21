@@ -930,6 +930,7 @@ export function registerFilesystemHandlers(
       args: {
         worktreePath: string
         publish?: boolean
+        forceWithLease?: boolean
         connectionId?: string
         pushTarget?: GitPushTarget
       }
@@ -946,13 +947,17 @@ export function registerFilesystemHandlers(
         if (!provider) {
           throw new Error(SSH_GIT_PROVIDER_UNAVAILABLE_MESSAGE)
         }
-        return provider.pushBranch(args.worktreePath, publish, args.pushTarget)
+        return provider.pushBranch(args.worktreePath, publish, args.pushTarget, {
+          forceWithLease: args.forceWithLease === true
+        })
       }
       const worktreePath = await resolveRegisteredWorktreePath(args.worktreePath, store)
       if (args.pushTarget) {
         await validateGitPushTarget(worktreePath, args.pushTarget)
       }
-      await gitPush(worktreePath, publish, args.pushTarget)
+      await gitPush(worktreePath, publish, args.pushTarget, {
+        forceWithLease: args.forceWithLease === true
+      })
     }
   )
 
@@ -1183,9 +1188,8 @@ export function registerFilesystemHandlers(
       _event,
       args: { worktreePath: string; relativePath: string; line: number; connectionId?: string }
     ): Promise<string | null> => {
-      // Why: remote repos can't use the local hosted-git-info approach because
-      // the .git/config lives on the remote. Route through the relay's git.exec
-      // to fetch the remote URL and build the file link server-side.
+      // Why: remote repos can't read relay-side .git/config locally. Delegate
+      // URL construction to the SSH provider, which can fetch remote metadata.
       if (args.connectionId) {
         const provider = getSshGitProvider(args.connectionId)
         if (!provider) {

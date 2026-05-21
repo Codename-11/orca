@@ -33,6 +33,7 @@ import type {
   NotificationSoundResult,
   OnboardingState,
   FloatingTerminalCwdRequest,
+  MarkdownDocument,
   SearchResult,
   WorktreeBaseStatusEvent,
   WorktreeRemoteBranchConflictEvent
@@ -55,6 +56,8 @@ import type {
 } from '../shared/mobile-markdown-document'
 import type { RateLimitState } from '../shared/rate-limit-types'
 import type {
+  WorkspacePackageManagerCacheCleanupRequest,
+  WorkspacePackageManagerCacheCleanupResult,
   WorkspaceSpaceAnalyzeResult,
   WorkspaceSpaceScanProgress
 } from '../shared/workspace-space-types'
@@ -364,7 +367,13 @@ const api = {
     setUnreadDockBadgeCount: (count: number): Promise<void> =>
       ipcRenderer.invoke('app:setUnreadDockBadgeCount', count),
     getFloatingTerminalCwd: (args?: FloatingTerminalCwdRequest): Promise<string> =>
-      ipcRenderer.invoke('app:getFloatingTerminalCwd', args)
+      ipcRenderer.invoke('app:getFloatingTerminalCwd', args),
+    getFloatingMarkdownDirectory: (): Promise<string> =>
+      ipcRenderer.invoke('app:getFloatingMarkdownDirectory'),
+    pickFloatingMarkdownDocument: (): Promise<MarkdownDocument | null> =>
+      ipcRenderer.invoke('app:pickFloatingMarkdownDocument'),
+    pickFloatingWorkspaceDirectory: (): Promise<string | null> =>
+      ipcRenderer.invoke('app:pickFloatingWorkspaceDirectory')
   },
 
   wsl: {
@@ -554,6 +563,10 @@ const api = {
     analyze: (): Promise<WorkspaceSpaceAnalyzeResult> =>
       ipcRenderer.invoke('workspaceSpace:analyze'),
     cancel: (): Promise<boolean> => ipcRenderer.invoke('workspaceSpace:cancel'),
+    cleanupPackageManagerCache: (
+      request: WorkspacePackageManagerCacheCleanupRequest
+    ): Promise<WorkspacePackageManagerCacheCleanupResult> =>
+      ipcRenderer.invoke('workspaceSpace:cleanupPackageManagerCache', request),
     onProgress: (callback: (progress: WorkspaceSpaceScanProgress) => void): (() => void) => {
       const listener = (
         _event: Electron.IpcRendererEvent,
@@ -1788,6 +1801,9 @@ const api = {
     }): Promise<{ hasHooks: boolean; hooks: unknown; mayNeedUpdate: boolean }> =>
       ipcRenderer.invoke('hooks:check', args),
 
+    inspectSetupScriptImports: (args: { repoId: string }): Promise<unknown[]> =>
+      ipcRenderer.invoke('hooks:inspectSetupScriptImports', args),
+
     createIssueCommandRunner: (args: {
       repoId: string
       worktreePath: string
@@ -2106,6 +2122,7 @@ const api = {
     push: (args: {
       worktreePath: string
       publish?: boolean
+      forceWithLease?: boolean
       connectionId?: string
       pushTarget?: unknown
     }): Promise<void> => ipcRenderer.invoke('git:push', args),

@@ -1,10 +1,11 @@
 /* oxlint-disable max-lines */
 import type { BrowserWindow } from 'electron'
 import { ipcMain } from 'electron'
-import { rm } from 'fs/promises'
+import { readFile, rm } from 'fs/promises'
 import { randomUUID } from 'crypto'
 import type { Store } from '../persistence'
 import { isFolderRepo } from '../../shared/repo-kind'
+import { inspectSetupScriptImportCandidates } from '../../shared/setup-script-imports'
 import { deleteWorktreeHistoryDir } from '../terminal-history'
 import type {
   CreateWorktreeArgs,
@@ -26,10 +27,12 @@ import { getProjectRef as getGlabProjectRef, getGlabKnownHosts } from '../gitlab
 import { getWorkItemByProjectRef as getGitLabWorkItemByProjectRef } from '../gitlab/client'
 import { listRepoWorktrees, createFolderWorktree } from '../repo-worktrees'
 import { getSshGitProvider, requireSshGitProvider } from '../providers/ssh-git-dispatch'
+import { getSshFilesystemProvider } from '../providers/ssh-filesystem-dispatch'
 import {
   createIssueCommandRunnerScript,
   getEffectiveHooks,
   loadHooks,
+  parseOrcaYaml,
   readIssueCommand,
   runHook,
   hasHooksFile,
@@ -44,12 +47,19 @@ import {
   isOrphanCompatiblePreflightError,
   isOrphanedWorktreeError
 } from './worktree-logic'
+import { joinWorktreeRelativePath } from '../runtime/runtime-relative-paths'
 import {
   createLocalWorktree,
   createRemoteWorktree,
+  cleanupUnusedWorktreePushTargetRemote,
+  cleanupUnusedWorktreePushTargetRemoteSsh,
   notifyWorktreesChanged
 } from './worktree-remote'
-import { invalidateAuthorizedRootsCache, registerWorktreeRootsForRepo } from './filesystem-auth'
+import {
+  invalidateAuthorizedRootsCache,
+  isENOENT,
+  registerWorktreeRootsForRepo
+} from './filesystem-auth'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
 import { killAllProcessesForWorktree } from '../runtime/worktree-teardown'
 import { getLocalPtyProvider } from './pty'
@@ -229,6 +239,7 @@ export function registerWorktreeHandlers(
   ipcMain.removeHandler('worktrees:updateLineage')
   ipcMain.removeHandler('worktrees:persistSortOrder')
   ipcMain.removeHandler('hooks:check')
+  ipcMain.removeHandler('hooks:inspectSetupScriptImports')
   ipcMain.removeHandler('hooks:createIssueCommandRunner')
   ipcMain.removeHandler('hooks:readIssueCommand')
   ipcMain.removeHandler('hooks:writeIssueCommand')
@@ -594,9 +605,17 @@ export function registerWorktreeHandlers(
         worktreePath,
         registeredWorktrees
       ).path
+      const removedPushTarget = store.getWorktreeMeta(args.worktreeId)?.pushTarget
 
       if (repo.connectionId) {
         await provider!.removeWorktree(canonicalWorktreePath, args.force)
+        await cleanupUnusedWorktreePushTargetRemoteSsh(
+          provider!,
+          repo.path,
+          args.worktreeId,
+          removedPushTarget,
+          store
+        )
         runtime.clearOptimisticReconcileToken(args.worktreeId)
         store.removeWorktreeMeta(args.worktreeId)
         deleteWorktreeHistoryDir(args.worktreeId)
@@ -676,6 +695,12 @@ export function registerWorktreeHandlers(
           // list` continues to show the stale entry and the branch it had checked out
           // remains locked — other worktrees cannot check it out.
           await gitExecFileAsync(['worktree', 'prune'], { cwd: repo.path }).catch(() => {})
+          await cleanupUnusedWorktreePushTargetRemote(
+            repo.path,
+            args.worktreeId,
+            removedPushTarget,
+            store
+          )
           runtime.clearOptimisticReconcileToken(args.worktreeId)
           store.removeWorktreeMeta(args.worktreeId)
           deleteWorktreeHistoryDir(args.worktreeId)
@@ -687,6 +712,12 @@ export function registerWorktreeHandlers(
           formatWorktreeRemovalError(error, canonicalWorktreePath, args.force ?? false)
         )
       }
+      await cleanupUnusedWorktreePushTargetRemote(
+        repo.path,
+        args.worktreeId,
+        removedPushTarget,
+        store
+      )
       runtime.clearOptimisticReconcileToken(args.worktreeId)
       store.removeWorktreeMeta(args.worktreeId)
       deleteWorktreeHistoryDir(args.worktreeId)
@@ -750,10 +781,27 @@ export function registerWorktreeHandlers(
     }
   })
 
-  ipcMain.handle('hooks:check', (_event, args: { repoId: string }) => {
+  ipcMain.handle('hooks:check', async (_event, args: { repoId: string }) => {
     const repo = store.getRepo(args.repoId)
     if (!repo || isFolderRepo(repo)) {
       return { hasHooks: false, hooks: null, mayNeedUpdate: false }
+    }
+
+    if (repo.connectionId) {
+      const fsProvider = getSshFilesystemProvider(repo.connectionId)
+      if (!fsProvider) {
+        return { hasHooks: false, hooks: null, mayNeedUpdate: false }
+      }
+      try {
+        const result = await fsProvider.readFile(joinWorktreeRelativePath(repo.path, 'orca.yaml'))
+        return {
+          hasHooks: !result.isBinary,
+          hooks: result.isBinary ? null : parseOrcaYaml(result.content),
+          mayNeedUpdate: false
+        }
+      } catch {
+        return { hasHooks: false, hooks: null, mayNeedUpdate: false }
+      }
     }
 
     const has = hasHooksFile(repo.path)
@@ -781,6 +829,38 @@ export function registerWorktreeHandlers(
       return createIssueCommandRunnerScript(repo, args.worktreePath, args.command)
     }
   )
+
+  ipcMain.handle('hooks:inspectSetupScriptImports', async (_event, args: { repoId: string }) => {
+    const repo = store.getRepo(args.repoId)
+    if (!repo || isFolderRepo(repo)) {
+      return []
+    }
+
+    return inspectSetupScriptImportCandidates(async (relativePath) => {
+      const filePath = joinWorktreeRelativePath(repo.path, relativePath)
+      if (repo.connectionId) {
+        const fsProvider = getSshFilesystemProvider(repo.connectionId)
+        if (!fsProvider) {
+          return null
+        }
+        try {
+          const result = await fsProvider.readFile(filePath)
+          return result.isBinary ? null : result.content
+        } catch {
+          return null
+        }
+      }
+
+      try {
+        return await readFile(filePath, 'utf-8')
+      } catch (error) {
+        if (!isENOENT(error)) {
+          console.warn('[hooks] Failed to inspect setup script import candidate:', error)
+        }
+        return null
+      }
+    })
+  })
 
   ipcMain.handle('hooks:readIssueCommand', (_event, args: { repoId: string }) => {
     const repo = store.getRepo(args.repoId)

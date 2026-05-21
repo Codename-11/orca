@@ -88,7 +88,7 @@ export function registerCoreHandlers(
   }
   registered = true
 
-  registerAppHandlers()
+  registerAppHandlers(store)
   registerCliHandlers()
   registerPreflightHandlers()
   registerClaudeUsageHandlers(claudeUsage)

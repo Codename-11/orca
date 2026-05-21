@@ -10,10 +10,11 @@ import {
   renameSync,
   unlinkSync,
   copyFileSync,
-  statSync
+  statSync,
+  realpathSync
 } from 'fs'
 import { writeFile, rename, mkdir, rm, copyFile } from 'fs/promises'
-import { join, dirname } from 'path'
+import { join, dirname, isAbsolute, resolve, sep } from 'path'
 import { homedir } from 'os'
 import { randomUUID } from 'node:crypto'
 import type {
@@ -77,7 +78,7 @@ import { pruneLocalTerminalScrollbackBuffers } from '../shared/workspace-session
 import { pruneWorkspaceSessionBrowserHistory } from '../shared/workspace-session-browser-history'
 import { getRepoIdFromWorktreeId, getWorktreePathBasenameFromId } from '../shared/worktree-id'
 import { normalizeTerminalQuickCommands } from '../shared/terminal-quick-commands'
-import { normalizeVisibleTaskProviders } from '../shared/task-providers'
+import { normalizeTaskProviderSettings } from '../shared/task-providers'
 import { normalizeOpenInApplications } from '../shared/open-in-applications'
 import {
   DEFAULT_WORKSPACE_STATUS_ID,
@@ -177,8 +178,14 @@ function normalizeGroupBy(groupBy: unknown): PersistedState['ui']['groupBy'] {
   return getDefaultUIState().groupBy
 }
 
-function normalizeSortBy(sortBy: unknown): 'name' | 'smart' | 'recent' | 'repo' {
-  if (sortBy === 'smart' || sortBy === 'recent' || sortBy === 'repo' || sortBy === 'name') {
+function normalizeSortBy(sortBy: unknown): PersistedState['ui']['sortBy'] {
+  if (
+    sortBy === 'smart' ||
+    sortBy === 'recent' ||
+    sortBy === 'repo' ||
+    sortBy === 'name' ||
+    sortBy === 'manual'
+  ) {
     return sortBy
   }
   return getDefaultUIState().sortBy
@@ -319,6 +326,76 @@ function readDeprecatedExperimentFlag(parsed: PersistedState | undefined): boole
 
 function readLegacySidekickFlag(parsed: PersistedState | undefined): boolean | undefined {
   return (parsed?.settings as { experimentalSidekick?: boolean } | undefined)?.experimentalSidekick
+}
+
+function expandFloatingWorkspaceHomePath(input: string, home: string): string {
+  if (input === '~') {
+    return home
+  }
+  if (input.startsWith(`~${sep}`) || (process.platform === 'win32' && input.startsWith('~/'))) {
+    return join(home, input.slice(2))
+  }
+  return input
+}
+
+function resolveFloatingWorkspacePath(input: string, home: string): string {
+  const expanded = expandFloatingWorkspaceHomePath(input, home)
+  return isAbsolute(expanded) ? resolve(expanded) : resolve(home, expanded)
+}
+
+function canonicalizePersistedFloatingWorkspaceDirectory(
+  input: string,
+  home: string
+): string | null {
+  const trimmed = input.trim()
+  if (!trimmed) {
+    return null
+  }
+  try {
+    const canonicalPath = resolve(realpathSync(resolveFloatingWorkspacePath(trimmed, home)))
+    return statSync(canonicalPath).isDirectory() ? canonicalPath : null
+  } catch {
+    return null
+  }
+}
+
+function normalizeFloatingWorkspaceTrustedCwds(
+  input: unknown,
+  home: string
+): { trustedCwds: string[]; changed: boolean } {
+  const rawTrustedCwds = Array.isArray(input) ? input : []
+  const trustedCwds: string[] = []
+  const seen = new Set<string>()
+  let changed = input !== undefined && !Array.isArray(input)
+
+  for (const rawTrustedCwd of rawTrustedCwds) {
+    if (typeof rawTrustedCwd !== 'string') {
+      changed = true
+      continue
+    }
+    const trimmedTrustedCwd = rawTrustedCwd.trim()
+    if (!trimmedTrustedCwd) {
+      changed = true
+      continue
+    }
+    const canonicalPath = canonicalizePersistedFloatingWorkspaceDirectory(trimmedTrustedCwd, home)
+    const normalizedPath = canonicalPath ?? resolveFloatingWorkspacePath(trimmedTrustedCwd, home)
+    if (!normalizedPath) {
+      changed = true
+      continue
+    }
+    if (seen.has(normalizedPath)) {
+      changed = true
+      continue
+    }
+    seen.add(normalizedPath)
+    trustedCwds.push(normalizedPath)
+    if (rawTrustedCwd !== normalizedPath) {
+      changed = true
+    }
+  }
+
+  return { trustedCwds, changed }
 }
 
 function normalizeSshRemotePtyLease(value: unknown): SshRemotePtyLease | null {
@@ -1206,7 +1283,8 @@ export class Store {
         }
 
         // Merge with defaults in case new fields were added
-        const defaults = getDefaultPersistedState(homedir())
+        const homeDir = homedir()
+        const defaults = getDefaultPersistedState(homeDir)
         // Why: before the layout-aware 'auto' mode shipped (issue #903),
         // terminalMacOptionAsAlt defaulted to 'true' globally. That silently
         // broke Option-layer characters (@ on Turkish via Option+Q, @ on
@@ -1235,6 +1313,52 @@ export class Store {
         const migratedFloatingTerminalEnabled = floatingTerminalDefaultedForAllUsers
           ? (parsed.settings?.floatingTerminalEnabled ?? true)
           : true
+        const floatingTerminalCwdMigrated =
+          parsed.settings?.floatingTerminalCwdMigratedToAppWorkspace === true
+        // Why: an earlier migration wrote '' for the default app-owned notes
+        // directory. Floating terminals should still open at home by default;
+        // markdown notes resolve their app-owned directory through a separate IPC.
+        const migratedFloatingTerminalCwd = floatingTerminalCwdMigrated
+          ? !parsed.settings?.floatingTerminalCwd
+            ? defaults.settings.floatingTerminalCwd
+            : parsed.settings.floatingTerminalCwd
+          : parsed.settings?.floatingTerminalCwd === undefined
+            ? defaults.settings.floatingTerminalCwd
+            : parsed.settings.floatingTerminalCwd
+        const normalizedFloatingTerminalTrustedCwds = normalizeFloatingWorkspaceTrustedCwds(
+          parsed.settings?.floatingTerminalTrustedCwds,
+          homeDir
+        )
+        const migratedFloatingTerminalTrustedCwds = [
+          ...normalizedFloatingTerminalTrustedCwds.trustedCwds
+        ]
+        const rawLegacyFloatingTerminalCwd = parsed.settings?.floatingTerminalCwd
+        const shouldTrustLegacyFloatingTerminalCwd =
+          !floatingTerminalCwdMigrated &&
+          typeof rawLegacyFloatingTerminalCwd === 'string' &&
+          rawLegacyFloatingTerminalCwd.trim().length > 0 &&
+          rawLegacyFloatingTerminalCwd.trim() !== '~'
+        if (!floatingTerminalCwdMigrated) {
+          this.loadNeedsSave = true
+        }
+        if (shouldTrustLegacyFloatingTerminalCwd && rawLegacyFloatingTerminalCwd) {
+          const canonicalLegacyCwd = canonicalizePersistedFloatingWorkspaceDirectory(
+            rawLegacyFloatingTerminalCwd,
+            homeDir
+          )
+          if (
+            canonicalLegacyCwd &&
+            !migratedFloatingTerminalTrustedCwds.includes(canonicalLegacyCwd)
+          ) {
+            // Why: pre-grant profiles with an explicit Floating Workspace cwd
+            // already represented user intent; migrate only that legacy value.
+            migratedFloatingTerminalTrustedCwds.push(canonicalLegacyCwd)
+            normalizedFloatingTerminalTrustedCwds.changed = true
+          }
+        }
+        if (normalizedFloatingTerminalTrustedCwds.changed) {
+          this.loadNeedsSave = true
+        }
         const experimentalActivityDefaultedOffForAllUsers =
           parsed.settings?.experimentalActivityDefaultedOffForAllUsers === true
         // Why: the Agents view moved back behind Experimental. Flip every
@@ -1242,6 +1366,10 @@ export class Store {
         const migratedExperimentalActivity = experimentalActivityDefaultedOffForAllUsers
           ? (parsed.settings?.experimentalActivity ?? false)
           : false
+        const taskProviderSettings = normalizeTaskProviderSettings({
+          visibleTaskProviders: parsed.settings?.visibleTaskProviders,
+          defaultTaskSource: parsed.settings?.defaultTaskSource
+        })
         result = {
           ...defaults,
           ...parsed,
@@ -1259,12 +1387,14 @@ export class Store {
             terminalMacOptionAsAltMigrated: true,
             floatingTerminalEnabled: migratedFloatingTerminalEnabled,
             floatingTerminalDefaultedForAllUsers: true,
+            floatingTerminalCwd: migratedFloatingTerminalCwd,
+            floatingTerminalTrustedCwds: migratedFloatingTerminalTrustedCwds,
+            floatingTerminalCwdMigratedToAppWorkspace: true,
             terminalQuickCommands: normalizeTerminalQuickCommands(
               parsed.settings?.terminalQuickCommands
             ),
-            visibleTaskProviders: normalizeVisibleTaskProviders(
-              parsed.settings?.visibleTaskProviders
-            ),
+            defaultTaskSource: taskProviderSettings.defaultTaskSource,
+            visibleTaskProviders: taskProviderSettings.visibleTaskProviders,
             openInApplications: normalizeOpenInApplications(parsed.settings?.openInApplications),
             notifications: normalizeNotificationSettings(parsed.settings?.notifications),
             voice: {
@@ -2142,10 +2272,19 @@ export class Store {
         updates.terminalQuickCommands
       )
     }
-    if ('visibleTaskProviders' in updates) {
-      sanitizedUpdates.visibleTaskProviders = normalizeVisibleTaskProviders(
-        updates.visibleTaskProviders
-      )
+    if ('visibleTaskProviders' in updates || 'defaultTaskSource' in updates) {
+      const taskProviderSettings = normalizeTaskProviderSettings({
+        visibleTaskProviders:
+          'visibleTaskProviders' in updates
+            ? updates.visibleTaskProviders
+            : this.state.settings.visibleTaskProviders,
+        defaultTaskSource:
+          'defaultTaskSource' in updates
+            ? updates.defaultTaskSource
+            : this.state.settings.defaultTaskSource
+      })
+      sanitizedUpdates.defaultTaskSource = taskProviderSettings.defaultTaskSource
+      sanitizedUpdates.visibleTaskProviders = taskProviderSettings.visibleTaskProviders
     }
     if ('openInApplications' in updates) {
       sanitizedUpdates.openInApplications = normalizeOpenInApplications(updates.openInApplications)

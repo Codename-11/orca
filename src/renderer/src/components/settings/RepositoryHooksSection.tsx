@@ -16,6 +16,7 @@ import { useAppStore } from '@/store'
 import { readRuntimeIssueCommand, writeRuntimeIssueCommand } from '@/runtime/runtime-hooks-client'
 import { DEFAULT_REPO_HOOK_SETTINGS } from './SettingsConstants'
 import { normalizeHookCommandSourcePolicy } from '../../../../shared/hook-command-source-policy'
+import { getRepositoryLocalCommandsSectionId } from './repository-settings-targets'
 
 type RepositoryHooksSectionProps = {
   repo: Repo
@@ -79,7 +80,7 @@ const LOCAL_HOOK_FIELDS: {
   {
     name: 'archive',
     label: 'Local archive command',
-    description: 'Runs before a local worktree is archived or removed.',
+    description: 'Runs before a local workspace is archived or removed.',
     placeholder: 'echo "Cleaning up $ORCA_WORKSPACE_NAME"'
   }
 ]
@@ -560,6 +561,7 @@ export function RepositoryHooksSection({
       </SearchableSetting>
 
       <SearchableSetting
+        id={getRepositoryLocalCommandsSectionId(repo.id)}
         title="Local Settings Commands"
         description="Personal setup and archive commands stored locally on this machine."
         keywords={['local', 'personal', 'setup', 'archive']}
