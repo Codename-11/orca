@@ -221,11 +221,16 @@ jobs:
         run: |
           tag="${{ steps.check.outputs.fork_tag }}"
           title="Axiom Orca ${{ steps.check.outputs.fork_version }} (upstream ${{ steps.check.outputs.upstream_tag }})"
+          release_flags=()
+          if [[ "${{ steps.check.outputs.fork_version }}" == *-* ]]; then
+            release_flags+=(--prerelease)
+          fi
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release edit "$tag" \
               --repo "$GITHUB_REPOSITORY" \
               --title "$title" \
-              --notes-file axiom-release-notes.md
+              --notes-file axiom-release-notes.md \
+              "${release_flags[@]}"
           else
             # The previous step has already pushed the release tag. Let GitHub
             # attach the draft to that tag; passing the tag itself as
@@ -234,7 +239,8 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --title "$title" \
               --notes-file axiom-release-notes.md \
-              --draft
+              --draft \
+              "${release_flags[@]}"
           fi
 
       - name: Upload release notes artifact
@@ -395,7 +401,12 @@ jobs:
       - name: Publish draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release edit "${{ needs.sync.outputs.tag }}" --repo "$GITHUB_REPOSITORY" --draft=false
+        run: |
+          publish_flags=(--draft=false)
+          if [[ "${{ needs.sync.outputs.fork_version }}" == *-* ]]; then
+            publish_flags+=(--prerelease)
+          fi
+          gh release edit "${{ needs.sync.outputs.tag }}" --repo "$GITHUB_REPOSITORY" "${publish_flags[@]}"
 
   notify-failure:
     name: Notify failed Axiom release
