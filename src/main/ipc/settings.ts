@@ -1,4 +1,4 @@
-import { ipcMain, nativeTheme } from 'electron'
+import { app, dialog, ipcMain, nativeTheme } from 'electron'
 import type { Store } from '../persistence'
 import type { GlobalSettings, PersistedState } from '../../shared/types'
 import { listSystemFontFamilies } from '../system-fonts'
@@ -7,6 +7,7 @@ import { rebuildAppMenu } from '../menu/register-app-menu'
 import { track } from '../telemetry/client'
 import { SETTINGS_CHANGED_WHITELIST, type SettingsChangedKey } from '../../shared/telemetry-events'
 import type { AgentAwakeService } from '../agent-awake-service'
+import type { ProfileExportSection } from '../../shared/profile-portability'
 import { sanitizeFloatingWorkspaceDirectorySetting } from './floating-workspace-directory'
 
 // Why: the whitelist is the source-of-truth for which keys we emit on. Casting
@@ -95,6 +96,57 @@ export function registerSettingsHandlers(
   ipcMain.handle('settings:previewGhosttyImport', () => {
     return previewGhosttyImport(store)
   })
+
+  ipcMain.handle('settings:exportProfile', async () => {
+    const defaultPath = `orca-profile-export-${new Date().toISOString().slice(0, 10)}.json`
+    const result = await dialog.showSaveDialog({
+      title: 'Export Orca profile',
+      defaultPath,
+      filters: [{ name: 'Orca profile export', extensions: ['json'] }]
+    })
+    if (result.canceled || !result.filePath) {
+      return { canceled: true }
+    }
+    const source = {
+      appName: app.name,
+      appVersion: app.getVersion(),
+      appId: process.env.ORCA_APP_ID
+    }
+    store.exportProfileToFile(result.filePath, source)
+    return {
+      canceled: false,
+      filePath: result.filePath,
+      excludedSecrets: store.createProfileExportEnvelope(source).excludedSecrets
+    }
+  })
+
+  ipcMain.handle('settings:previewProfileImport', async () => {
+    const result = await dialog.showOpenDialog({
+      title: 'Import Orca profile',
+      properties: ['openFile'],
+      filters: [{ name: 'Orca profile export or orca-data.json', extensions: ['json'] }]
+    })
+    if (result.canceled || result.filePaths.length === 0) {
+      return { canceled: true }
+    }
+    const filePath = result.filePaths[0]
+    return {
+      canceled: false,
+      filePath,
+      preview: store.previewProfileImportFile(filePath)
+    }
+  })
+
+  ipcMain.handle(
+    'settings:importProfile',
+    (_event, args: { filePath: string; sections?: ProfileExportSection[] }) => {
+      const result = store.importProfileFromFile(args.filePath, args.sections)
+      return {
+        backupPath: result.backupPath,
+        importedSections: result.importedSections
+      }
+    }
+  )
 
   ipcMain.handle('cache:getGitHub', () => {
     return store.getGitHubCache()

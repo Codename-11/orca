@@ -6,6 +6,22 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-21 — Profile import/export portability
+
+Added a first pass at global Orca/Axiom profile portability from Settings → General → Data Portability. Users can export a versioned JSON profile and import either that export envelope or a raw upstream `orca-data.json`; imports preview discovered sections and create a `profile-import-backups/` snapshot before replacing selected sections.
+
+The export path intentionally omits local auth material: OpenCode session cookies, managed Codex/Claude account auth records, active managed-account selections, and private Kagi browser session links are stripped while preserving repositories, workspace metadata/session state, sparse presets, SSH host definitions, automations, automation run history, onboarding, settings, and UI preferences.
+
+Verification:
+
+- `pnpm exec vitest run --config config/vitest.config.ts src/shared/profile-portability.test.ts src/main/ipc/settings.test.ts` → 11 tests passed.
+- `pnpm run typecheck` → passed. Node engine warning only: project wants Node 24; local runtime is Node v25.6.0.
+- `pnpm exec oxlint ...` on touched profile portability/settings files → 0 warnings / 0 errors.
+- `pnpm exec oxfmt --check ...` on touched profile portability/settings files → passed after formatting.
+- `git diff --check` → passed.
+
+---
+
 ## 2026-05-21 — Agent-assisted upstream remediation and WSL status hardening
 
 Added the next layer of Axiom upstream-sync automation: when the release sync workflow fails after `should_release`, it now runs `config/scripts/axiom-request-merge-remediation.mjs`. The script classifies merge failures against `config/axiom-merge-remediation-policy.json`, requests Hermes/agent PR remediation via `AXIOM_SYNC_REMEDIATION_WEBHOOK` for eligible conflicts, and treats protected Axiom deletions or fork identity/update-feed conflicts as review-required true blocks. The generated remediation prompt explicitly requires a bot branch/PR into `axiom/deploy` and forbids direct deploy-branch pushes.

@@ -17,6 +17,15 @@ import { writeFile, rename, mkdir, rm, copyFile } from 'fs/promises'
 import { join, dirname, isAbsolute, resolve, sep } from 'path'
 import { homedir } from 'os'
 import { randomUUID } from 'node:crypto'
+import {
+  applyProfileImport,
+  createProfileExportEnvelope,
+  parseProfileImportPayload,
+  previewProfileImportPayload,
+  type ProfileExportEnvelope,
+  type ProfileExportSection,
+  type ProfileImportPreview
+} from '../shared/profile-portability'
 import type {
   Automation,
   AutomationCreateInput,
@@ -143,6 +152,10 @@ let _dataFile: string | null = null
 
 export function initDataPath(): void {
   _dataFile = join(app.getPath('userData'), 'orca-data.json')
+}
+
+export function getDataFilePath(): string {
+  return getDataFile()
 }
 
 function getDataFile(): string {
@@ -2257,6 +2270,65 @@ export class Store {
   removeWorktreeLineage(worktreeId: string): void {
     delete this.state.worktreeLineageById[worktreeId]
     this.scheduleSave()
+  }
+
+  // ── Profile import/export ──────────────────────────────────────────
+
+  createProfileExportEnvelope(source: ProfileExportEnvelope['source'] = {}): ProfileExportEnvelope {
+    return createProfileExportEnvelope(this.state, source)
+  }
+
+  exportProfileToFile(filePath: string, source: ProfileExportEnvelope['source'] = {}): void {
+    const envelope = this.createProfileExportEnvelope(source)
+    mkdirSync(dirname(filePath), { recursive: true })
+    writeFileSync(filePath, `${JSON.stringify(envelope, null, 2)}\n`, 'utf-8')
+  }
+
+  previewProfileImportFile(filePath: string): ProfileImportPreview {
+    try {
+      const raw = JSON.parse(readFileSync(filePath, 'utf-8')) as unknown
+      return previewProfileImportPayload(raw)
+    } catch (err) {
+      return {
+        valid: false,
+        format: 'unknown',
+        sections: [],
+        counts: {},
+        excludedSecrets: [],
+        error: err instanceof Error ? err.message : 'Failed to read profile import file.'
+      }
+    }
+  }
+
+  importProfileFromFile(
+    filePath: string,
+    selectedSections?: readonly ProfileExportSection[]
+  ): { backupPath: string; importedSections: ProfileExportSection[]; settings: GlobalSettings } {
+    const raw = JSON.parse(readFileSync(filePath, 'utf-8')) as unknown
+    const envelope = parseProfileImportPayload(raw)
+    if (!envelope) {
+      throw new Error('File is not an Orca profile export or orca-data.json file.')
+    }
+    const importedSections = selectedSections?.length
+      ? selectedSections.filter((section) =>
+          Object.prototype.hasOwnProperty.call(envelope.data, section)
+        )
+      : (Object.keys(envelope.data) as ProfileExportSection[])
+    const dataFile = getDataFile()
+    const backupPath = join(
+      dirname(dataFile),
+      'profile-import-backups',
+      `orca-data.${new Date().toISOString().replace(/[:.]/g, '-')}.json`
+    )
+    mkdirSync(dirname(backupPath), { recursive: true })
+    if (existsSync(dataFile)) {
+      copyFileSync(dataFile, backupPath)
+    } else {
+      writeFileSync(backupPath, `${JSON.stringify(this.state, null, 2)}\n`, 'utf-8')
+    }
+    this.state = applyProfileImport(this.state, envelope, importedSections)
+    this.flush()
+    return { backupPath, importedSections, settings: this.state.settings }
   }
 
   // ── Settings ───────────────────────────────────────────────────────

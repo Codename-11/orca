@@ -177,6 +177,12 @@ import type { ElectronAPI } from '@electron-toolkit/preload'
 import type { BrowserSetAnnotationViewportBridgeArgs } from '../shared/browser-annotation-viewport-bridge'
 import type { CliInstallStatus } from '../shared/cli-install-types'
 import type { E2EConfig } from '../shared/e2e-config'
+import type {
+  ProfileExportDialogResult,
+  ProfileExportSection,
+  ProfileImportDialogResult,
+  ProfileImportPreviewDialogResult
+} from '../shared/profile-portability'
 import type { AgentHookInstallStatus } from '../shared/agent-hook-types'
 import type {
   AgentStatusIpcPayload,
@@ -1292,6 +1298,12 @@ export type PreloadApi = {
     set: (args: Partial<GlobalSettings>) => Promise<GlobalSettings>
     listFonts: () => Promise<string[]>
     previewGhosttyImport: () => Promise<GhosttyImportPreview>
+    exportProfile: () => Promise<ProfileExportDialogResult>
+    previewProfileImport: () => Promise<ProfileImportPreviewDialogResult>
+    importProfile: (args: {
+      filePath: string
+      sections?: ProfileExportSection[]
+    }) => Promise<ProfileImportDialogResult>
     /** Subscribe to out-of-band settings updates (e.g. the View > Appearance
      *  menu toggles) so the renderer can stay in sync with main's persisted
      *  state without round-tripping through settings:get. */

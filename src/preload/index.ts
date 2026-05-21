@@ -42,6 +42,12 @@ import type { GitHistoryOptions, GitHistoryResult } from '../shared/git-history'
 import type { ShellOpenLocalPathResult } from '../shared/shell-open-types'
 import type { SkillDiscoveryResult } from '../shared/skills'
 import type {
+  ProfileExportDialogResult,
+  ProfileExportSection,
+  ProfileImportDialogResult,
+  ProfileImportPreviewDialogResult
+} from '../shared/profile-portability'
+import type {
   RuntimeBrowserDriverState,
   RuntimeMobileSessionTabMove,
   RuntimeStatus,
@@ -1274,6 +1280,17 @@ const api = {
 
     previewGhosttyImport: (): Promise<GhosttyImportPreview> =>
       ipcRenderer.invoke('settings:previewGhosttyImport'),
+
+    exportProfile: (): Promise<ProfileExportDialogResult> =>
+      ipcRenderer.invoke('settings:exportProfile'),
+
+    previewProfileImport: (): Promise<ProfileImportPreviewDialogResult> =>
+      ipcRenderer.invoke('settings:previewProfileImport'),
+
+    importProfile: (args: {
+      filePath: string
+      sections?: ProfileExportSection[]
+    }): Promise<ProfileImportDialogResult> => ipcRenderer.invoke('settings:importProfile', args),
 
     onChanged: (callback: (updates: Record<string, unknown>) => void): (() => void) => {
       const listener = (

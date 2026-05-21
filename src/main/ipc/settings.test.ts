@@ -1,11 +1,17 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
-const { handleMock, previewGhosttyImportMock } = vi.hoisted(() => ({
-  handleMock: vi.fn(),
-  previewGhosttyImportMock: vi.fn()
-}))
+const { handleMock, previewGhosttyImportMock, showSaveDialogMock, showOpenDialogMock } = vi.hoisted(
+  () => ({
+    handleMock: vi.fn(),
+    previewGhosttyImportMock: vi.fn(),
+    showSaveDialogMock: vi.fn(),
+    showOpenDialogMock: vi.fn()
+  })
+)
 
 vi.mock('electron', () => ({
+  app: { name: 'Axiom Orca', getVersion: () => '1.4.18-rc.0.axiom.1' },
+  dialog: { showSaveDialog: showSaveDialogMock, showOpenDialog: showOpenDialogMock },
   ipcMain: { handle: handleMock },
   nativeTheme: { themeSource: 'system' }
 }))
@@ -20,13 +26,19 @@ const store = {
   getSettings: vi.fn(),
   updateSettings: vi.fn(),
   getGitHubCache: vi.fn(),
-  setGitHubCache: vi.fn()
+  setGitHubCache: vi.fn(),
+  exportProfileToFile: vi.fn(),
+  createProfileExportEnvelope: vi.fn(),
+  previewProfileImportFile: vi.fn(),
+  importProfileFromFile: vi.fn()
 }
 
 describe('registerSettingsHandlers', () => {
   beforeEach(() => {
     handleMock.mockClear()
     previewGhosttyImportMock.mockClear()
+    showSaveDialogMock.mockReset()
+    showOpenDialogMock.mockReset()
     store.getSettings.mockReset()
     store.updateSettings.mockReset()
   })
@@ -35,6 +47,9 @@ describe('registerSettingsHandlers', () => {
     registerSettingsHandlers(store as never)
     const channels = handleMock.mock.calls.map((call) => call[0])
     expect(channels).toContain('settings:previewGhosttyImport')
+    expect(channels).toContain('settings:exportProfile')
+    expect(channels).toContain('settings:previewProfileImport')
+    expect(channels).toContain('settings:importProfile')
   })
 
   it('settings:previewGhosttyImport returns preview result', async () => {

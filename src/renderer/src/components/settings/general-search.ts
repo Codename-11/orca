@@ -74,6 +74,14 @@ export const GENERAL_CLI_SEARCH_ENTRIES: SettingsSearchEntry[] = [
   }
 ]
 
+export const GENERAL_DATA_SEARCH_ENTRIES: SettingsSearchEntry[] = [
+  {
+    title: 'Profile Import / Export',
+    description: 'Move Orca settings, repositories, workspaces, automations, and UI preferences.',
+    keywords: ['profile', 'import', 'export', 'backup', 'restore', 'migration', 'axiom']
+  }
+]
+
 export const GENERAL_UPDATE_SEARCH_ENTRIES: SettingsSearchEntry[] = [
   {
     title: 'Check for Updates',
@@ -121,6 +129,7 @@ export const GENERAL_PANE_SEARCH_ENTRIES: SettingsSearchEntry[] = [
   ...GENERAL_WORKSPACE_SEARCH_ENTRIES,
   ...GENERAL_EDITOR_SEARCH_ENTRIES,
   ...GENERAL_CLI_SEARCH_ENTRIES,
+  ...GENERAL_DATA_SEARCH_ENTRIES,
   ...GENERAL_CACHE_TIMER_SEARCH_ENTRIES,
   ...GENERAL_UPDATE_SEARCH_ENTRIES,
   ...GENERAL_SUPPORT_SEARCH_ENTRIES
