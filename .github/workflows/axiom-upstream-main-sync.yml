@@ -31,6 +31,7 @@ env:
 jobs:
   mirror:
     name: Fast-forward clean upstream mirror
+    if: github.event_name == 'workflow_dispatch' || vars.AXIOM_AUTO_MAIN_MIRROR == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:

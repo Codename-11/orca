@@ -6,6 +6,18 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-21 — Gated upstream dispatch automation after noisy failures
+
+Disabled unattended upstream repository-dispatch automation by default while preserving manual workflow dispatches and Axiom tag-triggered releases. `Axiom Upstream Sync Release` now only responds to upstream dispatch events when `AXIOM_AUTO_RELEASES=true`; `Axiom Upstream Main Mirror` now only responds to upstream dispatch events when `AXIOM_AUTO_MAIN_MIRROR=true`. Both repository variables were set to `false` to stop duplicate failure emails while upstream `v1.4.18-rc.2` conflicts await intentional remediation.
+
+Verification:
+
+- `pnpm exec vitest run --config config/vitest.config.ts config/scripts/axiom-upstream-sync-release.test.mjs` → 19 tests passed.
+- `git diff --check` → passed.
+- `pnpm exec oxfmt --check .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml config/scripts/axiom-upstream-sync-release.test.mjs` → passed.
+
+---
+
 ## 2026-05-21 — Profile import/export portability
 
 Added a first pass at global Orca/Axiom profile portability from Settings → General → Data Portability. Users can export a versioned JSON profile and import either that export envelope or a raw upstream `orca-data.json`; imports preview discovered sections and create a `profile-import-backups/` snapshot before replacing selected sections.

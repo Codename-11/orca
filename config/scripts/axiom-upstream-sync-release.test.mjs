@@ -99,12 +99,11 @@ describe('Axiom upstream sync release workflow', () => {
     expect(workflow).toContain('repository_dispatch:')
     expect(workflow).toContain('- upstream_release')
     expect(workflow).toContain('- upstream_tag')
-    expect(workflow).toContain("github.event_name == 'repository_dispatch'")
+    expect(workflow).toContain("vars.AXIOM_AUTO_RELEASES == 'true'")
     expect(workflow).toContain('github.event.client_payload.upstream_tag')
     expect(workflow).toContain('github.event.client_payload.tag')
     expect(workflow).toContain('github.event.client_payload.ref')
     expect(workflow).not.toContain('cron:')
-    expect(workflow).not.toContain('AXIOM_AUTO_RELEASES')
   })
 
   it('supports manually-created Axiom tags without reacting to arbitrary branch pushes', () => {
@@ -142,6 +141,7 @@ describe('Axiom upstream sync release workflow', () => {
     expect(mirrorWorkflow).toContain('- upstream_main')
     expect(mirrorWorkflow).toContain('- upstream_push')
     expect(mirrorWorkflow).toContain('workflow_dispatch:')
+    expect(mirrorWorkflow).toContain("vars.AXIOM_AUTO_MAIN_MIRROR == 'true'")
     expect(mirrorWorkflow).toContain('ref: ${{ env.AXIOM_UPSTREAM_BRANCH }}')
     expect(mirrorWorkflow).toContain('github.event.client_payload.ref')
     expect(mirrorWorkflow).toContain(
