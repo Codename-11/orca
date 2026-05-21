@@ -27,6 +27,11 @@ const ORCA_POSTHOG_WRITE_KEY_LITERAL =
   typeof orcaPostHogWriteKey === 'string' && orcaPostHogWriteKey.length > 0
     ? JSON.stringify(orcaPostHogWriteKey)
     : 'null'
+const orcaDiagnosticsTokenUrl = process.env.ORCA_DIAGNOSTICS_TOKEN_URL
+const ORCA_DIAGNOSTICS_TOKEN_URL_LITERAL =
+  typeof orcaDiagnosticsTokenUrl === 'string' && orcaDiagnosticsTokenUrl.length > 0
+    ? JSON.stringify(orcaDiagnosticsTokenUrl)
+    : 'null'
 
 function optionalBuildString(value: string | undefined): string {
   return typeof value === 'string' && value.trim().length > 0
@@ -72,6 +77,7 @@ export default defineConfig({
     define: {
       ORCA_BUILD_IDENTITY: ORCA_BUILD_IDENTITY_LITERAL,
       ORCA_POSTHOG_WRITE_KEY: ORCA_POSTHOG_WRITE_KEY_LITERAL,
+      ORCA_DIAGNOSTICS_TOKEN_URL: ORCA_DIAGNOSTICS_TOKEN_URL_LITERAL,
       ORCA_UPDATE_OWNER: ORCA_UPDATE_OWNER_LITERAL,
       ORCA_UPDATE_REPO: ORCA_UPDATE_REPO_LITERAL,
       ORCA_UPDATE_NUDGE_URL: ORCA_UPDATE_NUDGE_URL_LITERAL,
