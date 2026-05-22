@@ -6,6 +6,21 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-22 — Remediated upstream v1.4.21-rc.2 bot PR
+
+Resolved the agent-remediation merge for upstream `v1.4.21-rc.2` on `bot/upstream-sync-axiom-v1.4.21-rc.2.axiom.1` targeting `axiom/deploy`; no direct deploy-branch push was made. The conflict resolution keeps the fork semver at `1.4.21-rc.2.axiom.1`, preserves Axiom's task-provider shortcut registry including Forge, and accepts upstream's mobile sidebar entry/onboarding badge. Protected deletion review found no protected Axiom files removed by the merge.
+
+Verification:
+
+- `pnpm install --frozen-lockfile` → passed. Node engine warning only: project wants Node 24; local runtime is Node v25.6.0.
+- `pnpm run typecheck` → passed.
+- `pnpm exec vitest run --config config/vitest.config.ts src/shared/task-providers.test.ts src/main/axiom-release-hardening.test.ts src/main/updater-endpoints.test.ts src/main/app-build-identity.test.ts config/scripts/axiom-upstream-sync-release.test.mjs` → 46 tests passed.
+- `pnpm exec oxlint config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml` → 0 warnings / 0 errors.
+- `pnpm exec oxfmt --check config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml config/axiom-merge-remediation-policy.json` → passed.
+- `git diff --check` → passed.
+
+---
+
 ## 2026-05-21 — Verified automation setup and tightened release notes delta
 
 Verified the upstream sync automation is enabled end-to-end: repository dispatch variables for releases and main mirror are `true`, the remediation webhook/token secrets are present, Victor's webhook route is live on `/webhooks/orca-merge-remediation`, recent upstream release and main dispatch runs completed successfully, and bot remediation PRs #4/#5 were created with green checks and merged into `axiom/deploy`.
