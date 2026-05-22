@@ -675,7 +675,8 @@ function resolveRemoteActionError(kind: RemoteOpKind, error: unknown): string {
     publish: kind === 'publish',
     isPush: kind === 'push',
     isSync: kind === 'sync',
-    isFetch: kind === 'fetch'
+    isFetch: kind === 'fetch',
+    isRebase: kind === 'rebase'
   })
 }
 
@@ -812,6 +813,7 @@ function SourceControlInner(): React.JSX.Element {
   const pushBranch = useAppStore((s) => s.pushBranch)
   const pullBranch = useAppStore((s) => s.pullBranch)
   const syncBranch = useAppStore((s) => s.syncBranch)
+  const rebaseFromBase = useAppStore((s) => s.rebaseFromBase)
   const fetchBranch = useAppStore((s) => s.fetchBranch)
   const revealInExplorer = useAppStore((s) => s.revealInExplorer)
   const trackConflictPath = useAppStore((s) => s.trackConflictPath)
@@ -1034,6 +1036,7 @@ function SourceControlInner(): React.JSX.Element {
   const gitHistoryState = activeWorktreeId
     ? (gitHistoryByWorktree[activeWorktreeId] ?? EMPTY_GIT_HISTORY_STATE)
     : EMPTY_GIT_HISTORY_STATE
+  const isGitHistoryExpanded = !collapsedSections.has('history')
 
   const isFolder = activeRepo ? isFolderRepo(activeRepo) : false
   const worktreePath = activeWorktree?.path ?? null
@@ -1071,6 +1074,7 @@ function SourceControlInner(): React.JSX.Element {
       worktreeId: activeWorktreeId,
       worktreePath,
       connectionId,
+      pushTarget: activeWorktree?.pushTarget,
       deps: {
         setGitStatus,
         updateWorktreeGitIdentity,
@@ -1080,6 +1084,7 @@ function SourceControlInner(): React.JSX.Element {
     })
   }, [
     activeWorktreeId,
+    activeWorktree?.pushTarget,
     fetchUpstreamStatus,
     isFolder,
     setGitStatus,
@@ -1107,6 +1112,7 @@ function SourceControlInner(): React.JSX.Element {
           worktreeId: context.worktreeId,
           worktreePath: context.worktreePath,
           connectionId: context.connectionId,
+          pushTarget: worktreeMap[context.worktreeId]?.pushTarget,
           deps: {
             setGitStatus,
             updateWorktreeGitIdentity,
@@ -1118,7 +1124,14 @@ function SourceControlInner(): React.JSX.Element {
         console.warn('[SourceControl] post-generation git status refresh failed', error)
       }
     },
-    [fetchUpstreamStatus, isFolder, setGitStatus, setUpstreamStatus, updateWorktreeGitIdentity]
+    [
+      fetchUpstreamStatus,
+      isFolder,
+      setGitStatus,
+      setUpstreamStatus,
+      updateWorktreeGitIdentity,
+      worktreeMap
+    ]
   )
 
   useEffect(() => {
@@ -1705,7 +1718,7 @@ function SourceControlInner(): React.JSX.Element {
   // place — store slices already surface actionable toasts, so additional
   // try/catch here would duplicate the notification.
   const runRemoteAction = useCallback(
-    async (kind: 'push' | 'pull' | 'sync' | 'fetch' | 'publish'): Promise<void> => {
+    async (kind: 'push' | 'pull' | 'sync' | 'fetch' | 'publish' | 'rebase'): Promise<void> => {
       if (!activeWorktreeId || !worktreePath) {
         return
       }
@@ -1735,11 +1748,29 @@ function SourceControlInner(): React.JSX.Element {
           return
         }
         if (kind === 'pull') {
-          await pullBranch(activeWorktreeId, worktreePath, connectionId)
+          await pullBranch(activeWorktreeId, worktreePath, connectionId, activeWorktree?.pushTarget)
           return
         }
         if (kind === 'fetch') {
-          await fetchBranch(activeWorktreeId, worktreePath, connectionId)
+          await fetchBranch(
+            activeWorktreeId,
+            worktreePath,
+            connectionId,
+            activeWorktree?.pushTarget
+          )
+          return
+        }
+        if (kind === 'rebase') {
+          if (!effectiveBaseRef) {
+            return
+          }
+          await rebaseFromBase(
+            activeWorktreeId,
+            worktreePath,
+            effectiveBaseRef,
+            connectionId,
+            activeWorktree?.pushTarget
+          )
           return
         }
         await syncBranch(activeWorktreeId, worktreePath, connectionId, activeWorktree?.pushTarget)
@@ -1768,8 +1799,10 @@ function SourceControlInner(): React.JSX.Element {
       activeWorktree?.pushTarget,
       activeWorktreeId,
       fetchBranch,
+      effectiveBaseRef,
       pullBranch,
       pushBranch,
+      rebaseFromBase,
       refreshActiveGitStatusAfterMutation,
       remoteStatus,
       syncBranch,
@@ -2374,7 +2407,8 @@ function SourceControlInner(): React.JSX.Element {
         hostedReviewCreation,
         isPullRequestOperationActive: prGenerating || isCreatingPr,
         branchCommitsAhead:
-          branchSummary?.status === 'ready' ? (branchSummary.commitsAhead ?? 0) : undefined
+          branchSummary?.status === 'ready' ? (branchSummary.commitsAhead ?? 0) : undefined,
+        rebaseBaseRef: effectiveBaseRef
       }),
     [
       commitMessage,
@@ -2391,6 +2425,7 @@ function SourceControlInner(): React.JSX.Element {
       prGenerating,
       branchSummary?.commitsAhead,
       branchSummary?.status,
+      effectiveBaseRef,
       remoteStatus,
       unresolvedConflicts.length
     ]
@@ -2426,7 +2461,8 @@ function SourceControlInner(): React.JSX.Element {
         case 'sync':
         case 'fetch':
         case 'publish':
-          void runRemoteAction(kind)
+        case 'rebase_base':
+          void runRemoteAction(kind === 'rebase_base' ? 'rebase' : kind)
           return
         default: {
           // Why: exhaustiveness check — if a new DropdownActionKind is added
@@ -2914,7 +2950,13 @@ function SourceControlInner(): React.JSX.Element {
   refreshBranchCompareRef.current = refreshBranchCompare
 
   const refreshGitHistory = useCallback(async (): Promise<void> => {
-    if (!activeWorktreeId || !worktreePath || isFolder || !isBranchVisible) {
+    if (
+      !activeWorktreeId ||
+      !worktreePath ||
+      isFolder ||
+      !isBranchVisible ||
+      !isGitHistoryExpanded
+    ) {
       return
     }
 
@@ -2962,7 +3004,14 @@ function SourceControlInner(): React.JSX.Element {
         }
       })
     }
-  }, [activeWorktreeId, effectiveBaseRef, isBranchVisible, isFolder, worktreePath])
+  }, [
+    activeWorktreeId,
+    effectiveBaseRef,
+    isBranchVisible,
+    isFolder,
+    isGitHistoryExpanded,
+    worktreePath
+  ])
 
   const refreshGitHistoryRef = useRef(refreshGitHistory)
   refreshGitHistoryRef.current = refreshGitHistory
@@ -2982,14 +3031,20 @@ function SourceControlInner(): React.JSX.Element {
   }, [activeWorktreeId, effectiveBaseRef, isBranchVisible, isFolder, worktreePath])
 
   useEffect(() => {
-    // Why: history shells out to git, but unlike branch compare it only needs
-    // visible-load and mutation refreshes. Avoid polling so long sessions don't
-    // spawn git processes for a decorative graph.
-    if (!isBranchVisible) {
+    // Why: history shells out to git. Defer the first load until the user
+    // expands Graph so source control stays cheap for large/remote repos.
+    if (!isBranchVisible || !isGitHistoryExpanded) {
       return
     }
     void refreshGitHistoryRef.current()
-  }, [activeWorktreeId, effectiveBaseRef, isBranchVisible, isFolder, worktreePath])
+  }, [
+    activeWorktreeId,
+    effectiveBaseRef,
+    isBranchVisible,
+    isFolder,
+    isGitHistoryExpanded,
+    worktreePath
+  ])
 
   useEffect(() => {
     // Why: gate on isBranchVisible so we don't spawn git processes while the
@@ -3000,8 +3055,20 @@ function SourceControlInner(): React.JSX.Element {
       return
     }
     const connectionId = getConnectionId(activeWorktreeId) ?? undefined
-    void fetchUpstreamStatus(activeWorktreeId, worktreePath, connectionId)
-  }, [activeWorktreeId, fetchUpstreamStatus, isBranchVisible, isFolder, worktreePath])
+    void fetchUpstreamStatus(
+      activeWorktreeId,
+      worktreePath,
+      connectionId,
+      activeWorktree?.pushTarget
+    )
+  }, [
+    activeWorktree?.pushTarget,
+    activeWorktreeId,
+    fetchUpstreamStatus,
+    isBranchVisible,
+    isFolder,
+    worktreePath
+  ])
 
   const toggleSection = useCallback((section: string) => {
     setCollapsedSections((prev) => {
@@ -3650,7 +3717,7 @@ function SourceControlInner(): React.JSX.Element {
         </div>
 
         <div
-          className="relative flex flex-1 flex-col overflow-auto scrollbar-sleek py-1"
+          className="relative flex flex-1 flex-col overflow-auto scrollbar-sleek pt-1"
           style={{ paddingBottom: selectedKeys.size > 0 ? 50 : undefined }}
         >
           {unresolvedConflictReviewEntries.length > 0 && (
@@ -4069,20 +4136,24 @@ function SourceControlInner(): React.JSX.Element {
             </div>
           )}
 
-          {scope === 'all' && !normalizedFilter && (
-            // Why: the graph is reference context for the whole panel, so when
-            // file sections are short it should occupy the bottom instead of
-            // crowding the commit controls.
-            <div className="mt-auto">
-              <GitHistoryPanel
-                state={gitHistoryState}
-                collapsed={collapsedSections.has('history')}
-                onToggle={() => toggleSection('history')}
-                onRefresh={() => void refreshGitHistory()}
-                onOpenCommit={(item) => void openHistoryCommitDiff(item)}
-              />
-            </div>
-          )}
+          {scope === 'all' &&
+            !normalizedFilter &&
+            activeWorktreeId &&
+            worktreePath &&
+            !isFolder && (
+              // Why: the graph is reference context for the whole panel, so when
+              // file sections are short it should occupy the bottom, and when the
+              // pane scrolls it should remain docked as branch context.
+              <div className="sticky bottom-0 z-10 mt-auto shrink-0 border-t border-border bg-sidebar/95 backdrop-blur-sm">
+                <GitHistoryPanel
+                  state={gitHistoryState}
+                  collapsed={collapsedSections.has('history')}
+                  onToggle={() => toggleSection('history')}
+                  onRefresh={() => void refreshGitHistory()}
+                  onOpenCommit={(item) => void openHistoryCommitDiff(item)}
+                />
+              </div>
+            )}
         </div>
 
         {selectedKeys.size > 0 && (
@@ -4981,7 +5052,7 @@ export function CompareSummary({
     <div className="flex items-center gap-2 text-xs text-muted-foreground">
       {summary.commitsAhead !== undefined && (
         <span title={`Comparing against ${summary.baseRef}`}>
-          {summary.commitsAhead} commits ahead
+          {summary.commitsAhead} commits ahead of {summary.baseRef}
         </span>
       )}
       <div className="ml-auto flex shrink-0 items-center gap-2">

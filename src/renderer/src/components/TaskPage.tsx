@@ -154,8 +154,7 @@ import type {
   TaskViewPresetId
 } from '../../../shared/types'
 import { shouldSuppressEnterSubmit } from '@/lib/new-workspace-enter-guard'
-import { getShortcutPlatform } from '@/lib/shortcut-platform'
-import { useShortcutLabel } from '@/hooks/useShortcutLabel'
+import { getScreenSubmitShortcutLabel, isScreenSubmitShortcut } from '@/lib/screen-submit-shortcut'
 import { useTeamStates } from '@/hooks/useIssueMetadata'
 import {
   linearCreateIssue,
@@ -181,7 +180,6 @@ import {
   restoreAvailableDefaultTaskProvider,
   resolveVisibleTaskProvider
 } from '../../../shared/task-providers'
-import { keybindingMatchesAction } from '../../../shared/keybindings'
 
 type TaskSource = TaskProvider
 
@@ -1959,7 +1957,6 @@ export default function TaskPage(): React.JSX.Element {
   const openTaskPage = useAppStore((s) => s.openTaskPage)
   const closeTaskPage = useAppStore((s) => s.closeTaskPage)
   const activeModal = useAppStore((s) => s.activeModal)
-  const keybindings = useAppStore((s) => s.keybindings)
   const repos = useAppStore((s) => s.repos)
   const repoMap = useRepoMap()
   const openModal = useAppStore((s) => s.openModal)
@@ -1987,7 +1984,7 @@ export default function TaskPage(): React.JSX.Element {
   const patchLinearIssue = useAppStore((s) => s.patchLinearIssue)
   const checkLinearConnection = useAppStore((s) => s.checkLinearConnection)
   const refreshPreflightStatus = useAppStore((s) => s.refreshPreflightStatus)
-  const submitShortcutLabel = useShortcutLabel('composer.submit')
+  const submitShortcutLabel = getScreenSubmitShortcutLabel()
   const eligibleRepos = useMemo(() => repos.filter((repo) => isGitRepoKind(repo)), [repos])
 
   // Why: initial selection resolution honors (1) an explicit preselection from
@@ -6858,9 +6855,7 @@ export default function TaskPage(): React.JSX.Element {
         <DialogContent
           className="sm:max-w-lg"
           onKeyDown={(event) => {
-            if (
-              keybindingMatchesAction('composer.submit', event, getShortcutPlatform(), keybindings)
-            ) {
+            if (isScreenSubmitShortcut(event)) {
               event.preventDefault()
               void handleCreateNewIssue()
             }
@@ -6990,9 +6985,7 @@ export default function TaskPage(): React.JSX.Element {
                 className="w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 resize-none max-h-60 overflow-y-auto scrollbar-sleek"
               />
             </div>
-            {submitShortcutLabel !== 'Unassigned' ? (
-              <p className="text-[10px] text-muted-foreground">{submitShortcutLabel} to submit.</p>
-            ) : null}
+            <p className="text-[10px] text-muted-foreground">{submitShortcutLabel} to submit.</p>
           </div>
           <DialogFooter>
             <Button
@@ -7186,9 +7179,7 @@ export default function TaskPage(): React.JSX.Element {
         <DialogContent
           className="sm:max-w-lg"
           onKeyDown={(event) => {
-            if (
-              keybindingMatchesAction('composer.submit', event, getShortcutPlatform(), keybindings)
-            ) {
+            if (isScreenSubmitShortcut(event)) {
               event.preventDefault()
               void handleCreateNewLinearIssue()
             }
@@ -7260,9 +7251,7 @@ export default function TaskPage(): React.JSX.Element {
                 className="w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs transition-[color,box-shadow] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 resize-none max-h-60 overflow-y-auto scrollbar-sleek"
               />
             </div>
-            {submitShortcutLabel !== 'Unassigned' ? (
-              <p className="text-[10px] text-muted-foreground">{submitShortcutLabel} to submit.</p>
-            ) : null}
+            <p className="text-[10px] text-muted-foreground">{submitShortcutLabel} to submit.</p>
           </div>
           <DialogFooter>
             <Button

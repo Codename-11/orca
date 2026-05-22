@@ -22,6 +22,7 @@ import type {
   GitHubAssignableUser,
   GitHubCommentResult,
   GitHubWorkItem,
+  GitPushTarget,
   GitUpstreamStatus,
   GhosttyImportPreview,
   ListWorkItemsResult,
@@ -107,7 +108,7 @@ import type {
   SshConnectionState,
   SshTarget,
   PortForwardEntry,
-  DetectedPort
+  EnrichedDetectedPort
 } from '../shared/ssh-types'
 import type {
   AgentStatusIpcPayload,
@@ -2167,9 +2168,13 @@ const api = {
     upstreamStatus: (args: {
       worktreePath: string
       connectionId?: string
+      pushTarget?: GitPushTarget
     }): Promise<GitUpstreamStatus> => ipcRenderer.invoke('git:upstreamStatus', args),
-    fetch: (args: { worktreePath: string; connectionId?: string }): Promise<void> =>
-      ipcRenderer.invoke('git:fetch', args),
+    fetch: (args: {
+      worktreePath: string
+      connectionId?: string
+      pushTarget?: GitPushTarget
+    }): Promise<void> => ipcRenderer.invoke('git:fetch', args),
     push: (args: {
       worktreePath: string
       publish?: boolean
@@ -2177,8 +2182,16 @@ const api = {
       connectionId?: string
       pushTarget?: unknown
     }): Promise<void> => ipcRenderer.invoke('git:push', args),
-    pull: (args: { worktreePath: string; connectionId?: string }): Promise<void> =>
-      ipcRenderer.invoke('git:pull', args),
+    pull: (args: {
+      worktreePath: string
+      connectionId?: string
+      pushTarget?: GitPushTarget
+    }): Promise<void> => ipcRenderer.invoke('git:pull', args),
+    rebaseFromBase: (args: {
+      worktreePath: string
+      baseRef: string
+      connectionId?: string
+    }): Promise<void> => ipcRenderer.invoke('git:rebaseFromBase', args),
     branchDiff: (args: {
       worktreePath: string
       compare: { baseRef: string; baseOid: string; headOid: string; mergeBase: string }
@@ -3056,7 +3069,7 @@ const api = {
     listPortForwards: (args?: { targetId?: string }): Promise<PortForwardEntry[]> =>
       ipcRenderer.invoke('ssh:listPortForwards', args),
 
-    listDetectedPorts: (args: { targetId: string }): Promise<DetectedPort[]> =>
+    listDetectedPorts: (args: { targetId: string }): Promise<EnrichedDetectedPort[]> =>
       ipcRenderer.invoke('ssh:listDetectedPorts', args),
 
     onPortForwardsChanged: (
@@ -3071,11 +3084,11 @@ const api = {
     },
 
     onDetectedPortsChanged: (
-      callback: (data: { targetId: string; ports: DetectedPort[] }) => void
+      callback: (data: { targetId: string; ports: EnrichedDetectedPort[] }) => void
     ): (() => void) => {
       const handler = (
         _event: Electron.IpcRendererEvent,
-        data: { targetId: string; ports: DetectedPort[] }
+        data: { targetId: string; ports: EnrichedDetectedPort[] }
       ) => callback(data)
       ipcRenderer.on('ssh:detected-ports-changed', handler)
       return () => ipcRenderer.removeListener('ssh:detected-ports-changed', handler)
