@@ -130,10 +130,15 @@ function addSplitLeafToLayout(
   newLeafId: string,
   ptyId: string,
   direction: TerminalSplitDirection,
-  title?: string | null
+  title?: string | null,
+  activateNewLeaf = true
 ): TerminalLayoutSnapshot {
   const root = layout?.root ?? { type: 'leaf', leafId: sourceLeafId }
   const existingLeafIds = collectLeafIdsInOrder(root)
+  const nextActiveLeafId =
+    activateNewLeaf || !layout?.activeLeafId || !existingLeafIds.includes(layout.activeLeafId)
+      ? newLeafId
+      : layout.activeLeafId
   const nextRoot = existingLeafIds.includes(newLeafId)
     ? root
     : (() => {
@@ -152,7 +157,7 @@ function addSplitLeafToLayout(
   return {
     ...(layout ?? { root: null, activeLeafId: null, expandedLeafId: null }),
     root: nextRoot,
-    activeLeafId: newLeafId,
+    activeLeafId: nextActiveLeafId,
     expandedLeafId: null,
     ptyIdsByLeafId: {
       ...layout?.ptyIdsByLeafId,
@@ -850,7 +855,8 @@ export function useIpcEvents(): void {
                     leafId,
                     ptyId,
                     splitDirection ?? 'horizontal',
-                    title
+                    title,
+                    shouldActivate
                   )
                 )
                 window.dispatchEvent(
@@ -2215,24 +2221,6 @@ function resolvePaneKey(
   }
   const { tabId, leafId } = parsed
   const layout = store.terminalLayoutsByTabId?.[tabId]
-  const leafExists = collectLeafIdsInOrder(layout?.root).includes(leafId)
-  if (!leafExists) {
-    return {
-      exists: false,
-      title: undefined,
-      repoConnectionId: null,
-      repoConnectionResolved: false,
-      owningWorktreeId: undefined
-    }
-  }
-  // Why: replay can remint numeric pane ids, so status title recovery must use
-  // persisted leaf-keyed titles when crossing from hook state into tab state.
-  const rawPaneTitle = layout?.titlesByLeafId?.[leafId]
-  // Why: treat an empty-string paneTitle as "no title" so the tab-level
-  // fallback still fires. `paneTitle ?? tabTitle` alone would short-circuit on
-  // '' and also erase any previously-cached terminalTitle in the store
-  // (`terminalTitle ?? existing?.terminalTitle` resolves to '').
-  const paneTitle = rawPaneTitle && rawPaneTitle.length > 0 ? rawPaneTitle : undefined
   let exists = false
   let tabTitle: string | undefined
   let owningWorktreeId: string | undefined
@@ -2263,6 +2251,33 @@ function resolvePaneKey(
       repoConnectionId = repo?.connectionId ?? null
     }
   }
+  if (!exists) {
+    return {
+      exists: false,
+      title: undefined,
+      repoConnectionId,
+      repoConnectionResolved,
+      owningWorktreeId
+    }
+  }
+  const leafExists = layout ? collectLeafIdsInOrder(layout.root).includes(leafId) : true
+  if (!leafExists) {
+    return {
+      exists: false,
+      title: undefined,
+      repoConnectionId,
+      repoConnectionResolved,
+      owningWorktreeId
+    }
+  }
+  // Why: inactive worktrees can have a durable tab and live PTY while their
+  // terminal layout is temporarily unmounted. Hook state must still land there.
+  const rawPaneTitle = layout?.titlesByLeafId?.[leafId]
+  // Why: treat an empty-string paneTitle as "no title" so the tab-level
+  // fallback still fires. `paneTitle ?? tabTitle` alone would short-circuit on
+  // '' and also erase any previously-cached terminalTitle in the store
+  // (`terminalTitle ?? existing?.terminalTitle` resolves to '').
+  const paneTitle = rawPaneTitle && rawPaneTitle.length > 0 ? rawPaneTitle : undefined
   return {
     exists,
     title: paneTitle ?? tabTitle,
