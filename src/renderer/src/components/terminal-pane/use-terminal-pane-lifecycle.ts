@@ -51,6 +51,7 @@ import {
   isPrimarySelectionEnabled,
   setPrimarySelectionText
 } from '@/lib/primary-selection'
+import { getConnectionId } from '@/lib/connection-context'
 import {
   SPLIT_TERMINAL_PANE_EVENT,
   CLOSE_TERMINAL_PANE_EVENT,
@@ -58,6 +59,7 @@ import {
   type CloseTerminalPaneDetail
 } from '@/constants/terminal'
 import { acquireWebviewsDragPassthrough } from '../browser-pane/webview-registry'
+import { shouldDisableKittyKeyboardForTerminal } from './terminal-keyboard-protocol'
 
 type UseTerminalPaneLifecycleDeps = {
   tabId: string
@@ -795,6 +797,10 @@ export function useTerminalPaneLifecycle({
         const currentSettings = settingsRef.current
         const terminalFontWeights = resolveTerminalFontWeights(currentSettings?.terminalFontWeight)
         const cursorStyle = currentSettings?.terminalCursorStyle ?? 'bar'
+        const disableKittyKeyboard = shouldDisableKittyKeyboardForTerminal({
+          userAgent: navigator.userAgent,
+          connectionId: getConnectionId(worktreeId)
+        })
         return {
           fontSize: currentSettings?.terminalFontSize ?? 14,
           fontFamily: buildFontFamily(currentSettings?.terminalFontFamily ?? ''),
@@ -811,6 +817,9 @@ export function useTerminalPaneLifecycle({
           cursorInactiveStyle: resolveTerminalCursorInactiveStyle(cursorStyle),
           cursorBlink: currentSettings?.terminalCursorBlink ?? true,
           macOptionIsMeta: effectiveMacOptionAsAltRef.current === 'true',
+          vtExtensions: {
+            kittyKeyboard: !disableKittyKeyboard
+          },
           lineHeight: currentSettings?.terminalLineHeight ?? 1,
           wordSeparator: currentSettings?.terminalWordSeparator
         }
