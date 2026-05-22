@@ -9,6 +9,8 @@ import {
   resolveForkReleaseVersion
 } from './axiom-release-versioning.mjs'
 
+import { forkCommitBaseline, nearestPriorAxiomReleaseTag } from './axiom-generate-release-notes.mjs'
+
 import {
   getRequiredReleaseAssetNames,
   parseReleasePlatforms
@@ -179,6 +181,46 @@ describe('Axiom upstream sync release workflow', () => {
     expect(notesScript).toContain('MAX_UPSTREAM_NOTES_LENGTH')
     expect(notesScript).toContain('MAX_FORK_DELTA_LENGTH')
     expect(notesScript).toContain('truncateMarkdown')
+  })
+
+  it('chooses the fork commit range from the prior Axiom revision or upstream tag', () => {
+    const tags = [
+      'v1.4.17',
+      'v1.4.18-rc.0',
+      'axiom-v1.4.18-rc.0.axiom.1',
+      'axiom-v1.4.18-rc.0.axiom.2',
+      'axiom-v1.4.17-axiom.1'
+    ]
+
+    expect(
+      nearestPriorAxiomReleaseTag({
+        existingTags: tags,
+        upstreamTag: 'v1.4.18-rc.0',
+        forkTag: 'axiom-v1.4.18-rc.0.axiom.2'
+      })
+    ).toBe('axiom-v1.4.18-rc.0.axiom.1')
+    expect(
+      forkCommitBaseline({
+        existingTags: tags,
+        upstreamTag: 'v1.4.18-rc.0',
+        forkTag: 'axiom-v1.4.18-rc.0.axiom.2'
+      })
+    ).toBe('axiom-v1.4.18-rc.0.axiom.1')
+    expect(
+      forkCommitBaseline({
+        existingTags: tags,
+        upstreamTag: 'v1.4.18-rc.0',
+        forkTag: 'axiom-v1.4.18-rc.0.axiom.1',
+        previousAxiomTag: 'axiom-v1.4.17-axiom.1'
+      })
+    ).toBe('axiom-v1.4.17-axiom.1')
+    expect(
+      forkCommitBaseline({
+        existingTags: tags,
+        upstreamTag: 'v1.4.18-rc.0',
+        forkTag: 'axiom-v1.4.18-rc.0.axiom.1'
+      })
+    ).toBe('v1.4.18-rc.0')
   })
 
   it('combines upstream notes with optional Axiom deviation notes and commit fallback', () => {

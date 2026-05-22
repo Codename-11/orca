@@ -207,6 +207,8 @@ jobs:
         if: steps.check.outputs.should_release == 'true' && steps.merge.outputs.merge_result != 'agent_remediate'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AXIOM_FORK_TAG: ${{ steps.check.outputs.fork_tag }}
+          AXIOM_FORK_VERSION: ${{ steps.check.outputs.fork_version }}
         run: node config/scripts/axiom-generate-release-notes.mjs "${{ steps.check.outputs.upstream_tag }}" --output axiom-release-notes.md
 
       - name: Create release tag

@@ -4,6 +4,8 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
+import { forkTagForVersion, parseAxiomReleaseTag } from './axiom-release-versioning.mjs'
+
 const API_VERSION = '2022-11-28'
 const MAX_RELEASE_NOTES_BODY_LENGTH = 120_000
 const MAX_UPSTREAM_NOTES_LENGTH = 70_000
@@ -52,7 +54,9 @@ function parseArgs(argv) {
   const args = {
     tag: '',
     output: 'axiom-release-notes.md',
-    deviationNotes: envString('AXIOM_RELEASE_DEVIATION_NOTES_FILE')
+    deviationNotes: envString('AXIOM_RELEASE_DEVIATION_NOTES_FILE'),
+    forkTag: envString('AXIOM_FORK_TAG'),
+    forkVersion: envString('AXIOM_FORK_VERSION')
   }
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--tag') {
@@ -61,6 +65,10 @@ function parseArgs(argv) {
       args.output = argv[++i] ?? args.output
     } else if (argv[i] === '--deviation-notes') {
       args.deviationNotes = argv[++i] ?? args.deviationNotes
+    } else if (argv[i] === '--fork-tag') {
+      args.forkTag = argv[++i] ?? args.forkTag
+    } else if (argv[i] === '--fork-version') {
+      args.forkVersion = argv[++i] ?? args.forkVersion
     } else if (!args.tag) {
       args.tag = argv[i]
     }
@@ -76,9 +84,111 @@ function previousReleaseTag(tag) {
   }
 }
 
-function commitList(range) {
+function localTags() {
   try {
-    return run('git', ['log', '--no-merges', '--pretty=format:- %s (%h)', range])
+    return run('git', ['tag', '--list'])
+      .split('\n')
+      .map((tag) => tag.trim())
+      .filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
+export function nearestPriorAxiomReleaseTag({ existingTags = [], upstreamTag, forkTag }) {
+  const current = parseAxiomReleaseTag(forkTag)
+  if (!current || current.upstreamTag !== upstreamTag) {
+    return ''
+  }
+
+  return (
+    existingTags
+      .map((tag) => parseAxiomReleaseTag(tag))
+      .filter(
+        (parsed) =>
+          parsed &&
+          parsed.upstreamTag === upstreamTag &&
+          parsed.axiomRevision < current.axiomRevision
+      )
+      .sort((a, b) => b.axiomRevision - a.axiomRevision)[0]?.forkTag ?? ''
+  )
+}
+
+export function forkCommitBaseline({
+  existingTags = [],
+  upstreamTag,
+  forkTag,
+  previousAxiomTag = ''
+}) {
+  return (
+    nearestPriorAxiomReleaseTag({ existingTags, upstreamTag, forkTag }) ||
+    previousAxiomTag ||
+    upstreamTag
+  )
+}
+
+function refExists(ref) {
+  if (!ref) {
+    return false
+  }
+  try {
+    run('git', ['rev-parse', '--verify', '--quiet', ref])
+    return true
+  } catch {
+    return false
+  }
+}
+
+function previousAxiomReleaseTag(ref = 'HEAD') {
+  const describeRef = refExists(ref) ? `${ref}^` : 'HEAD^'
+  try {
+    return run('git', ['describe', '--tags', '--abbrev=0', '--match', 'axiom-v*', describeRef])
+  } catch {
+    return ''
+  }
+}
+
+function resolveForkTag({ forkTag, forkVersion }) {
+  if (forkTag) {
+    return forkTag
+  }
+  if (forkVersion) {
+    return forkTagForVersion(forkVersion)
+  }
+  try {
+    return forkTagForVersion(JSON.parse(readFileSync('package.json', 'utf8')).version)
+  } catch {
+    return ''
+  }
+}
+
+function resolveBaselineRef(ref) {
+  if (!ref) {
+    return ''
+  }
+  try {
+    run('git', ['rev-parse', '--verify', '--quiet', ref])
+    return ref
+  } catch {
+    const upstreamTagRef = `refs/remotes/upstream-tags/${ref}`
+    try {
+      run('git', ['rev-parse', '--verify', '--quiet', upstreamTagRef])
+      return upstreamTagRef
+    } catch {
+      return ref
+    }
+  }
+}
+
+function commitList(range, excludedRefs = []) {
+  try {
+    return run('git', [
+      'log',
+      '--no-merges',
+      '--pretty=format:- %s (%h)',
+      range,
+      ...excludedRefs.flatMap((ref) => (ref ? ['--not', ref] : []))
+    ])
   } catch {
     return ''
   }
@@ -96,18 +206,27 @@ function readOptionalMarkdown(filePath) {
 }
 
 async function main() {
-  const { tag, output, deviationNotes } = parseArgs(process.argv.slice(2))
+  const { tag, output, deviationNotes, forkTag, forkVersion } = parseArgs(process.argv.slice(2))
   if (!tag) {
     throw new Error(
-      'Usage: node config/scripts/axiom-generate-release-notes.mjs <tag> [--output file] [--deviation-notes file]'
+      'Usage: node config/scripts/axiom-generate-release-notes.mjs <tag> [--output file] [--deviation-notes file] [--fork-tag tag] [--fork-version version]'
     )
   }
 
   const upstreamRepo = envString('AXIOM_UPSTREAM_REPOSITORY', 'stablyai/orca')
   const upstreamRelease = await fetchUpstreamRelease(upstreamRepo, tag)
-  const previousTag = previousReleaseTag(tag)
-  const range = previousTag ? `${previousTag}..HEAD` : 'HEAD'
-  const axiomCommits = commitList(range)
+  const resolvedForkTag = resolveForkTag({ forkTag, forkVersion })
+  const previousAxiomTag = previousAxiomReleaseTag(resolvedForkTag)
+  const baseline = forkCommitBaseline({
+    existingTags: localTags(),
+    upstreamTag: tag,
+    forkTag: resolvedForkTag,
+    previousAxiomTag
+  })
+  const rangeBase = resolveBaselineRef(baseline || previousReleaseTag(tag))
+  const upstreamExclude = baseline && baseline !== tag ? resolveBaselineRef(tag) : ''
+  const range = rangeBase ? `${rangeBase}..HEAD` : 'HEAD'
+  const axiomCommits = commitList(range, [upstreamExclude])
 
   const upstreamBody = truncateMarkdown(
     upstreamRelease?.body?.trim() || '_No upstream release notes were provided._',

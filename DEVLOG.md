@@ -6,6 +6,24 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-21 — Verified automation setup and tightened release notes delta
+
+Verified the upstream sync automation is enabled end-to-end: repository dispatch variables for releases and main mirror are `true`, the remediation webhook/token secrets are present, Victor's webhook route is live on `/webhooks/orca-merge-remediation`, recent upstream release and main dispatch runs completed successfully, and bot remediation PRs #4/#5 were created with green checks and merged into `axiom/deploy`.
+
+Fixed Axiom release-note fallback generation so it no longer dumps the full fork history. `config/scripts/axiom-generate-release-notes.mjs` now receives the fork tag/version from the workflow, chooses the nearest prior Axiom revision/release as the commit baseline, and excludes commits already reachable from the upstream release tag. Updated the published notes for `axiom-v1.4.18-rc.0.axiom.2`; the fallback section is now the intended short Axiom delta instead of a huge historical list.
+
+Verification:
+
+- `node --check config/scripts/axiom-generate-release-notes.mjs && node --check config/scripts/axiom-upstream-sync-release.test.mjs` → passed.
+- `pnpm exec vitest run --config config/vitest.config.ts config/scripts/axiom-upstream-sync-release.test.mjs` → 21 tests passed.
+- `pnpm exec oxlint config/scripts/axiom-generate-release-notes.mjs config/scripts/axiom-upstream-sync-release.test.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml` → 0 warnings / 0 errors.
+- `pnpm exec oxfmt --check config/scripts/axiom-generate-release-notes.mjs config/scripts/axiom-upstream-sync-release.test.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml config/axiom-merge-remediation-policy.json` → passed.
+- `pnpm run typecheck` → passed. Node engine warning only: project wants Node 24; local runtime is Node v25.6.0.
+- `git diff --check` → passed.
+- `gh release edit -R Codename-11/orca axiom-v1.4.18-rc.0.axiom.2 --notes-file /tmp/axiom-release-notes-rc0-axiom2-fixed.md` → updated release notes; verified body is 1,213 bytes with 7 bullet lines total.
+
+---
+
 ## 2026-05-21 — Remediated upstream v1.4.18-rc.4 bot PR
 
 Resolved the agent-remediation merge for upstream `v1.4.18-rc.4` on `bot/upstream-sync-axiom-v1.4.18-rc.4.axiom.1` targeting `axiom/deploy` without pushing directly to the deploy branch. The conflict resolution preserves Axiom's fork semver (`1.4.18-rc.4.axiom.1`), env-driven app/update/installer identity in `config/electron-builder.config.cjs`, provider registry shortcuts including Forge, and upstream's newer sidebar unread-count extraction plus Linux icon packaging fix. Protected deletion review found no protected Axiom files removed by the merge.
