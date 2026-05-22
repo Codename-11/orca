@@ -89,6 +89,7 @@ import {
   type ExpectedTeardownScope
 } from './crash-reporting/process-gone-classification'
 import { isCrashReportReason } from '../shared/crash-reporting'
+import { KeybindingService } from './keybindings/keybinding-service'
 
 let mainWindow: BrowserWindow | null = null
 /** Whether a manual app.quit() (Cmd+Q, etc.) is in progress. Shared with the
@@ -115,6 +116,7 @@ let disposeFeatureWallFirstAgentTour: (() => void) | null = null
 let watcherShutdownPromise: Promise<void> | null = null
 let watcherShutdownDone = false
 let automations: AutomationService | null = null
+let keybindings: KeybindingService | null = null
 let expectedRendererReload: { webContentsId: number; until: number } | null = null
 const isServeMode = process.argv.includes('--serve')
 const configuredAppIdentity = resolveConfiguredAppIdentity()
@@ -292,6 +294,9 @@ function openMainWindow(): BrowserWindow {
       'Claude runtime auth service must be initialized before opening the main window'
     )
   }
+  if (!keybindings) {
+    throw new Error('Keybinding service must be initialized before opening the main window')
+  }
 
   // Why: Chromium's BrowserWindow constructor resets the userData DACL to a
   // Protected DACL. Grant explicit Full Control ACEs on all existing children
@@ -337,7 +342,8 @@ function openMainWindow(): BrowserWindow {
         expectedTeardown: getExpectedTeardownScope(webContentsId)
       }),
     deferLoad: true,
-    title: devInstanceIdentity.name
+    title: devInstanceIdentity.name,
+    getKeybindings: () => keybindings?.getOverrides()
   })
   recordCrashBreadcrumb('main_window_created')
 
@@ -380,7 +386,8 @@ function openMainWindow(): BrowserWindow {
       prepareForClaudeLaunch: () => claudeRuntimeAuth!.prepareForClaudeLaunch()
     },
     agentAwakeService ?? undefined,
-    crashReports ?? undefined
+    crashReports ?? undefined,
+    keybindings
   )
   automations.setWebContents(window.webContents)
   automations.start()
@@ -881,6 +888,11 @@ app.whenReady().then(async () => {
   rateLimits.setCodexHomePathResolver(() => codexRuntimeHome!.prepareForRateLimitFetch())
   rateLimits.setClaudeAuthPreparationResolver(() => claudeRuntimeAuth!.prepareForRateLimitFetch())
   rateLimits.setSettingsResolver(() => store!.getSettings())
+  keybindings = new KeybindingService({
+    homePath: app.getPath('home'),
+    getLegacyOverrides: () => store!.getSettings().keybindings
+  })
+  browserManager.setSettingsResolver(() => ({ keybindings: keybindings?.getOverrides() }))
   rateLimits.setInactiveClaudeAccountsResolver(() => {
     const settings = store!.getSettings()
     return settings.claudeManagedAccounts
@@ -1019,7 +1031,8 @@ app.whenReady().then(async () => {
         showTitlebarAppName: settings?.showTitlebarAppName !== false,
         statusBarVisible: ui?.statusBarVisible !== false
       }
-    }
+    },
+    getKeybindings: () => keybindings?.getOverrides()
   })
   // Why: E2E tests launch parallel Electron instances that would all race to
   // bind the default fixed port, crashing on EADDRINUSE. Port 0 lets the OS

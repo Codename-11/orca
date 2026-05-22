@@ -6,7 +6,16 @@ import {
   useVirtualizer
 } from '@tanstack/react-virtual'
 import type { Range } from '@tanstack/react-virtual'
-import { ChevronDown, CircleX, Ellipsis, Plus, Trash2, Workflow } from 'lucide-react'
+import {
+  ChevronDown,
+  CircleX,
+  Ellipsis,
+  Palette,
+  Plus,
+  SlidersHorizontal,
+  Trash2,
+  Workflow
+} from 'lucide-react'
 import { useAppStore } from '@/store'
 import {
   getAllWorktreesFromState,
@@ -24,6 +33,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
@@ -82,6 +92,7 @@ import {
   type VirtualizedScrollAnchor
 } from '@/hooks/useVirtualizedScrollAnchor'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
+import { getShortcutPlatform } from '@/lib/shortcut-platform'
 import { useRepoHeaderDrag } from './repo-header-drag'
 import WorktreeContextMenu from './WorktreeContextMenu'
 import {
@@ -111,6 +122,8 @@ import { branchDisplayName } from './WorktreeCardHelpers'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
 import { getRepoHeaderCreateState } from './repo-header-create-state'
 import type { PendingSidebarWorktreeReveal } from '@/store/slices/ui'
+import { getRepositoryBadgeColorSectionId } from '@/components/settings/repository-settings-targets'
+import { keybindingMatchesAction } from '../../../../shared/keybindings'
 
 // How long to wait after a sortEpoch bump before actually re-sorting.
 // Prevents jarring position shifts when background events (AI starting work,
@@ -187,6 +200,7 @@ type VirtualizedWorktreeViewportProps = {
   toggleGroup: (key: string) => void
   collapsedGroups: Set<string>
   handleCreateForRepo: (repoId: string) => void
+  handleOpenRepoSettings: (repoId: string, sectionId?: string) => void
   handleRemoveRepo: (repo: Repo) => void
   activeModal: string
   pendingRevealWorktree: PendingSidebarWorktreeReveal | null
@@ -477,6 +491,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   toggleGroup,
   collapsedGroups,
   handleCreateForRepo,
+  handleOpenRepoSettings,
   handleRemoveRepo,
   activeModal,
   pendingRevealWorktree,
@@ -521,6 +536,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     (s) => s.reportVisibleGitHubPRRefreshCandidates
   )
   const cardProps = useAppStore((s) => s.worktreeCardProperties)
+  const keybindings = useAppStore((s) => s.keybindings)
   const sshConnectedGeneration = useAppStore((s) => s.sshConnectedGeneration)
   const prVisibleRefreshGeneration = useAppStore((s) => s.prVisibleRefreshGeneration)
   const settings = useAppStore((s) => s.settings)
@@ -1026,25 +1042,28 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
         return
       }
 
-      const mod = navigator.userAgent.includes('Mac')
-        ? e.metaKey && !e.ctrlKey
-        : e.ctrlKey && !e.metaKey
-      if (mod && !e.shiftKey && e.key === '0') {
+      const platform = getShortcutPlatform()
+      if (keybindingMatchesAction('sidebar.focusWorktreeList', e, platform, keybindings)) {
         scrollRef.current?.focus()
         e.preventDefault()
         return
       }
 
-      if (mod && e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      const direction = keybindingMatchesAction('worktree.navigateUp', e, platform, keybindings)
+        ? 'up'
+        : keybindingMatchesAction('worktree.navigateDown', e, platform, keybindings)
+          ? 'down'
+          : null
+      if (direction) {
         markDirectScrollInput()
-        navigateWorktree(e.key === 'ArrowUp' ? 'up' : 'down')
+        navigateWorktree(direction)
         e.preventDefault()
       }
     }
 
     window.addEventListener('keydown', handleKeyDown, { capture: true })
     return () => window.removeEventListener('keydown', handleKeyDown, { capture: true })
-  }, [activeModal, markDirectScrollInput, navigateWorktree])
+  }, [activeModal, keybindings, markDirectScrollInput, navigateWorktree])
 
   // Why: lightweight nested cards do not mount WorktreeCard, so the viewport
   // owns the SSH reconnect prompt for an active lineage child.
@@ -1886,6 +1905,30 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                           onClick={(event) => event.stopPropagation()}
                         >
                           <DropdownMenuItem
+                            onSelect={() => {
+                              if (row.repo) {
+                                handleOpenRepoSettings(row.repo.id)
+                              }
+                            }}
+                          >
+                            <SlidersHorizontal className="size-3.5" />
+                            Repo Settings
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              if (row.repo) {
+                                handleOpenRepoSettings(
+                                  row.repo.id,
+                                  getRepositoryBadgeColorSectionId(row.repo.id)
+                                )
+                              }
+                            }}
+                          >
+                            <Palette className="size-3.5" />
+                            Change Repo Color
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
                             variant="destructive"
                             onSelect={() => {
                               if (row.repo) {
@@ -2273,6 +2316,8 @@ const WorktreeList = React.memo(function WorktreeList({
   const hideDefaultBranchWorkspace = useAppStore((s) => s.hideDefaultBranchWorkspace)
   const filterRepoIds = useAppStore((s) => s.filterRepoIds)
   const openModal = useAppStore((s) => s.openModal)
+  const openSettingsPage = useAppStore((s) => s.openSettingsPage)
+  const openSettingsTarget = useAppStore((s) => s.openSettingsTarget)
   const updateWorktreeMeta = useAppStore((s) => s.updateWorktreeMeta)
   const updateWorktreesMeta = useAppStore((s) => s.updateWorktreesMeta)
   const activeView = useAppStore((s) => s.activeView)
@@ -2734,6 +2779,14 @@ const WorktreeList = React.memo(function WorktreeList({
     [openModal]
   )
 
+  const handleOpenRepoSettings = useCallback(
+    (repoId: string, sectionId?: string) => {
+      openSettingsTarget({ pane: 'repo', repoId, ...(sectionId ? { sectionId } : {}) })
+      openSettingsPage()
+    },
+    [openSettingsPage, openSettingsTarget]
+  )
+
   const handleRemoveRepo = useCallback(
     (repo: Repo) => {
       openModal('confirm-remove-folder', {
@@ -2891,6 +2944,7 @@ const WorktreeList = React.memo(function WorktreeList({
       toggleGroup={toggleGroup}
       collapsedGroups={collapsedGroups}
       handleCreateForRepo={handleCreateForRepo}
+      handleOpenRepoSettings={handleOpenRepoSettings}
       handleRemoveRepo={handleRemoveRepo}
       activeModal={activeModal}
       pendingRevealWorktree={pendingRevealWorktree}

@@ -312,6 +312,7 @@ import type {
   WorkspaceCleanupScanArgs,
   WorkspaceCleanupScanResult
 } from '../shared/workspace-cleanup'
+import type { KeybindingActionId, KeybindingFileSnapshot } from '../shared/keybindings'
 
 export type BrowserApi = {
   registerGuest: (args: {
@@ -1304,6 +1305,18 @@ export type PreloadApi = {
      *  state without round-tripping through settings:get. */
     onChanged: (callback: (updates: Partial<GlobalSettings>) => void) => () => void
   }
+  keybindings: {
+    get: () => Promise<KeybindingFileSnapshot>
+    ensureFile: () => Promise<KeybindingFileSnapshot>
+    setAction: (args: {
+      actionId: KeybindingActionId
+      bindings: string[] | null
+    }) => Promise<KeybindingFileSnapshot>
+    reload: () => Promise<KeybindingFileSnapshot>
+    openFile: () => Promise<KeybindingFileSnapshot>
+    revealFile: () => Promise<KeybindingFileSnapshot>
+    onChanged: (callback: (snapshot: KeybindingFileSnapshot) => void) => () => void
+  }
   codexAccounts: {
     list: () => Promise<CodexRateLimitAccountsState>
     add: () => Promise<CodexRateLimitAccountsState>
@@ -1737,6 +1750,7 @@ export type PreloadApi = {
     onToggleFloatingTerminal: (callback: () => void) => () => void
     onOpenQuickOpen: (callback: () => void) => () => void
     onOpenNewWorkspace: (callback: () => void) => () => void
+    onOpenTasks: (callback: () => void) => () => void
     onJumpToWorktreeIndex: (callback: (index: number) => void) => () => void
     onWorktreeHistoryNavigate: (callback: (direction: 'back' | 'forward') => void) => () => void
     onNewBrowserTab: (callback: () => void) => () => void
@@ -1765,6 +1779,7 @@ export type PreloadApi = {
     onCloseActiveTab: (callback: () => void) => () => void
     onSwitchTab: (callback: (direction: 1 | -1) => void) => () => void
     onSwitchTabAcrossAllTypes: (callback: (direction: 1 | -1) => void) => () => void
+    onSwitchRecentTab: (callback: () => void) => () => void
     onSwitchTerminalTab: (callback: (direction: 1 | -1) => void) => () => void
     onCtrlTabKeyDown: (callback: (data: { shiftKey: boolean }) => void) => () => void
     onCtrlTabKeyUp: (callback: () => void) => () => void
