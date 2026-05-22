@@ -100,6 +100,7 @@ import {
   setSidebarPointerDragDocumentStyles,
   updateSidebarDragPreviewPosition
 } from './worktree-sidebar-pointer-drag-dom'
+import { resolveRepoGroupHeaderColor } from './repo-header-color'
 import {
   areWorktreeSelectionsEqual,
   getWorktreeSelectionIntent,
@@ -1729,6 +1730,11 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                   ? getWorkspaceStatusFromGroupKey(row.key, workspaceStatuses)
                   : null
               const isPinnedHeader = row.key === PINNED_GROUP_KEY
+              const repoHeaderColor = resolveRepoGroupHeaderColor({
+                groupBy,
+                headerKey: row.key,
+                badgeColor: row.repo?.badgeColor
+              })
               const createState = row.repo
                 ? getRepoHeaderCreateState({
                     repo: row.repo,
@@ -1822,8 +1828,9 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                         }
                         className={cn(
                           'flex size-4 shrink-0 items-center justify-center rounded-[4px]',
-                          row.repo ? 'text-muted-foreground' : row.tone
+                          repoHeaderColor ? 'text-muted-foreground' : row.tone
                         )}
+                        style={repoHeaderColor ? { color: repoHeaderColor } : undefined}
                       >
                         <row.icon className={row.repo ? 'size-3.5' : 'size-3'} />
                       </div>
@@ -2098,6 +2105,15 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                             {child.worktree.comment}
                           </div>
                         ) : null}
+                        {showInlineAgentCards ? (
+                          // Why: nested lineage children use this lightweight
+                          // renderer instead of WorktreeCard, so their inline
+                          // agent rows must be mounted here explicitly.
+                          <WorktreeCardAgents
+                            worktreeId={child.worktree.id}
+                            className="mt-1 divide-y-0"
+                          />
+                        ) : null}
                         {child.lineageChildCount > 0 && lineageToggleGroupKey ? (
                           <div className="mt-1.5 flex min-w-0 justify-start">
                             <Tooltip>
@@ -2139,15 +2155,6 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                               </TooltipContent>
                             </Tooltip>
                           </div>
-                        ) : null}
-                        {showInlineAgentCards ? (
-                          // Why: nested lineage children use this lightweight
-                          // renderer instead of WorktreeCard, so their inline
-                          // agent rows must be mounted here explicitly.
-                          <WorktreeCardAgents
-                            worktreeId={child.worktree.id}
-                            className="mt-1 divide-y-0"
-                          />
                         ) : null}
                       </div>
                     </div>
