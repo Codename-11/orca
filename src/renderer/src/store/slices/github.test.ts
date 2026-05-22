@@ -8,6 +8,7 @@ import { createHostedReviewSlice } from './hosted-review'
 import type { AppState } from '../types'
 import type { GitHubWorkItem, PRInfo } from '../../../../shared/types'
 import type { HostedReviewInfo } from '../../../../shared/hosted-review'
+import { GITHUB_WORK_ITEMS_SSH_REMOTE_REQUIRED_MESSAGE } from '../../../../shared/work-items'
 import {
   createCompatibleRuntimeStatusResponseIfNeeded,
   type RuntimeEnvironmentCallRequest
@@ -1049,6 +1050,59 @@ describe('createGitHubSlice.fetchPRForBranch', () => {
     expect(store.getState().prCache[`repo-1::${branch}`]?.data).toEqual(cachedPR)
   })
 
+  it('preserves visible cached PR data when a fallback refresh misses', async () => {
+    const store = createTestStore()
+    const repoPath = '/repo'
+    const repoId = 'repo-1'
+    const branch = 'feature/fallback-miss'
+    const cachedPR = makePR({ number: 12, title: 'Visible cached PR' })
+    const hostedReviewCacheKey = getHostedReviewCacheKey(repoPath, branch, null, repoId)
+
+    store.setState({
+      repos: [{ id: repoId, path: repoPath, name: 'repo', kind: 'git' }],
+      prCache: {
+        [`${repoId}::${branch}`]: {
+          data: cachedPR,
+          fetchedAt: 1
+        }
+      },
+      hostedReviewCache: {
+        [hostedReviewCacheKey]: {
+          data: {
+            provider: 'github',
+            number: 12,
+            title: 'Visible cached PR',
+            state: 'open',
+            url: 'https://github.com/acme/orca/pull/12',
+            status: 'pending',
+            updatedAt: '2026-03-28T00:00:00Z',
+            mergeable: 'UNKNOWN'
+          },
+          fetchedAt: 1,
+          linkedReviewHintKey: 'github:12'
+        }
+      }
+    } as unknown as Partial<AppState>)
+    mockApi.gh.refreshPRNow.mockResolvedValueOnce({ kind: 'no-pr', fetchedAt: 2 })
+
+    await expect(
+      store.getState().fetchPRForBranch(repoPath, branch, {
+        force: true,
+        repoId,
+        fallbackPRNumber: 12
+      })
+    ).resolves.toEqual(cachedPR)
+    expect(store.getState().prCache[`${repoId}::${branch}`]).toEqual({
+      data: cachedPR,
+      fetchedAt: 1
+    })
+    expect(store.getState().hostedReviewCache[hostedReviewCacheKey]).toMatchObject({
+      data: expect.objectContaining({ provider: 'github', number: 12 }),
+      fetchedAt: 1,
+      linkedReviewHintKey: 'github:12'
+    })
+  })
+
   it('records PR refresh errors without clearing cached PR data', () => {
     const store = createTestStore()
     const repoPath = '/repo'
@@ -1082,6 +1136,55 @@ describe('createGitHubSlice.fetchPRForBranch', () => {
       status: 'error',
       reason: 'manual',
       message: 'network unavailable'
+    })
+  })
+
+  it('preserves visible cached PR data when a fallback refresh event misses', () => {
+    const store = createTestStore()
+    const repoPath = '/repo'
+    const repoId = 'repo-1'
+    const branch = 'feature/event-fallback-miss'
+    const cacheKey = `${repoId}::${branch}`
+    const cachedPR = makePR({ number: 12, title: 'Visible event PR' })
+    const hostedReviewCacheKey = getHostedReviewCacheKey(repoPath, branch, null, repoId)
+
+    store.setState({
+      prCache: {
+        [cacheKey]: {
+          data: cachedPR,
+          fetchedAt: 1
+        }
+      },
+      hostedReviewCache: {
+        [hostedReviewCacheKey]: {
+          data: {
+            provider: 'github',
+            number: 12,
+            title: 'Visible event PR',
+            state: 'open',
+            url: 'https://github.com/acme/orca/pull/12',
+            status: 'pending',
+            updatedAt: '2026-03-28T00:00:00Z',
+            mergeable: 'UNKNOWN'
+          },
+          fetchedAt: 1,
+          linkedReviewHintKey: 'github:12'
+        }
+      }
+    } as unknown as Partial<AppState>)
+
+    store.getState().applyGitHubPRRefreshEvent({
+      sequence: 1,
+      aliases: [{ cacheKey, repoId, repoPath, branch, fallbackPRNumber: 12 }],
+      reason: 'visible',
+      outcome: { kind: 'no-pr', fetchedAt: 2 }
+    })
+
+    expect(store.getState().prCache[cacheKey]).toEqual({ data: cachedPR, fetchedAt: 1 })
+    expect(store.getState().hostedReviewCache[hostedReviewCacheKey]).toMatchObject({
+      data: expect.objectContaining({ provider: 'github', number: 12 }),
+      fetchedAt: 1,
+      linkedReviewHintKey: 'github:12'
     })
   })
 
@@ -2189,6 +2292,84 @@ describe('createGitHubSlice.fetchWorkItems source/error envelope', () => {
       repoId: 'repo-id',
       number: 7
     })
+  })
+
+  it('quietly skips SSH repos without a resolved GitHub remote in cross-repo fetches', async () => {
+    const store = createTestStore()
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const item = {
+      type: 'pr',
+      number: 7,
+      title: 'Server PR',
+      url: 'https://example.test/7',
+      updatedAt: '2026-05-21T00:00:00Z'
+    } as GitHubWorkItem
+
+    mockApi.gh.listWorkItems
+      .mockRejectedValueOnce(new Error(GITHUB_WORK_ITEMS_SSH_REMOTE_REQUIRED_MESSAGE))
+      .mockResolvedValueOnce({
+        items: [item],
+        sources: { issues: { owner: 'up', repo: 'r' }, prs: { owner: 'up', repo: 'r' } }
+      })
+
+    try {
+      const result = await store.getState().fetchWorkItemsAcrossRepos(
+        [
+          { repoId: 'ssh-repo', path: '/server/ssh-repo' },
+          { repoId: 'github-repo', path: '/server/github-repo' }
+        ],
+        24,
+        100,
+        ''
+      )
+
+      expect(result.failedCount).toBe(0)
+      expect(result.items).toEqual([{ ...item, repoId: 'github-repo' }])
+      expect(consoleWarn).not.toHaveBeenCalled()
+      expect(consoleError).not.toHaveBeenCalled()
+    } finally {
+      consoleWarn.mockRestore()
+      consoleError.mockRestore()
+    }
+  })
+
+  it('quietly skips SSH repos without a resolved GitHub remote in next-page fetches', async () => {
+    const store = createTestStore()
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const item = {
+      type: 'issue',
+      number: 8,
+      title: 'Server issue',
+      url: 'https://example.test/8',
+      updatedAt: '2026-05-21T00:00:00Z'
+    } as GitHubWorkItem
+
+    mockApi.gh.listWorkItems
+      .mockRejectedValueOnce(new Error(GITHUB_WORK_ITEMS_SSH_REMOTE_REQUIRED_MESSAGE))
+      .mockResolvedValueOnce({
+        items: [item],
+        sources: { issues: { owner: 'up', repo: 'r' }, prs: { owner: 'up', repo: 'r' } }
+      })
+
+    try {
+      const result = await store.getState().fetchWorkItemsNextPage(
+        [
+          { repoId: 'ssh-repo', path: '/server/ssh-repo' },
+          { repoId: 'github-repo', path: '/server/github-repo' }
+        ],
+        24,
+        100,
+        '',
+        '2026-05-21T00:00:00Z'
+      )
+
+      expect(result.failedCount).toBe(0)
+      expect(result.items).toEqual([{ ...item, repoId: 'github-repo' }])
+      expect(consoleWarn).not.toHaveBeenCalled()
+    } finally {
+      consoleWarn.mockRestore()
+    }
   })
 
   it('routes project table fetches through the active runtime environment', async () => {
