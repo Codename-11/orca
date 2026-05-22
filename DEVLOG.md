@@ -6,6 +6,21 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-21 — Remediated upstream v1.4.18-rc.4 bot PR
+
+Resolved the agent-remediation merge for upstream `v1.4.18-rc.4` on `bot/upstream-sync-axiom-v1.4.18-rc.4.axiom.1` targeting `axiom/deploy` without pushing directly to the deploy branch. The conflict resolution preserves Axiom's fork semver (`1.4.18-rc.4.axiom.1`), env-driven app/update/installer identity in `config/electron-builder.config.cjs`, provider registry shortcuts including Forge, and upstream's newer sidebar unread-count extraction plus Linux icon packaging fix. Protected deletion review found no protected Axiom files removed by the merge.
+
+Verification:
+
+- `pnpm install --frozen-lockfile` → passed. Node engine warning only: project wants Node 24; local runtime is Node v25.6.0.
+- `pnpm run typecheck` → passed.
+- `pnpm exec vitest run --config config/vitest.config.ts src/shared/task-providers.test.ts src/main/axiom-release-hardening.test.ts src/main/updater-endpoints.test.ts src/main/app-build-identity.test.ts config/scripts/axiom-upstream-sync-release.test.mjs` → 45 tests passed.
+- `pnpm exec oxlint config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml` → 0 warnings / 0 errors.
+- `pnpm exec oxfmt --check config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml config/axiom-merge-remediation-policy.json` → passed.
+- `git diff --check` → passed.
+
+---
+
 ## 2026-05-21 — Classified upstream-sync remediation pipeline
 
 Converted Axiom Orca upstream release conflicts from noisy workflow failures into classified remediation flow. `config/scripts/axiom-sync-upstream-release.mjs` now emits `merge_result=agent_remediate` for unsafe conflicts instead of failing the whole release job, causing publish/build steps to skip while `config/scripts/axiom-request-merge-remediation.mjs` creates/updates a `bot/upstream-sync-*` branch, writes a remediation metadata commit, opens/updates a PR into `axiom/deploy`, and then optionally dispatches Hermes via HMAC-signed webhook. The safe `package.json` top-level version auto-resolver remains the only automatic merge resolver.
