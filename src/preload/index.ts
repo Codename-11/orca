@@ -2744,6 +2744,9 @@ const api = {
     setFloatingTerminalInputFocused: (focused: boolean): void => {
       ipcRenderer.send('ui:setFloatingTerminalInputFocused', focused)
     },
+    setShortcutRecorderFocused: (focused: boolean): void => {
+      ipcRenderer.send('ui:setShortcutRecorderFocused', focused)
+    },
     onRichMarkdownContextCommand: (
       callback: (payload: RichMarkdownContextMenuCommandPayload) => void
     ): (() => void) => {
