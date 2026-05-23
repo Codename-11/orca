@@ -63,7 +63,7 @@ env:
   AXIOM_UPSTREAM_BRANCH: main
   AXIOM_UPSTREAM_REPOSITORY: stablyai/orca
   AXIOM_UPSTREAM_REPOSITORY_URL: https://github.com/stablyai/orca.git
-  AXIOM_INCLUDE_PRERELEASES: '1'
+  AXIOM_INCLUDE_PRERELEASES: '0'
   ORCA_APP_ID: com.axiomlabs.orca
   ORCA_APP_USER_MODEL_ID: com.axiomlabs.orca
   ORCA_PRODUCT_NAME: Axiom Orca
@@ -333,9 +333,9 @@ jobs:
             --clobber
 
   mobile:
-    name: Build Android mobile APK when requested
+    name: Build Android mobile APK for stable/Axiom releases
     needs: sync
-    if: needs.sync.outputs.should_release == 'true' && !inputs.dry_run && inputs.build_mobile
+    if: needs.sync.outputs.should_release == 'true' && !inputs.dry_run && (needs.sync.outputs.upstream_prerelease != 'true' || inputs.build_mobile)
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -409,7 +409,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          ORCA_RELEASE_PLATFORMS: ${{ inputs.build_mobile && 'win,android' || env.ORCA_RELEASE_PLATFORMS }}
+          ORCA_RELEASE_PLATFORMS: ${{ (needs.mobile.result == 'success' || inputs.build_mobile) && 'win,android' || env.ORCA_RELEASE_PLATFORMS }}
         run: node config/scripts/verify-release-required-assets.mjs "${{ needs.sync.outputs.tag }}"
 
       - name: Publish draft release

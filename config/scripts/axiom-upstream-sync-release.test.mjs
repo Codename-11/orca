@@ -9,6 +9,10 @@ import {
   resolveForkReleaseVersion
 } from './axiom-release-versioning.mjs'
 
+import {
+  isUpstreamPrereleaseRelease,
+  newestSemverTag
+} from './axiom-check-upstream-release.mjs'
 import { forkCommitBaseline, nearestPriorAxiomReleaseTag } from './axiom-generate-release-notes.mjs'
 import { buildDiscordPayload, extractMarkdownSection } from './axiom-post-release-discord-notes.mjs'
 
@@ -87,7 +91,7 @@ describe('Axiom upstream sync release workflow', () => {
   it('keeps fork builds isolated to the deploy branch and fork identity', () => {
     expect(workflow).toContain('AXIOM_DEPLOY_BRANCH: axiom/deploy')
     expect(workflow).toContain('AXIOM_UPSTREAM_BRANCH: main')
-    expect(workflow).toContain("AXIOM_INCLUDE_PRERELEASES: '1'")
+    expect(workflow).toContain("AXIOM_INCLUDE_PRERELEASES: '0'")
     expect(workflow).toContain('ORCA_APP_ID: com.axiomlabs.orca')
     expect(workflow).toContain('ORCA_APP_USER_MODEL_ID: com.axiomlabs.orca')
     expect(workflow).toContain('ORCA_PRODUCT_NAME: Axiom Orca')
@@ -118,6 +122,22 @@ describe('Axiom upstream sync release workflow', () => {
     expect(workflow).not.toContain('cron:')
   })
 
+  it('skips upstream prerelease tags while still allowing Axiom-owned tags', () => {
+    expect(newestSemverTag(['v1.4.22', 'v1.4.23-rc.1'], { includePrereleases: false })).toBe(
+      'v1.4.22'
+    )
+    expect(newestSemverTag(['v1.4.22', 'v1.4.23-rc.1'], { includePrereleases: true })).toBe(
+      'v1.4.23-rc.1'
+    )
+    expect(isUpstreamPrereleaseRelease({ tag_name: 'v1.4.23-rc.1', prerelease: false })).toBe(
+      true
+    )
+    expect(isUpstreamPrereleaseRelease({ tag_name: 'v1.4.23', prerelease: true })).toBe(true)
+    expect(isUpstreamPrereleaseRelease({ tag_name: 'v1.4.23', prerelease: false })).toBe(false)
+    expect(checkScript).toContain('upstream_prerelease_skipped')
+    expect(checkScript).toContain("source', 'axiom_tag'")
+  })
+
   it('supports manually-created Axiom tags without reacting to arbitrary branch pushes', () => {
     expect(workflow).toContain('push:')
     expect(workflow).toContain("- 'axiom-v*'")
@@ -144,7 +164,10 @@ describe('Axiom upstream sync release workflow', () => {
       'axiom-orca-windows-setup.exe.blockmap',
       'app-release.apk'
     ])
-    expect(workflow).toContain("inputs.build_mobile && 'win,android' || env.ORCA_RELEASE_PLATFORMS")
+    expect(workflow).toContain("needs.sync.outputs.upstream_prerelease != 'true' || inputs.build_mobile")
+    expect(workflow).toContain(
+      "(needs.mobile.result == 'success' || inputs.build_mobile) && 'win,android' || env.ORCA_RELEASE_PLATFORMS"
+    )
   })
 
   it('mirrors upstream main commits through repository_dispatch without touching deploy releases', () => {

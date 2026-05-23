@@ -51,10 +51,20 @@ type WorkspaceCreateLinearItem = {
   }
 }
 
+type WorkspaceCreateForgeItem = {
+  provider: 'forge'
+  source: {
+    identifier: string
+    title: string
+    url: string
+  }
+}
+
 export type WorkspaceCreateTaskItem =
   | WorkspaceCreateGitHubItem
   | WorkspaceCreateGitLabItem
   | WorkspaceCreateLinearItem
+  | WorkspaceCreateForgeItem
 
 export type WorkspaceCreateParams = Record<string, unknown>
 

@@ -289,6 +289,21 @@ type LinearIssue = {
   updatedAt: string
 }
 
+type ForgeIssue = {
+  id: string
+  identifier: string
+  title: string
+  description?: string
+  url: string
+  status: { id: string; name: string; category: string; color?: string }
+  priority?: string
+  project?: { id: string; name: string; key?: string } | null
+  labels?: string[]
+  assignedAgent?: { id: string; name?: string; profileKey?: string } | null
+  updatedAt: string
+  createdAt?: string
+}
+
 type LinearState = {
   id: string
   name: string
@@ -396,6 +411,14 @@ type DetailPayload =
       project?: LinearProject
       children: LinearIssueChild[]
     }
+  | {
+      provider: 'forge'
+      description: string
+      comments: DetailComment[]
+      labels: string[]
+      assignee?: string
+      project?: LinearProject
+    }
 
 type GitHubTaskKind = 'issues' | 'prs'
 type GitHubMode = GitHubTaskKind | 'project'
@@ -441,6 +464,10 @@ type LinearStatusResponse = {
   workspaces?: LinearWorkspace[]
   selectedWorkspaceId?: string | 'all' | null
   activeWorkspaceId?: string | null
+}
+
+type ForgeStatusResponse = {
+  connected?: boolean
 }
 
 type GitHubProjectOwnerType = 'organization' | 'user'
@@ -608,6 +635,15 @@ type TaskItem =
       updatedAt: string
       source: LinearIssue
     }
+  | {
+      key: string
+      provider: 'forge'
+      title: string
+      subtitle: string
+      status: string
+      updatedAt: string
+      source: ForgeIssue
+    }
 
 type ActionableTaskItem = Exclude<TaskItem, { provider: 'gitlabTodo' }>
 type HostedReviewMergeMethod = 'merge' | 'squash' | 'rebase'
@@ -730,6 +766,18 @@ const PROVIDER_OPTIONS: PickerOption<TaskProvider>[] = [
     renderIcon: (selected) => (
       <TaskProviderLogo
         provider="linear"
+        size={16}
+        color={selected ? colors.textPrimary : colors.textSecondary}
+      />
+    )
+  },
+  {
+    value: 'forge',
+    label: 'Forge',
+    subtitle: 'Forge issues and agent tasks',
+    renderIcon: (selected) => (
+      <TaskProviderLogo
+        provider="forge"
         size={16}
         color={selected ? colors.textPrimary : colors.textSecondary}
       />
@@ -910,7 +958,7 @@ function getTaskPresetQuery(preset: GitHubPreset): string {
 }
 
 function isTaskProvider(value: unknown): value is TaskProvider {
-  return value === 'github' || value === 'gitlab' || value === 'linear'
+  return value === 'github' || value === 'gitlab' || value === 'linear' || value === 'forge'
 }
 
 function normalizeGitHubPreset(value: unknown): GitHubPreset {
@@ -1134,6 +1182,19 @@ function createLinearTask(issue: LinearIssue): TaskItem {
     title: issue.title,
     subtitle: `${issue.identifier} · ${issue.team.name}`,
     status: issue.state.name,
+    updatedAt: issue.updatedAt,
+    source: issue
+  }
+}
+
+function createForgeTask(issue: ForgeIssue): TaskItem {
+  const projectName = issue.project?.name ?? 'Forge'
+  return {
+    key: `forge:${issue.id}`,
+    provider: 'forge',
+    title: issue.title,
+    subtitle: `${issue.identifier} · ${projectName}`,
+    status: issue.status.name,
     updatedAt: issue.updatedAt,
     source: issue
   }
@@ -1713,12 +1774,14 @@ function taskKindLabel(item: TaskItem): string {
   if (item.provider === 'gitlabTodo') {
     return `${gitLabTodoTargetLabel(item.source)} todo`
   }
+  if (item.provider === 'forge') return 'Forge issue'
   return 'Linear ticket'
 }
 
 function taskExternalOpenLabel(item: TaskItem): string {
   if (item.provider === 'github') return 'Open in GitHub'
   if (item.provider === 'gitlab' || item.provider === 'gitlabTodo') return 'Open in GitLab'
+  if (item.provider === 'forge') return 'Open in Forge'
   return 'Open in Linear'
 }
 
@@ -1987,6 +2050,14 @@ function taskRepositoryMeta(
       color: repoColor(item.source.projectPath)
     }
   }
+  if (item.provider === 'forge') {
+    const label = item.source.project?.name ?? 'Forge'
+    return {
+      key: item.source.project?.id ?? 'forge',
+      label,
+      color: item.source.status.color || colors.accentBlue
+    }
+  }
   return {
     key: item.source.team.id,
     label: item.source.team.name,
@@ -2026,6 +2097,7 @@ export default function MobileTasksScreen() {
     normalizeVisibleTaskProviders(undefined)
   )
   const [linearConnected, setLinearConnected] = useState(false)
+  const [forgeConnected, setForgeConnected] = useState(false)
   const [githubMode, setGithubMode] = useState<'items' | 'project'>('items')
   const [githubKind, setGithubKind] = useState<GitHubTaskKind>('issues')
   const [githubPreset, setGithubPreset] = useState<GitHubPreset>('issues')
@@ -2815,13 +2887,19 @@ export default function MobileTasksScreen() {
       }
       setTasksSupportState({ kind: 'supported', client })
       setError('')
-      const [settingsResponse, uiResponse, preflightResponse, linearStatusResponse] =
-        await Promise.all([
-          client.sendRequest('settings.get'),
-          client.sendRequest('ui.get'),
-          client.sendRequest('preflight.check'),
-          client.sendRequest('linear.status')
-        ])
+      const [
+        settingsResponse,
+        uiResponse,
+        preflightResponse,
+        linearStatusResponse,
+        forgeStatusResponse
+      ] = await Promise.all([
+        client.sendRequest('settings.get'),
+        client.sendRequest('ui.get'),
+        client.sendRequest('preflight.check'),
+        client.sendRequest('linear.status'),
+        client.sendRequest('forge.status')
+      ])
       if (stale) return
 
       const settings = isSuccess(settingsResponse)
@@ -2850,17 +2928,23 @@ export default function MobileTasksScreen() {
       const linearStatus = isSuccess(linearStatusResponse)
         ? (linearStatusResponse.result as LinearStatusResponse)
         : null
+      const forgeStatus = isSuccess(forgeStatusResponse)
+        ? (forgeStatusResponse.result as ForgeStatusResponse)
+        : null
       const preferredProviders = normalizeVisibleTaskProviders(settings.visibleTaskProviders)
       const linearIsConnected = linearStatus?.connected === true
+      const forgeIsConnected = forgeStatus?.connected === true
       const availableProviders = filterAvailableTaskProviders(preferredProviders, {
         gitlabInstalled: preflight?.glab?.installed === true,
-        linearConnected: linearIsConnected
+        linearConnected: linearIsConnected,
+        forgeConnected: forgeIsConnected
       })
       const nextVisibleProviders =
         preferredProviders.includes('linear') && !availableProviders.includes('linear')
           ? [...availableProviders, 'linear' as const]
           : availableProviders
       setLinearConnected(linearIsConnected)
+      setForgeConnected(forgeIsConnected)
       if (!linearIsConnected) {
         setLinearWorkspaces([])
         setLinearTeams([])
@@ -3140,6 +3224,10 @@ export default function MobileTasksScreen() {
           setItems([])
           return
         }
+        if (provider === 'forge' && !forgeConnected) {
+          setItems([])
+          return
+        }
         const currentRepos = reposRef.current.length > 0 ? reposRef.current : await loadRepos()
         if (!isCurrent()) return
         if (provider === 'github' || provider === 'gitlab') {
@@ -3262,6 +3350,27 @@ export default function MobileTasksScreen() {
           } else {
             setError('')
           }
+        } else if (provider === 'forge') {
+          const normalizedQuery = appliedQuery.trim()
+          const response = normalizedQuery
+            ? await requestClient.sendRequest('forge.searchIssues', {
+                query: normalizedQuery,
+                limit: LINEAR_LIMIT
+              })
+            : await requestClient.sendRequest('forge.listIssues', {
+                filter: 'active',
+                limit: LINEAR_LIMIT
+              })
+          if (!isSuccess(response)) {
+            throw new Error(response.error.message)
+          }
+          const issues = response.result as ForgeIssue[]
+          if (!isCurrent()) return
+          setItems(
+            issues
+              .map(createForgeTask)
+              .sort((a, b) => taskTime(b.updatedAt) - taskTime(a.updatedAt))
+          )
         } else {
           const normalizedQuery = appliedQuery.trim()
           const response = normalizedQuery
@@ -3306,6 +3415,7 @@ export default function MobileTasksScreen() {
       connState,
       countGitHubItems,
       fetchGitHubItemsPage,
+      forgeConnected,
       gitlabFilter,
       gitlabView,
       githubMode,
@@ -3910,7 +4020,9 @@ export default function MobileTasksScreen() {
       return
     }
     setItemBodyDraft(
-      detailPayload.provider === 'linear' ? detailPayload.description : detailPayload.body
+      detailPayload.provider === 'linear' || detailPayload.provider === 'forge'
+        ? detailPayload.description
+        : detailPayload.body
     )
   }, [detailPayload])
 
@@ -4102,6 +4214,24 @@ export default function MobileTasksScreen() {
         }
         return
       }
+
+      if (actionItem.provider === 'forge') {
+        if (!stale) {
+          setDetailPayload({
+            provider: 'forge',
+            description: actionItem.source.description ?? '',
+            comments: [],
+            labels: actionItem.source.labels ?? [],
+            assignee:
+              actionItem.source.assignedAgent?.name ?? actionItem.source.assignedAgent?.profileKey,
+            project: actionItem.source.project
+              ? { id: actionItem.source.project.id, name: actionItem.source.project.name }
+              : undefined
+          })
+        }
+        return
+      }
+      if (actionItem.provider !== 'linear') return
 
       const [issueResponse, commentsResponse] = await Promise.all([
         client.sendRequest(
@@ -7581,6 +7711,23 @@ export default function MobileTasksScreen() {
             )
           }
         }
+      } else if (provider === 'forge') {
+        const response = await client.sendRequest('forge.createIssue', {
+          title,
+          description: createBody.trim() || undefined
+        })
+        if (!isSuccess(response)) {
+          throw new Error(response.error.message)
+        }
+        const result = response.result as {
+          ok?: boolean
+          issue?: ForgeIssue
+          error?: string
+        }
+        if (result.ok === false || !result.issue) {
+          throw new Error(result.error ?? 'Failed to create Forge issue')
+        }
+        setActionItem(createForgeTask(result.issue) as Extract<TaskItem, { provider: 'forge' }>)
       } else {
         const team = linearTeams.find((entry) => entry.id === createTeamId) ?? linearTeams[0]
         if (!team) {
@@ -7843,23 +7990,37 @@ export default function MobileTasksScreen() {
             />
           )
         }))
-      : linearTeams.map((team) => ({
-          value: team.id,
-          label: team.name,
-          subtitle: team.workspaceName
-        }))
+      : provider === 'linear'
+        ? linearTeams.map((team) => ({
+            value: team.id,
+            label: team.name,
+            subtitle: team.workspaceName
+          }))
+        : []
   const selectedCreateTarget =
     provider === 'github' || provider === 'gitlab'
       ? (hostedRepos.find((repo) => repo.id === createRepoId) ?? hostedRepos[0] ?? null)
-      : (linearTeams.find((team) => team.id === createTeamId) ?? linearTeams[0] ?? null)
+      : provider === 'linear'
+        ? (linearTeams.find((team) => team.id === createTeamId) ?? linearTeams[0] ?? null)
+        : null
   const selectedCreateTargetLabel =
     provider === 'github' || provider === 'gitlab'
       ? ((selectedCreateTarget as RepoSummary | null)?.displayName ?? 'Select target')
-      : ((selectedCreateTarget as LinearTeam | null)?.name ?? 'Select target')
+      : provider === 'linear'
+        ? ((selectedCreateTarget as LinearTeam | null)?.name ?? 'Select target')
+        : 'Forge workspace'
   const providerLabel =
-    provider === 'github' ? 'GitHub' : provider === 'gitlab' ? 'GitLab' : 'Linear'
+    provider === 'github'
+      ? 'GitHub'
+      : provider === 'gitlab'
+        ? 'GitLab'
+        : provider === 'forge'
+          ? 'Forge'
+          : 'Linear'
   const showHeaderCreateTask =
-    provider === 'linear' || (provider === 'github' && githubMode === 'items')
+    provider === 'linear' ||
+    provider === 'forge' ||
+    (provider === 'github' && githubMode === 'items')
   const providerOptions = useMemo(
     () => PROVIDER_OPTIONS.filter((option) => visibleProviders.includes(option.value)),
     [visibleProviders]
@@ -8158,7 +8319,9 @@ export default function MobileTasksScreen() {
           ? 'No GitHub tasks'
           : provider === 'gitlab'
             ? 'No GitLab tasks'
-            : 'No Linear tasks'
+            : provider === 'forge'
+              ? 'No Forge issues'
+              : 'No Linear tasks'
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -10098,42 +10261,48 @@ export default function MobileTasksScreen() {
           <Text style={styles.sheetSubtitle}>
             {provider === 'github' || provider === 'gitlab'
               ? 'Create an issue in the selected repository.'
-              : 'Create an issue in the selected Linear team.'}
+              : provider === 'forge'
+                ? 'Create an issue in the connected Forge workspace.'
+                : 'Create an issue in the selected Linear team.'}
           </Text>
         </View>
 
         <View style={styles.createForm}>
-          <Text style={styles.fieldLabel}>
-            {provider === 'github' || provider === 'gitlab' ? 'Repository' : 'Team'}
-          </Text>
-          <Pressable
-            style={styles.targetButton}
-            disabled={!taskUiReady}
-            onPress={() => {
-              if (!taskUiReady) return
-              setShowCreateTargetPicker(true)
-            }}
-          >
-            {provider === 'github' || provider === 'gitlab' ? (
-              <View
-                style={[
-                  styles.pickerRepoDot,
-                  selectedCreateTarget
-                    ? {
-                        backgroundColor: getRepoBadgeColor(
-                          selectedCreateTarget as RepoSummary,
-                          (selectedCreateTarget as RepoSummary).displayName
-                        )
-                      }
-                    : undefined
-                ]}
-              />
-            ) : null}
-            <Text style={styles.targetButtonText} numberOfLines={1}>
-              {selectedCreateTargetLabel}
-            </Text>
-            <ChevronDown size={14} color={colors.textMuted} />
-          </Pressable>
+          {provider !== 'forge' ? (
+            <>
+              <Text style={styles.fieldLabel}>
+                {provider === 'github' || provider === 'gitlab' ? 'Repository' : 'Team'}
+              </Text>
+              <Pressable
+                style={styles.targetButton}
+                disabled={!taskUiReady}
+                onPress={() => {
+                  if (!taskUiReady) return
+                  setShowCreateTargetPicker(true)
+                }}
+              >
+                {provider === 'github' || provider === 'gitlab' ? (
+                  <View
+                    style={[
+                      styles.pickerRepoDot,
+                      selectedCreateTarget
+                        ? {
+                            backgroundColor: getRepoBadgeColor(
+                              selectedCreateTarget as RepoSummary,
+                              (selectedCreateTarget as RepoSummary).displayName
+                            )
+                          }
+                        : undefined
+                    ]}
+                  />
+                ) : null}
+                <Text style={styles.targetButtonText} numberOfLines={1}>
+                  {selectedCreateTargetLabel}
+                </Text>
+                <ChevronDown size={14} color={colors.textMuted} />
+              </Pressable>
+            </>
+          ) : null}
 
           {provider === 'github' &&
           selectedCreateRepo &&
@@ -10223,7 +10392,7 @@ export default function MobileTasksScreen() {
       </BottomDrawer>
 
       <PickerModal
-        visible={taskUiReady && showCreateTask && showCreateTargetPicker}
+        visible={taskUiReady && showCreateTask && showCreateTargetPicker && provider !== 'forge'}
         title={provider === 'linear' ? 'Linear Team' : 'Repository'}
         options={createTargetOptions}
         selected={
@@ -12149,13 +12318,15 @@ export default function MobileTasksScreen() {
                       <Text style={styles.detailMetaLabel}>Status</Text>
                       <Text style={styles.detailMetaValue}>{actionItem.status}</Text>
                     </View>
-                    {detailPayload.provider === 'linear' && detailPayload.assignee ? (
+                    {(detailPayload.provider === 'linear' || detailPayload.provider === 'forge') &&
+                    detailPayload.assignee ? (
                       <View style={styles.detailMetaItem}>
                         <Text style={styles.detailMetaLabel}>Assignee</Text>
                         <Text style={styles.detailMetaValue}>{detailPayload.assignee}</Text>
                       </View>
                     ) : null}
-                    {detailPayload.provider === 'linear' && detailPayload.project ? (
+                    {(detailPayload.provider === 'linear' || detailPayload.provider === 'forge') &&
+                    detailPayload.project ? (
                       <View style={styles.detailMetaItem}>
                         <Text style={styles.detailMetaLabel}>Project</Text>
                         <Text style={styles.detailMetaValue}>{detailPayload.project.name}</Text>
@@ -12242,9 +12413,9 @@ export default function MobileTasksScreen() {
                     ) : (
                       <MobileMarkdown
                         content={
-                          detailPayload.provider === 'linear'
-                            ? detailPayload.description
-                            : detailPayload.body
+                          detailPayload.provider === 'github' || detailPayload.provider === 'gitlab'
+                            ? detailPayload.body
+                            : detailPayload.description
                         }
                         fallback="No description."
                       />

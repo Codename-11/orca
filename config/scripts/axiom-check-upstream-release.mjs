@@ -173,10 +173,18 @@ function compareVersions(left, right) {
   return 0
 }
 
-function newestSemverTag(tags, { includePrereleases }) {
+export function isPrereleaseTag(tag) {
+  return (parseVersion(tag)?.prerelease.length ?? 0) > 0
+}
+
+export function isUpstreamPrereleaseRelease(release) {
+  return Boolean(release?.prerelease) || isPrereleaseTag(release?.tag_name)
+}
+
+export function newestSemverTag(tags, { includePrereleases }) {
   return tags
     .filter((tag) => parseVersion(tag))
-    .filter((tag) => includePrereleases || parseVersion(tag).prerelease.length === 0)
+    .filter((tag) => includePrereleases || !isPrereleaseTag(tag))
     .sort((left, right) => compareVersions(right, left))[0]
 }
 
@@ -266,6 +274,21 @@ async function main() {
   }
 
   const upstreamTag = release.tag_name
+  const upstreamPrerelease = isUpstreamPrereleaseRelease(release)
+  if (upstreamPrerelease) {
+    setOutput('source', 'upstream_tag')
+    setOutput('upstream_tag', upstreamTag)
+    setOutput('upstream_name', release.name || upstreamTag)
+    setOutput(
+      'upstream_url',
+      release.html_url || `https://github.com/${upstreamRepo}/releases/tag/${upstreamTag}`
+    )
+    setOutput('upstream_prerelease', 'true')
+    setOutput('should_release', 'false')
+    setOutput('reason', `upstream_prerelease_skipped:${upstreamTag}`)
+    return
+  }
+
   const existingTags = await listForkReleaseTags(forkRepo)
   const forkRelease = resolveForkReleaseVersion({
     upstreamTag,
@@ -285,7 +308,7 @@ async function main() {
     'upstream_url',
     release.html_url || `https://github.com/${upstreamRepo}/releases/tag/${upstreamTag}`
   )
-  setOutput('upstream_prerelease', release.prerelease ? 'true' : 'false')
+  setOutput('upstream_prerelease', upstreamPrerelease ? 'true' : 'false')
   setOutput('fork_version', forkRelease.forkVersion)
   setOutput('fork_tag', forkRelease.forkTag)
   setOutput('axiom_revision', String(forkRelease.axiomRevision))

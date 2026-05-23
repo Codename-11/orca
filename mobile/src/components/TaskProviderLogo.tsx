@@ -1,6 +1,6 @@
 import Svg, { Path } from 'react-native-svg'
 
-export type TaskProviderLogoKind = 'github' | 'gitlab' | 'linear'
+export type TaskProviderLogoKind = 'github' | 'gitlab' | 'linear' | 'forge'
 
 type Props = {
   provider: TaskProviderLogoKind
@@ -42,6 +42,26 @@ export function TaskProviderLogo({ provider, size = 16, color }: Props) {
       >
         {/* Why: lucide-react-native omits deprecated brand icons; keep parity with desktop lucide paths. */}
         <Path d="m22 13.29-3.33-10a.42.42 0 0 0-.14-.18.38.38 0 0 0-.22-.11.39.39 0 0 0-.23.07.42.42 0 0 0-.14.18l-2.26 6.67H8.32L6.1 3.26A.42.42 0 0 0 6 3.08.38.38 0 0 0 5.74 3a.39.39 0 0 0-.23.07.42.42 0 0 0-.14.18L2 13.29a.74.74 0 0 0 .27.83L12 21l9.69-6.88a.71.71 0 0 0 .31-.83Z" />
+      </Svg>
+    )
+  }
+
+  if (provider === 'forge') {
+    return (
+      <Svg
+        width={size}
+        height={size}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        {/* Why: Forge is the built-in task board; use an anvil-like mark without depending on a brand package. */}
+        <Path d="M4 6h13a3 3 0 0 1-3 3H9l-2 3h5l-3 6H5l2-4H3l3-5H4Z" />
+        <Path d="M13 18h7" />
+        <Path d="M16 14v4" />
       </Svg>
     )
   }
