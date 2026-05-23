@@ -1,0 +1,38 @@
+name: Axiom Resume Remediated Release
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - axiom/deploy
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: axiom-remediated-release-resume-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch-release:
+    name: Dispatch release after remediation merge
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'bot/upstream-sync-'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout release tooling
+        uses: actions/checkout@v4
+        with:
+          ref: axiom/deploy
+          fetch-depth: 1
+
+      - name: Dispatch remediated release publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node config/scripts/axiom-dispatch-remediated-release.mjs
