@@ -150,4 +150,29 @@ describe('task workspace create params', () => {
       createdWithAgent: 'grok'
     })
   })
+
+  it('creates Forge workspaces in the selected repo and preserves the issue reference', () => {
+    expect(
+      buildTaskWorkspaceCreateParams({
+        item: {
+          provider: 'forge',
+          source: {
+            identifier: 'AXI-42',
+            title: 'Ship Forge mobile tasks',
+            url: 'https://forge.example/issues/AXI-42'
+          }
+        },
+        targetRepoId: 'repo-forge',
+        setupDecision: 'inherit',
+        agent: 'codex'
+      })
+    ).toMatchObject({
+      repo: 'id:repo-forge',
+      name: 'axi-42',
+      displayName: 'Ship Forge mobile tasks',
+      linkedLinearIssue: 'AXI-42',
+      startupDraft: 'https://forge.example/issues/AXI-42',
+      createdWithAgent: 'codex'
+    })
+  })
 })
