@@ -373,7 +373,19 @@ jobs:
         run: npx expo prebuild --platform android --no-install
 
       - name: Build Android release APK
-        run: cd android && ./gradlew assembleRelease
+        shell: bash
+        run: |
+          cd android
+          for attempt in 1 2 3; do
+            if ./gradlew assembleRelease --refresh-dependencies; then
+              exit 0
+            fi
+            if [[ "$attempt" == "3" ]]; then
+              exit 1
+            fi
+            echo "Gradle assembleRelease failed; retrying in 20s (attempt $attempt/3)..."
+            sleep 20
+          done
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
