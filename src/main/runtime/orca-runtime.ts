@@ -46,8 +46,9 @@ import type {
   TabGroupLayoutNode,
   TuiAgent
 } from '../../shared/types'
-import { splitWorktreeId } from '../../shared/worktree-id'
+import { FOLDER_WORKSPACE_INSTANCE_SEPARATOR, splitWorktreeId } from '../../shared/worktree-id'
 import { isFolderRepo } from '../../shared/repo-kind'
+import { DEFAULT_WORKSPACE_STATUS_ID } from '../../shared/workspace-statuses'
 import { buildSetupRunnerCommand } from '../../shared/setup-runner-command'
 import { FIRST_PANE_ID } from '../../shared/pane-key'
 import { isTerminalLeafId, makePaneKey, parsePaneKey } from '../../shared/stable-pane-id'
@@ -317,8 +318,9 @@ import {
   writeIssueCommand
 } from '../hooks'
 import { DEFAULT_REPO_BADGE_COLOR, getDefaultVoiceSettings } from '../../shared/constants'
-import { createFolderWorktree, listRepoWorktrees } from '../repo-worktrees'
+import { listRepoWorktrees } from '../repo-worktrees'
 import { createWorktreeSymlinks } from '../ipc/worktree-symlinks'
+import { deleteWorktreeHistoryDir } from '../terminal-history'
 import {
   cleanupUnusedWorktreePushTargetRemote,
   cleanupUnusedWorktreePushTargetRemoteSsh,
@@ -576,6 +578,7 @@ const BRACKETED_PASTE_BEGIN = '\x1b[200~'
 const BRACKETED_PASTE_END = '\x1b[201~'
 const BRACKETED_PASTE_QUIET_MS = 1500
 const DRAFT_PASTE_READY_TIMEOUT_MS = 8000
+const HEADLESS_RENDERER_SNAPSHOT_STABLE_WRITE_ATTEMPTS = 8
 const RECENT_PTY_OUTPUT_LIMIT = 4096
 
 type RuntimeNotifier = {
@@ -702,6 +705,92 @@ type RuntimeWorktreeRemovalInFlight = {
 
 function getRuntimeWorktreeRemovalOptionsKey(force: boolean, runHooks: boolean): string {
   return `${force ? 'force' : 'normal'}:${runHooks ? 'run-hooks' : 'skip-hooks'}`
+}
+
+function getRuntimeFolderWorkspaceRootId(repo: Repo): string {
+  return `${repo.id}::${repo.path}`
+}
+
+function getRuntimeFolderWorkspaceInstanceId(repo: Repo, instanceId: string): string {
+  return `${getRuntimeFolderWorkspaceRootId(repo)}${FOLDER_WORKSPACE_INSTANCE_SEPARATOR}${instanceId}`
+}
+
+function getRuntimeFolderWorkspaceInstanceIdentity(repo: Repo, worktreeId: string): string {
+  const prefix = `${getRuntimeFolderWorkspaceRootId(repo)}${FOLDER_WORKSPACE_INSTANCE_SEPARATOR}`
+  return worktreeId.startsWith(prefix) ? worktreeId.slice(prefix.length) : randomUUID()
+}
+
+function isRuntimeFolderWorkspaceIdForRepo(repo: Repo, worktreeId: string): boolean {
+  const rootId = getRuntimeFolderWorkspaceRootId(repo)
+  return (
+    worktreeId === rootId ||
+    worktreeId.startsWith(`${rootId}${FOLDER_WORKSPACE_INSTANCE_SEPARATOR}`)
+  )
+}
+
+function mergeRuntimeFolderWorkspace(repo: Repo, worktreeId: string, meta: WorktreeMeta): Worktree {
+  return {
+    id: worktreeId,
+    ...(meta.instanceId !== undefined ? { instanceId: meta.instanceId } : {}),
+    repoId: repo.id,
+    path: repo.path,
+    head: '',
+    branch: '',
+    isBare: false,
+    isMainWorktree: worktreeId === getRuntimeFolderWorkspaceRootId(repo),
+    displayName: meta.displayName || repo.displayName,
+    comment: meta.comment || '',
+    linkedIssue: meta.linkedIssue ?? null,
+    linkedPR: meta.linkedPR ?? null,
+    linkedLinearIssue: meta.linkedLinearIssue ?? null,
+    linkedGitLabMR: meta.linkedGitLabMR ?? null,
+    linkedGitLabIssue: meta.linkedGitLabIssue ?? null,
+    isArchived: meta.isArchived ?? false,
+    isUnread: meta.isUnread ?? false,
+    isPinned: meta.isPinned ?? false,
+    sortOrder: meta.sortOrder ?? 0,
+    ...(meta.manualOrder !== undefined ? { manualOrder: meta.manualOrder } : {}),
+    lastActivityAt: meta.lastActivityAt ?? 0,
+    ...(meta.createdAt !== undefined ? { createdAt: meta.createdAt } : {}),
+    ...(meta.createdWithAgent !== undefined ? { createdWithAgent: meta.createdWithAgent } : {}),
+    workspaceStatus: meta.workspaceStatus ?? DEFAULT_WORKSPACE_STATUS_ID,
+    diffComments: meta.diffComments
+  }
+}
+
+function listRuntimeFolderWorkspaces(
+  store: Pick<RuntimeStore, 'getAllWorktreeMeta' | 'setWorktreeMeta'>,
+  repo: Repo
+): Worktree[] {
+  const rootId = getRuntimeFolderWorkspaceRootId(repo)
+  const allMeta = store.getAllWorktreeMeta()
+  const ids = Object.keys(allMeta).filter((worktreeId) =>
+    isRuntimeFolderWorkspaceIdForRepo(repo, worktreeId)
+  )
+  if (!ids.includes(rootId)) {
+    ids.unshift(rootId)
+  } else {
+    ids.sort((left, right) => {
+      if (left === rootId) {
+        return -1
+      }
+      if (right === rootId) {
+        return 1
+      }
+      return 0
+    })
+  }
+
+  return ids.map((worktreeId) => {
+    const existing = allMeta[worktreeId]
+    const meta = existing?.instanceId
+      ? existing
+      : store.setWorktreeMeta(worktreeId, {
+          instanceId: getRuntimeFolderWorkspaceInstanceIdentity(repo, worktreeId),
+          ...(existing ? {} : { displayName: repo.displayName, lastActivityAt: Date.now() })
+        })
+    return mergeRuntimeFolderWorkspace(repo, worktreeId, meta)
+  })
 }
 
 function parseExactWorktreeIdSelector(selector: string): RuntimeWorktreeRemovalTarget | null {
@@ -2227,6 +2316,16 @@ export class OrcaRuntimeService {
     return this.serializeTerminalBufferFromAvailableState(ptyId, opts)
   }
 
+  serializeHeadlessTerminalBufferForRenderer(
+    ptyId: string,
+    opts: { scrollbackRows?: number } = {}
+  ): Promise<{ data: string; cols: number; rows: number } | null> {
+    return this.serializeHeadlessTerminalBuffer(ptyId, {
+      ...opts,
+      requireStableWrites: true
+    })
+  }
+
   async clearTerminalBuffer(handle: string): Promise<{ handle: string; cleared: boolean }> {
     const leaf = this.resolveLeafForHandle(handle)
     if (!leaf?.ptyId) {
@@ -2448,13 +2547,15 @@ export class OrcaRuntimeService {
 
   private async serializeHeadlessTerminalBuffer(
     ptyId: string,
-    opts: { scrollbackRows?: number } = {}
+    opts: { scrollbackRows?: number; requireStableWrites?: boolean } = {}
   ): Promise<{ data: string; cols: number; rows: number } | null> {
     const state = this.headlessTerminals.get(ptyId)
     if (!state) {
       return null
     }
-    await state.writeChain
+    if (!(await this.waitForHeadlessWritesBeforeSnapshot(state, opts.requireStableWrites))) {
+      return null
+    }
     // Why: when an alternate-screen TUI (Claude Code, vim, etc.) is currently
     // active, the visible content is the alt-screen snapshot — replaying any
     // normal-buffer scrollback before it can duplicate shell prompts and
@@ -2467,6 +2568,30 @@ export class OrcaRuntimeService {
     const snapshot = state.emulator.getSnapshot({ scrollbackRows })
     const data = snapshot.rehydrateSequences + snapshot.snapshotAnsi
     return data.length > 0 ? { data, cols: snapshot.cols, rows: snapshot.rows } : null
+  }
+
+  private async waitForHeadlessWritesBeforeSnapshot(
+    state: RuntimeHeadlessTerminal,
+    requireStableWrites = false
+  ): Promise<boolean> {
+    let observed = state.writeChain
+    await observed
+    if (!requireStableWrites || state.writeChain === observed) {
+      return true
+    }
+
+    for (let attempt = 0; attempt < HEADLESS_RENDERER_SNAPSHOT_STABLE_WRITE_ATTEMPTS; attempt++) {
+      observed = state.writeChain
+      await observed
+      if (state.writeChain === observed) {
+        return true
+      }
+    }
+
+    // Why: renderer reveal drops its fallback queue on a successful snapshot.
+    // If output keeps appending while we wait, prefer the renderer fallback
+    // replay over returning a stale "authoritative" headless snapshot.
+    return false
   }
 
   private disposeHeadlessTerminal(ptyId: string): void {
@@ -5169,6 +5294,7 @@ export class OrcaRuntimeService {
         Repo,
         | 'displayName'
         | 'badgeColor'
+        | 'repoIcon'
         | 'hookSettings'
         | 'worktreeBaseRef'
         | 'kind'
@@ -6410,11 +6536,18 @@ export class OrcaRuntimeService {
 
   async listDetectedManagedWorktrees(repoSelector: string): Promise<DetectedWorktreeListResult> {
     const repo = await this.resolveRepoSelector(repoSelector)
+    if (isFolderRepo(repo)) {
+      const worktrees = listRuntimeFolderWorkspaces(this.requireStore(), repo)
+      return {
+        repoId: repo.id,
+        authoritative: true,
+        source: 'git',
+        worktrees: worktrees.map((worktree) => this.toRuntimeDetectedWorktree(repo, worktree))
+      }
+    }
     let scan: RuntimeWorktreeScanResult
     try {
-      scan = isFolderRepo(repo)
-        ? { ok: true, worktrees: [createFolderWorktree(repo)] }
-        : await this.listRepoWorktreesForResolution(repo)
+      scan = await this.listRepoWorktreesForResolution(repo)
     } catch {
       scan = { ok: false, worktrees: [] }
     }
@@ -6895,15 +7028,102 @@ export class OrcaRuntimeService {
     }
 
     const repo = await this.resolveRepoSelector(args.repoSelector)
-    if (isFolderRepo(repo)) {
-      throw new Error('Folder mode does not support creating worktrees.')
-    }
     const draftStartup = args.startupDraft
       ? await this.buildStartupForDraft(repo, args.startupDraft, args.createdWithAgent)
       : null
     const effectiveStartup = args.startup ?? draftStartup?.startup
     const effectiveCreatedWithAgent = args.createdWithAgent ?? draftStartup?.agent
     const effectiveDraftPaste = args.startupDraftPaste ?? draftStartup?.draftPaste
+    if (isFolderRepo(repo)) {
+      const now = Date.now()
+      const settings = this.store.getSettings()
+      const instanceId = randomUUID()
+      const worktreeId = getRuntimeFolderWorkspaceInstanceId(repo, instanceId)
+      const meta = this.store.setWorktreeMeta(worktreeId, {
+        instanceId,
+        displayName: args.displayName?.trim() || args.name,
+        lastActivityAt: now,
+        createdAt: now,
+        orcaCreatedAt: now,
+        orcaCreationSource: 'runtime',
+        orcaCreationWorkspaceLayout: {
+          path: settings.workspaceDir,
+          nestWorkspaces: settings.nestWorkspaces
+        },
+        ...(args.linkedIssue !== undefined ? { linkedIssue: args.linkedIssue } : {}),
+        ...(args.linkedPR !== undefined ? { linkedPR: args.linkedPR } : {}),
+        ...(args.linkedLinearIssue !== undefined
+          ? { linkedLinearIssue: args.linkedLinearIssue }
+          : {}),
+        ...(args.linkedGitLabIssue !== undefined
+          ? { linkedGitLabIssue: args.linkedGitLabIssue }
+          : {}),
+        ...(args.linkedGitLabMR !== undefined ? { linkedGitLabMR: args.linkedGitLabMR } : {}),
+        ...(effectiveCreatedWithAgent ? { createdWithAgent: effectiveCreatedWithAgent } : {}),
+        ...(args.comment !== undefined ? { comment: args.comment } : {}),
+        ...(args.manualOrder !== undefined ? { manualOrder: args.manualOrder } : {}),
+        ...(args.workspaceStatus !== undefined ? { workspaceStatus: args.workspaceStatus } : {})
+      })
+      const worktree = mergeRuntimeFolderWorkspace(repo, worktreeId, meta)
+      this.invalidateResolvedWorktreeCache()
+      this.notifier?.worktreesChanged(repo.id)
+      const shouldActivate = args.activate === true || args.runHooks === true
+      let warning: string | undefined
+      let didSpawnStartup = false
+      if (effectiveStartup && this.ptyController?.spawn) {
+        try {
+          const startupTrustAgent = effectiveDraftPaste?.agent ?? effectiveCreatedWithAgent
+          if (startupTrustAgent) {
+            this.markLocalWorkspaceTrustedForAgent(startupTrustAgent, worktree.path)
+          }
+          const terminal = await this.createTerminal(`id:${worktree.id}`, {
+            command: effectiveStartup.command,
+            env: effectiveStartup.env
+          })
+          if (effectiveDraftPaste) {
+            this.pasteStartupDraftWhenReady(terminal.handle, effectiveDraftPaste)
+          }
+          didSpawnStartup = true
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          warning = `Failed to create the startup terminal for ${worktree.path}: ${message}`
+          console.warn(`[worktree-create] ${warning}`)
+        }
+      }
+      if (shouldActivate) {
+        if (effectiveStartup && !didSpawnStartup) {
+          this.notifier?.activateWorktree(repo.id, worktree.id, undefined, effectiveStartup)
+        } else {
+          this.notifier?.activateWorktree(repo.id, worktree.id)
+        }
+      } else if (this.ptyController?.spawn && !didSpawnStartup) {
+        try {
+          await this.createTerminal(`id:${worktree.id}`)
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          warning = warning
+            ? `${warning} Also failed to create the initial terminal for ${worktree.path}: ${message}`
+            : `Failed to create the initial terminal for ${worktree.path}: ${message}`
+          console.warn(`[worktree-create] ${warning}`)
+        }
+      }
+      return {
+        worktree: {
+          ...worktree,
+          parentWorktreeId: null,
+          childWorktreeIds: [],
+          lineage: null,
+          git: {
+            path: worktree.path,
+            head: worktree.head,
+            branch: worktree.branch,
+            isBare: worktree.isBare,
+            isMainWorktree: worktree.isMainWorktree
+          }
+        },
+        ...(warning ? { warning } : {})
+      }
+    }
     if (repo.connectionId) {
       return await this.createManagedRemoteWorktree(repo, {
         ...args,
@@ -8252,7 +8472,27 @@ export class OrcaRuntimeService {
         throw new Error('repo_not_found')
       }
       if (isFolderRepo(repo)) {
-        throw new Error('Folder mode does not support deleting worktrees.')
+        if (removalTarget.id === getRuntimeFolderWorkspaceRootId(repo)) {
+          throw new Error(
+            'Cannot delete the project root workspace. Remove the folder project instead.'
+          )
+        }
+        const localProvider = this.getLocalProvider()
+        if (localProvider) {
+          // Why: folder workspace deletion has no Git removal phase where PTYs
+          // would otherwise be swept; tear them down before hiding the workspace.
+          await killAllProcessesForWorktree(removalTarget.id, {
+            runtime: this,
+            localProvider
+          }).catch((err) => {
+            console.warn(`[worktree-teardown] failed for ${removalTarget.id}:`, err)
+          })
+        }
+        store.removeWorktreeMeta(removalTarget.id)
+        deleteWorktreeHistoryDir(removalTarget.id)
+        this.invalidateResolvedWorktreeCache()
+        this.notifier?.worktreesChanged(repo.id)
+        return {}
       }
       const provider = repo.connectionId ? requireSshGitProvider(repo.connectionId) : null
       const registeredWorktrees = repo.connectionId
@@ -9606,6 +9846,23 @@ export class OrcaRuntimeService {
     const now = Date.now()
     const perRepoWorktrees = await Promise.all(
       this.store.getRepos().map(async (repo) => {
+        if (isFolderRepo(repo)) {
+          return listRuntimeFolderWorkspaces(this.requireStore(), repo).map((worktree) => ({
+            ...worktree,
+            parentWorktreeId: null,
+            childWorktreeIds: [],
+            lineage: null,
+            git: {
+              path: worktree.path,
+              head: worktree.head,
+              branch: worktree.branch,
+              isBare: worktree.isBare,
+              isMainWorktree: worktree.isMainWorktree
+            },
+            displayName: worktree.displayName,
+            comment: worktree.comment
+          }))
+        }
         // Why: mobile startup RPCs share this path. A slow repo scan should
         // degrade one repo's metadata, not block all terminal/session loading.
         const scan = await withTimeout(

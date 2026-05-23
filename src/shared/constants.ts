@@ -19,7 +19,6 @@ import { DEFAULT_WORKTREE_CARD_PROPERTIES } from './worktree-card-properties'
 
 export { DEFAULT_STATUS_BAR_ITEMS } from './status-bar-defaults'
 export {
-  ALWAYS_VISIBLE_WORKTREE_CARD_PROPERTIES,
   DEFAULT_WORKTREE_CARD_PROPERTIES,
   normalizeWorktreeCardProperties
 } from './worktree-card-properties'
@@ -31,7 +30,7 @@ export const DEFAULT_HIDE_SLEEPING_WORKSPACES = false
 
 // Why: the onboarding wizard's last step index. Centralized so backfill,
 // clamps, and UI step references all agree on the same upper bound.
-export const ONBOARDING_FINAL_STEP = 6
+export const ONBOARDING_FINAL_STEP = 7
 
 export const ORCA_BROWSER_PARTITION = 'persist:orca-browser'
 // Why: blank browser tabs must start from an inert guest URL that does not

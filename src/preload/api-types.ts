@@ -642,6 +642,7 @@ export type PreloadApi = {
           Repo,
           | 'displayName'
           | 'badgeColor'
+          | 'repoIcon'
           | 'hookSettings'
           | 'worktreeBaseRef'
           | 'kind'
@@ -790,6 +791,10 @@ export type PreloadApi = {
     hasChildProcesses: (id: string) => Promise<boolean>
     getForegroundProcess: (id: string) => Promise<string | null>
     getCwd: (id: string) => Promise<string>
+    serializeHeadlessBuffer: (
+      id: string,
+      opts?: { scrollbackRows?: number }
+    ) => Promise<{ data: string; cols: number; rows: number } | null>
     listSessions: () => Promise<{ id: string; cwd: string; title: string }[]>
     onData: (callback: (data: { id: string; data: string }) => void) => () => void
     onReplay: (callback: (data: { id: string; data: string }) => void) => () => void
@@ -1404,6 +1409,7 @@ export type PreloadApi = {
     pathExists: (path: string) => Promise<boolean>
     pickAttachment: () => Promise<string | null>
     pickImage: () => Promise<string | null>
+    pickRepoIconImage: () => Promise<{ dataUrl: string; fileName: string } | null>
     pickAudio: () => Promise<string | null>
     pickDirectory: (args: { defaultPath?: string }) => Promise<string | null>
     copyFile: (args: { srcPath: string; destPath: string }) => Promise<void>
@@ -1765,7 +1771,6 @@ export type PreloadApi = {
     onOpenSettings: (callback: () => void) => () => void
     onOpenFeatureTour: (callback: () => void) => () => void
     onOpenCrashReport: (callback: () => void) => () => void
-    onShowFeatureTourNudge: (callback: () => void) => () => void
     onToggleLeftSidebar: (callback: () => void) => () => void
     onToggleRightSidebar: (callback: () => void) => () => void
     onToggleWorktreePalette: (callback: () => void) => () => void

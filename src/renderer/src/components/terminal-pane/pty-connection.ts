@@ -50,6 +50,11 @@ import {
   type AgentInterruptInputIntent
 } from '../../../../shared/agent-interrupt-intent'
 import { createAgentCompletionCoordinator } from './agent-completion-coordinator'
+import {
+  clearHiddenTerminalOutput,
+  isHiddenTerminalHydratingForPty,
+  queueHiddenTerminalOutput
+} from './hidden-terminal-output-state'
 
 const pendingSpawnByPaneKey = new Map<string, Promise<string | null>>()
 const SSH_SESSION_EXPIRED_ERROR = 'SSH_SESSION_EXPIRED'
@@ -1146,6 +1151,7 @@ export function connectPanePty(
         },
         () => {
           discardTerminalOutput(pane.terminal)
+          clearHiddenTerminalOutput(pane.terminal)
           pane.terminal.clear()
         }
       )
@@ -1222,14 +1228,40 @@ export function connectPanePty(
       pendingSpawnByPaneKey.set(pendingSpawnKey, trackedPromise)
     }
 
+    const shouldQueueOutputForPty = (ptyId: string): boolean => {
+      // Why: hidden hydration belongs to a specific PTY lease. If a visible
+      // pane rebinds while an old snapshot is in flight, new PTY bytes must
+      // paint immediately; no later visibility effect will drain that queue.
+      return !deps.isVisibleRef.current || isHiddenTerminalHydratingForPty(pane.terminal, ptyId)
+    }
+
     // The replay path uses the guard so xterm auto-replies to embedded query
     // sequences don't leak into the shell. xterm.write() buffers internally
     // regardless of DOM visibility and the guard stays engaged via the
     // write-completion callback until xterm finishes parsing.
-    const writeReplayData = (data: string): void => {
+    const writeReplayData = (
+      data: string,
+      options: { replaceHiddenQueue?: boolean } = {}
+    ): void => {
+      if (!data) {
+        return
+      }
+      const ptyId = transport.getPtyId()
+      if (ptyId && shouldQueueOutputForPty(ptyId)) {
+        if (options.replaceHiddenQueue) {
+          clearHiddenTerminalOutput(pane.terminal)
+        }
+        if (terminalOutputPrefersDomRenderer(data)) {
+          manager.markPaneHasComplexScriptOutput(pane.id)
+        }
+        recordTerminalOutput(pane.terminal)
+        queueHiddenTerminalOutput(pane.terminal, ptyId, data)
+        return
+      }
       // Why: drain any queued background bytes BEFORE the replay paint, so the
       // scheduler's deferred drain cannot land older bytes on top of the replay.
       flushTerminalOutput(pane.terminal)
+      clearHiddenTerminalOutput(pane.terminal)
       if (terminalOutputPrefersDomRenderer(data)) {
         manager.markPaneHasComplexScriptOutput(pane.id)
       }
@@ -1240,12 +1272,21 @@ export function connectPanePty(
       // Relay replay buffer holds the last 100 KB of output, which may
       // overlap with content already rendered in xterm before the
       // disconnect. Clear first to prevent duplication on SSH reconnect.
-      writeReplayData('\x1b[2J\x1b[3J\x1b[H')
+      writeReplayData('\x1b[2J\x1b[3J\x1b[H', { replaceHiddenQueue: true })
       writeReplayData(data)
     }
 
     const dataCallback = (data: string): void => {
       commandLifecycle.handlePtyData(data)
+      const ptyId = transport.getPtyId()
+      if (ptyId && shouldQueueOutputForPty(ptyId)) {
+        if (terminalOutputPrefersDomRenderer(data)) {
+          manager.markPaneHasComplexScriptOutput(pane.id)
+        }
+        recordTerminalOutput(pane.terminal)
+        queueHiddenTerminalOutput(pane.terminal, ptyId, data)
+        return
+      }
       // Why: visibility is the right gate — split-pane layouts have multiple
       // visible-but-inactive panes whose output the user is watching. Only
       // hidden panes (background tabs) should be throttled.
@@ -1340,7 +1381,7 @@ export function connectPanePty(
       // the daemon and relay are by definition tracking the same session
       // and only the freshest source belongs on screen.
       if (connectResult?.snapshot) {
-        writeReplayData('\x1b[2J\x1b[3J\x1b[H')
+        writeReplayData('\x1b[2J\x1b[3J\x1b[H', { replaceHiddenQueue: true })
         writeReplayData(connectResult.snapshot)
         // Snapshot reattach keeps a live session, so avoid the broader mode
         // reset. We only drop stale cursor/focus state that should not leak
@@ -1358,7 +1399,7 @@ export function connectPanePty(
         // already hold pre-disconnect content; clear first to avoid
         // duplication. The reattach reset prevents stale cursor/focus mode
         // bits in the replayed data from leaking into the restored terminal.
-        writeReplayData('\x1b[2J\x1b[3J\x1b[H')
+        writeReplayData('\x1b[2J\x1b[3J\x1b[H', { replaceHiddenQueue: true })
         writeReplayData(connectResult.replay)
         writeReplayData(POST_REPLAY_REATTACH_RESET)
         if (connectResult.coldRestore) {
@@ -1374,7 +1415,7 @@ export function connectPanePty(
         // may contain query sequences the previous agent CLI emitted;
         // writing them through xterm.write would trigger auto-replies that
         // land in the new shell's stdin. See replay-guard.ts.
-        writeReplayData('\x1b[2J\x1b[3J\x1b[H')
+        writeReplayData('\x1b[2J\x1b[3J\x1b[H', { replaceHiddenQueue: true })
         writeReplayData(connectResult.coldRestore.scrollback)
         writeReplayData('\r\n\x1b[2m--- session restored ---\x1b[0m\r\n\r\n')
         // Cold-restore means the daemon lost the session and spawned a
@@ -1884,6 +1925,7 @@ export function connectPanePty(
       pendingTerminalBellNotification = false
       clearTerminalBellNotificationTimer()
       discardTerminalOutput(pane.terminal)
+      clearHiddenTerminalOutput(pane.terminal)
       if (agentTaskCompleteSettingsUnsubscribe !== null) {
         agentTaskCompleteSettingsUnsubscribe()
         agentTaskCompleteSettingsUnsubscribe = null

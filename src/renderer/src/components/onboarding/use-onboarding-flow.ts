@@ -102,6 +102,7 @@ export function useOnboardingFlow(
   const [cloneUrl, setCloneUrl] = useState('')
   const [serverPath, setServerPath] = useState('')
   const [cloneDestination, setCloneDestination] = useState('')
+  const [tourStarted, setTourStarted] = useState(false)
   const [busyLabel, setBusyLabel] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -209,6 +210,21 @@ export function useOnboardingFlow(
   useEffect(() => {
     persistedThemeRef.current = settings?.theme ?? 'dark'
   }, [settings?.theme])
+  const themeStepEntryThemeRef = useRef<GlobalSettings['theme'] | null>(null)
+  const themeStepEntryCapturedRef = useRef(false)
+  useEffect(() => {
+    if (currentStep.id !== 'theme') {
+      themeStepEntryCapturedRef.current = false
+      return
+    }
+    if (!settings || themeStepEntryCapturedRef.current) {
+      return
+    }
+    // Why: theme tile clicks persist immediately for normal progression, but
+    // "Skip to project setup" should keep the preference the user arrived with.
+    themeStepEntryCapturedRef.current = true
+    themeStepEntryThemeRef.current = settings.theme
+  }, [currentStep.id, settings])
 
   // Apply preview when local theme changes.
   useEffect(() => {
@@ -569,11 +585,15 @@ export function useOnboardingFlow(
       return
     }
     const durationMs = consumeStepDurationMs()
-    // Why: theme step previews on the document without persisting. On skip,
-    // revert to the saved theme before advancing so the preview doesn't leak.
-    if (currentStep.id === 'theme' && settings) {
-      setTheme(settings.theme)
-      applyDocumentTheme(settings.theme)
+    // Why: theme tiles save immediately for a stable preview, but skip still
+    // means "do not keep this step's choice."
+    if (currentStep.id === 'theme') {
+      const themeBeforePreview = themeStepEntryThemeRef.current ?? settings?.theme
+      if (themeBeforePreview) {
+        setTheme(themeBeforePreview)
+        applyDocumentTheme(themeBeforePreview)
+        await updateSettings({ theme: themeBeforePreview })
+      }
     }
     // Why: the repo step seeds folder terminals from saved settings. Preserve
     // the visible agent choice when optional preferences are skipped.
@@ -594,6 +614,7 @@ export function useOnboardingFlow(
         trackTaskSourcesSnapshot('skip_to_project_setup', durationMs, 'button')
       }
       setStepIndex(repoStepIndex)
+      setTourStarted(false)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       setError(message)
@@ -610,6 +631,84 @@ export function useOnboardingFlow(
     trackTaskSourcesSnapshot,
     updateSettings
   ])
+
+  const startTour = useCallback(() => {
+    if (busyLabel) {
+      return
+    }
+    setError(null)
+    setTourStarted(true)
+  }, [busyLabel])
+
+  const completeTour = useCallback(async () => {
+    if (busyLabel || currentStep.id !== 'tour') {
+      return
+    }
+    setError(null)
+    const repoStepIndex = STEPS.findIndex((step) => step.id === 'repo')
+    const repoStep = STEPS[repoStepIndex]
+    if (!repoStep) {
+      return
+    }
+    const durationMs = consumeStepDurationMs()
+    setBusyLabel('Saving…')
+    try {
+      const nextState = await persistStep(repoStep.stepNumber - 1)
+      onOnboardingChange(nextState)
+      track('onboarding_step_completed', {
+        step: currentStep.stepNumber,
+        value_kind: currentStep.valueKind,
+        duration_ms: durationMs,
+        advanced_via: 'button'
+      })
+      setTourStarted(false)
+      setStepIndex(repoStepIndex)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      setError(message)
+      toast.error('Could not continue to project setup', { description: message })
+    } finally {
+      setBusyLabel(null)
+    }
+  }, [
+    busyLabel,
+    consumeStepDurationMs,
+    currentStep.id,
+    currentStep.stepNumber,
+    currentStep.valueKind,
+    onOnboardingChange
+  ])
+
+  const skipTourToRepo = useCallback(async () => {
+    if (busyLabel || currentStep.id !== 'tour') {
+      return
+    }
+    setError(null)
+    const repoStepIndex = STEPS.findIndex((step) => step.id === 'repo')
+    const repoStep = STEPS[repoStepIndex]
+    if (!repoStep) {
+      return
+    }
+    const durationMs = consumeStepDurationMs()
+    setBusyLabel('Saving…')
+    try {
+      const nextState = await persistStep(repoStep.stepNumber - 1)
+      onOnboardingChange(nextState)
+      track('onboarding_step_skipped', {
+        step: currentStep.stepNumber,
+        duration_ms: durationMs,
+        advanced_via: 'button'
+      })
+      setTourStarted(false)
+      setStepIndex(repoStepIndex)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      setError(message)
+      toast.error('Could not continue to project setup', { description: message })
+    } finally {
+      setBusyLabel(null)
+    }
+  }, [busyLabel, consumeStepDurationMs, currentStep.id, currentStep.stepNumber, onOnboardingChange])
 
   const skipAgentSetup = useCallback(async () => {
     if (busyLabel || currentStep.id !== 'agentSetup') {
@@ -669,10 +768,12 @@ export function useOnboardingFlow(
   ])
 
   const back = useCallback(() => {
+    setTourStarted(false)
     setStepIndex((idx) => Math.max(idx - 1, 0))
   }, [])
 
   const jumpToStep = useCallback((idx: number) => {
+    setTourStarted(false)
     setStepIndex(Math.min(Math.max(idx, 0), STEPS.length - 1))
   }, [])
 
@@ -696,6 +797,7 @@ export function useOnboardingFlow(
     setServerPath,
     cloneDestination,
     setCloneDestination,
+    tourStarted,
     busyLabel,
     error,
     detectedSet,
@@ -703,6 +805,9 @@ export function useOnboardingFlow(
     next,
     skipAgentSetup,
     skipToRepo,
+    startTour,
+    completeTour,
+    skipTourToRepo,
     back,
     jumpToStep,
     openFolder,

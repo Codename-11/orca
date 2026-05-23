@@ -682,6 +682,15 @@ const api = {
      *  Returns `''` when the id is unknown or the platform cannot resolve one. */
     getCwd: (id: string): Promise<string> => ipcRenderer.invoke('pty:getCwd', { id }),
 
+    serializeHeadlessBuffer: (
+      id: string,
+      opts?: { scrollbackRows?: number }
+    ): Promise<{ data: string; cols: number; rows: number } | null> =>
+      ipcRenderer.invoke('pty:serializeHeadlessBuffer', {
+        id,
+        scrollbackRows: opts?.scrollbackRows
+      }),
+
     onData: (callback: (data: { id: string; data: string }) => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent, data: { id: string; data: string }) =>
         callback(data)
@@ -1542,6 +1551,9 @@ const api = {
 
     pickImage: (): Promise<string | null> => ipcRenderer.invoke('shell:pickImage'),
 
+    pickRepoIconImage: (): Promise<{ dataUrl: string; fileName: string } | null> =>
+      ipcRenderer.invoke('shell:pickRepoIconImage'),
+
     pickAudio: (): Promise<string | null> => ipcRenderer.invoke('shell:pickAudio'),
 
     pickDirectory: (args: { defaultPath?: string }): Promise<string | null> =>
@@ -2306,11 +2318,6 @@ const api = {
       const listener = (_event: Electron.IpcRendererEvent) => callback()
       ipcRenderer.on('ui:openCrashReport', listener)
       return () => ipcRenderer.removeListener('ui:openCrashReport', listener)
-    },
-    onShowFeatureTourNudge: (callback: () => void): (() => void) => {
-      const listener = (_event: Electron.IpcRendererEvent) => callback()
-      ipcRenderer.on('ui:showFeatureTourNudge', listener)
-      return () => ipcRenderer.removeListener('ui:showFeatureTourNudge', listener)
     },
     onToggleLeftSidebar: (callback: () => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent) => callback()

@@ -1494,7 +1494,6 @@ function createWebUiApi(): NonNullable<Partial<PreloadApi>['ui']> {
     onOpenSettings: () => noopUnsubscribe,
     onOpenFeatureTour: () => noopUnsubscribe,
     onOpenCrashReport: () => noopUnsubscribe,
-    onShowFeatureTourNudge: () => noopUnsubscribe,
     onToggleLeftSidebar: () => noopUnsubscribe,
     onToggleRightSidebar: () => noopUnsubscribe,
     onToggleWorktreePalette: () => noopUnsubscribe,
@@ -1787,6 +1786,7 @@ function createShellApi(): NonNullable<Partial<PreloadApi>['shell']> {
     },
     pickAttachment: () => Promise.resolve(null),
     pickImage: () => Promise.resolve(null),
+    pickRepoIconImage: () => Promise.resolve(null),
     pickAudio: () => Promise.resolve(null),
     pickDirectory: () => Promise.resolve(null),
     copyFile: () => Promise.resolve()
@@ -1806,6 +1806,7 @@ function createPtyApi(): NonNullable<Partial<PreloadApi>['pty']> {
     hasChildProcesses: () => Promise.resolve(false),
     getForegroundProcess: () => Promise.resolve(null),
     getCwd: () => Promise.resolve('~'),
+    serializeHeadlessBuffer: () => Promise.resolve(null),
     listSessions: () => Promise.resolve([]),
     onData: () => noopUnsubscribe,
     onReplay: () => noopUnsubscribe,
