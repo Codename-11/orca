@@ -46,6 +46,7 @@ import type {
   WorktreeMeta,
   WorktreeLineage,
   GlobalSettings,
+  OrcaWorkspaceLayout,
   NotificationSettings,
   OnboardingChecklistState,
   OnboardingOutcome,
@@ -87,6 +88,7 @@ import { agentHookServer } from './agent-hooks/server'
 import { pruneLocalTerminalScrollbackBuffers } from '../shared/workspace-session-terminal-buffers'
 import { pruneWorkspaceSessionBrowserHistory } from '../shared/workspace-session-browser-history'
 import { getRepoIdFromWorktreeId, getWorktreePathBasenameFromId } from '../shared/worktree-id'
+import { normalizeRuntimePathForComparison } from '../shared/cross-platform-path'
 import { normalizeTerminalQuickCommands } from '../shared/terminal-quick-commands'
 import { normalizeTaskProviderSettings } from '../shared/task-providers'
 import { normalizeOpenInApplications } from '../shared/open-in-applications'
@@ -99,6 +101,7 @@ import {
   normalizePersistedWorkspaceStatuses,
   normalizeWorkspaceStatuses
 } from '../shared/workspace-statuses'
+import { isLegacyRepoForExternalWorktreeVisibility } from '../shared/worktree-ownership'
 
 function encrypt(plaintext: string): string {
   if (!plaintext || !safeStorage.isEncryptionAvailable()) {
@@ -178,6 +181,40 @@ function backupPath(dataFile: string, index: number): string {
   return `${dataFile}.bak.${index}`
 }
 
+function buildWorkspaceDirHistoryForUpdate(
+  current: GlobalSettings,
+  updates: Partial<GlobalSettings>
+): OrcaWorkspaceLayout[] | null {
+  if (!('workspaceDir' in updates) && !('nestWorkspaces' in updates)) {
+    return null
+  }
+  const nextPath = updates.workspaceDir ?? current.workspaceDir
+  const nextNestWorkspaces = updates.nestWorkspaces ?? current.nestWorkspaces
+  if (
+    normalizeRuntimePathForComparison(nextPath) ===
+      normalizeRuntimePathForComparison(current.workspaceDir) &&
+    nextNestWorkspaces === current.nestWorkspaces
+  ) {
+    return null
+  }
+
+  const previousLayout = {
+    path: current.workspaceDir,
+    nestWorkspaces: current.nestWorkspaces
+  }
+  const existing = current.workspaceDirHistory ?? []
+  const next = [...existing]
+  const previousKey = getWorkspaceLayoutHistoryKey(previousLayout)
+  if (!next.some((layout) => getWorkspaceLayoutHistoryKey(layout) === previousKey)) {
+    next.push(previousLayout)
+  }
+  return next
+}
+
+function getWorkspaceLayoutHistoryKey(layout: OrcaWorkspaceLayout): string {
+  return `${normalizeRuntimePathForComparison(layout.path)}:${layout.nestWorkspaces}`
+}
+
 function normalizeGroupBy(groupBy: unknown): PersistedState['ui']['groupBy'] {
   if (
     groupBy === 'none' ||
@@ -210,6 +247,27 @@ function normalizeNotificationSettings(value: unknown): NotificationSettings {
   const defaults = getDefaultNotificationSettings()
   const candidate =
     value && typeof value === 'object' ? (value as Partial<NotificationSettings>) : {}
+  const rawSoundId = (candidate as { customSoundId?: unknown }).customSoundId
+  const customSoundId =
+    rawSoundId === 'system' ||
+    rawSoundId === 'two-tone' ||
+    rawSoundId === 'bong' ||
+    rawSoundId === 'thump' ||
+    rawSoundId === 'blip' ||
+    rawSoundId === 'sonar' ||
+    rawSoundId === 'blop' ||
+    rawSoundId === 'ding' ||
+    rawSoundId === 'clack' ||
+    rawSoundId === 'beep' ||
+    rawSoundId === 'custom'
+      ? rawSoundId
+      : rawSoundId === 'orca' || rawSoundId === 'chime'
+        ? 'two-tone'
+        : rawSoundId === 'pop'
+          ? 'blop'
+          : typeof candidate.customSoundPath === 'string'
+            ? 'custom'
+            : defaults.customSoundId
   const rawVolume = candidate.customSoundVolume
   const customSoundVolume =
     typeof rawVolume === 'number' && Number.isFinite(rawVolume)
@@ -218,6 +276,7 @@ function normalizeNotificationSettings(value: unknown): NotificationSettings {
   return {
     ...defaults,
     ...candidate,
+    customSoundId,
     customSoundVolume
   }
 }
@@ -1981,6 +2040,8 @@ export class Store {
         | 'worktreeBaseRef'
         | 'kind'
         | 'issueSourcePreference'
+        | 'externalWorktreeVisibility'
+        | 'externalWorktreeVisibilityPromptDismissedAt'
       >
     >
   ): Repo | null {
@@ -1988,6 +2049,10 @@ export class Store {
     if (!repo) {
       return null
     }
+    const externalWorktreeVisibilityLegacy =
+      'externalWorktreeVisibility' in updates && repo.externalWorktreeVisibilityLegacy === undefined
+        ? isLegacyRepoForExternalWorktreeVisibility(repo)
+        : undefined
     // Why: `issueSourcePreference === undefined` in the patch means "reset to
     // auto" (and the persisted record should drop the key, not preserve a
     // stale explicit value via Object.assign's skip-on-undefined behavior).
@@ -1999,6 +2064,14 @@ export class Store {
       Object.assign(repo, rest)
     } else {
       Object.assign(repo, updates)
+    }
+    if (
+      'externalWorktreeVisibility' in updates &&
+      repo.externalWorktreeVisibilityLegacy === undefined
+    ) {
+      // Why: old persisted repos have no explicit marker. Stamp it the first
+      // time visibility changes so later hide/show choices keep legacy safety.
+      repo.externalWorktreeVisibilityLegacy = externalWorktreeVisibilityLegacy
     }
     this.scheduleSave()
     return this.hydrateRepo(repo)
@@ -2424,6 +2497,13 @@ export class Store {
       sanitizedUpdates.terminalShortcutPolicy = normalizeTerminalShortcutPolicy(
         updates.terminalShortcutPolicy
       )
+    }
+    const historyWithPreviousLayout = buildWorkspaceDirHistoryForUpdate(
+      this.state.settings,
+      sanitizedUpdates
+    )
+    if (historyWithPreviousLayout) {
+      sanitizedUpdates.workspaceDirHistory = historyWithPreviousLayout
     }
     // Why: `telemetry` is deep-merged for the same reason `notifications` is —
     // partial updates from the Privacy pane / consent flow (e.g., flipping

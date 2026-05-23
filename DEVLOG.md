@@ -6,6 +6,23 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-23 — Remediated upstream v1.4.22 bot PR
+
+Resolved the agent-remediation merge for upstream `v1.4.22` on `bot/upstream-sync-axiom-v1.4.22-axiom.1` targeting `axiom/deploy`; no direct deploy-branch push was made. The conflict resolution keeps the fork semver at `1.4.22-axiom.1`, preserves the Axiom build label in Settings → General → Updates while adopting upstream's settings subsection header, keeps Forge-aware task provider sidebar shortcuts alongside upstream's opt-out mobile sidebar entry, and combines Axiom's Windows Kitty-keyboard guard with upstream's Windows PTY compatibility options. Protected deletion review found no protected Axiom files removed by the merge.
+
+CI-only follow-up fixes updated terminal settings tests for upstream's shared `SettingsFormControls` extraction and waited for deferred remote PTY title/status side effects after the upstream processor began flushing them on the next event-loop turn.
+
+Verification:
+
+- `pnpm install --frozen-lockfile` → passed. Node engine warning only: project wants Node 24; local runtime is Node v25.6.0.
+- `pnpm run typecheck` → passed.
+- `pnpm exec vitest run --config config/vitest.config.ts src/shared/task-providers.test.ts src/main/axiom-release-hardening.test.ts src/main/updater-endpoints.test.ts src/main/app-build-identity.test.ts config/scripts/axiom-upstream-sync-release.test.mjs` → 47 tests passed.
+- `pnpm exec oxlint config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml` → 0 warnings / 0 errors.
+- `pnpm exec oxfmt --check config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml config/axiom-merge-remediation-policy.json` → passed.
+- `git diff --check` → passed.
+
+---
+
 ## 2026-05-22 — Remediated upstream v1.4.21-rc.2 bot PR
 
 Resolved the agent-remediation merge for upstream `v1.4.21-rc.2` on `bot/upstream-sync-axiom-v1.4.21-rc.2.axiom.1` targeting `axiom/deploy`; no direct deploy-branch push was made. The conflict resolution keeps the fork semver at `1.4.21-rc.2.axiom.1`, preserves Axiom's task-provider shortcut registry including Forge, and accepts upstream's mobile sidebar entry/onboarding badge. Protected deletion review found no protected Axiom files removed by the merge.
