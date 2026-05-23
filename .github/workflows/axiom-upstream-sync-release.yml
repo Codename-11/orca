@@ -91,6 +91,7 @@ jobs:
       tag: ${{ steps.check.outputs.fork_tag }}
       upstream_tag: ${{ steps.check.outputs.upstream_tag }}
       fork_version: ${{ steps.check.outputs.fork_version }}
+      upstream_prerelease: ${{ steps.check.outputs.upstream_prerelease }}
       source: ${{ steps.check.outputs.source }}
       merge_result: ${{ steps.merge.outputs.merge_result }}
       release_notes: axiom-release-notes.md
@@ -416,14 +417,47 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           publish_flags=(--draft=false)
-          if [[ "${{ needs.sync.outputs.fork_version }}" == *-* ]]; then
+          # Why: Axiom stable builds include `-axiom.N`; only upstream RC/beta
+          # tags should be published as GitHub prereleases.
+          if [[ "${{ needs.sync.outputs.upstream_prerelease }}" == "true" ]]; then
             publish_flags+=(--prerelease)
+          else
+            publish_flags+=(--prerelease=false --latest)
           fi
           gh release edit "${{ needs.sync.outputs.tag }}" --repo "$GITHUB_REPOSITORY" "${publish_flags[@]}"
 
+  notify-release:
+    name: Notify stable Axiom release
+    needs: [sync, publish]
+    if: >-
+      always() &&
+      needs.sync.outputs.should_release == 'true' &&
+      needs.sync.outputs.upstream_prerelease != 'true' &&
+      !inputs.dry_run &&
+      needs.publish.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout release tooling
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.AXIOM_DEPLOY_BRANCH }}
+          fetch-depth: 1
+
+      - name: Post Discord release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AXIOM_RELEASE_DISCORD_WEBHOOK: ${{ secrets.AXIOM_RELEASE_DISCORD_WEBHOOK }}
+          AXIOM_SYNC_DISCORD_WEBHOOK: ${{ secrets.AXIOM_SYNC_DISCORD_WEBHOOK }}
+          AXIOM_UPSTREAM_TAG: ${{ needs.sync.outputs.upstream_tag }}
+          AXIOM_FORK_TAG: ${{ needs.sync.outputs.tag }}
+          AXIOM_FORK_VERSION: ${{ needs.sync.outputs.fork_version }}
+        run: node config/scripts/axiom-post-release-discord-notes.mjs
+
   notify-failure:
     name: Notify failed Axiom release
-    needs: [sync, build, mobile, publish]
+    needs: [sync, build, mobile, publish, notify-release]
     if: >-
       always() &&
       needs.sync.outputs.should_release == 'true' &&

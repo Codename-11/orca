@@ -10,6 +10,7 @@ import {
 } from './axiom-release-versioning.mjs'
 
 import { forkCommitBaseline, nearestPriorAxiomReleaseTag } from './axiom-generate-release-notes.mjs'
+import { buildDiscordPayload, extractMarkdownSection } from './axiom-post-release-discord-notes.mjs'
 
 import {
   getRequiredReleaseAssetNames,
@@ -23,6 +24,10 @@ const mirrorWorkflow = readFileSync('.github/workflows/axiom-upstream-main-sync.
 const checkScript = readFileSync('config/scripts/axiom-check-upstream-release.mjs', 'utf8')
 const syncScript = readFileSync('config/scripts/axiom-sync-upstream-release.mjs', 'utf8')
 const notifyScript = readFileSync('config/scripts/axiom-report-sync-failure.mjs', 'utf8')
+const releaseNotifyScript = readFileSync(
+  'config/scripts/axiom-post-release-discord-notes.mjs',
+  'utf8'
+)
 const remediationScript = readFileSync('config/scripts/axiom-request-merge-remediation.mjs', 'utf8')
 const remediationPolicy = readFileSync('config/axiom-merge-remediation-policy.json', 'utf8')
 const notesScript = readFileSync('config/scripts/axiom-generate-release-notes.mjs', 'utf8')
@@ -250,6 +255,66 @@ describe('Axiom upstream sync release workflow', () => {
     expect(notifyScript).toContain('AXIOM_SYNC_FORGE_WEBHOOK')
     expect(notifyScript).toContain('postDiscordIfCritical')
     expect(notifyScript).toContain("severity !== 'critical'")
+  })
+
+  it('announces only stable published releases to Discord with release notes', () => {
+    expect(workflow).toContain('Notify stable Axiom release')
+    expect(workflow).toContain("needs.sync.outputs.upstream_prerelease != 'true'")
+    expect(workflow).toContain("needs.publish.result == 'success'")
+    expect(workflow).toContain('AXIOM_RELEASE_DISCORD_WEBHOOK')
+    expect(workflow).toContain('node config/scripts/axiom-post-release-discord-notes.mjs')
+    expect(workflow).toContain(
+      'upstream_prerelease: ${{ steps.check.outputs.upstream_prerelease }}'
+    )
+    expect(workflow).toContain('publish_flags+=(--prerelease=false --latest)')
+    expect(releaseNotifyScript).toContain('release.prerelease')
+    expect(releaseNotifyScript).toContain('buildDiscordPayload')
+    expect(releaseNotifyScript).toContain('Axiom notes')
+
+    const releaseBody = [
+      '# Axiom Orca v1.4.22',
+      '',
+      '## Upstream Orca',
+      '',
+      '- Upstream release: https://github.com/stablyai/orca/releases/tag/v1.4.22',
+      '- Fixed workspace restore.',
+      '',
+      '## Axiom patch notes',
+      '',
+      '- Kept Axiom update feed isolation.',
+      '',
+      '## Axiom commit fallback',
+      '',
+      '- chore(release): align Axiom build (abc123)'
+    ].join('\n')
+
+    expect(extractMarkdownSection(releaseBody, 'Axiom patch notes')).toContain(
+      'Kept Axiom update feed isolation'
+    )
+
+    const payload = buildDiscordPayload({
+      repository: 'Codename-11/orca',
+      forkTag: 'axiom-v1.4.22-axiom.1',
+      forkVersion: '1.4.22-axiom.1',
+      upstreamTag: 'v1.4.22',
+      release: {
+        name: 'Axiom Orca 1.4.22-axiom.1 (upstream v1.4.22)',
+        body: releaseBody,
+        html_url: 'https://github.com/Codename-11/orca/releases/tag/axiom-v1.4.22-axiom.1',
+        assets: [
+          {
+            name: 'axiom-orca-windows-setup.exe',
+            browser_download_url:
+              'https://github.com/Codename-11/orca/releases/download/axiom-v1.4.22-axiom.1/axiom-orca-windows-setup.exe'
+          }
+        ]
+      }
+    })
+
+    expect(payload.content).toContain('is live')
+    expect(payload.embeds[0].fields.map((field) => field.name)).toContain('Axiom notes')
+    expect(payload.embeds[0].fields.map((field) => field.name)).toContain('Upstream notes')
+    expect(payload.embeds[0].fields.map((field) => field.name)).toContain('Downloads')
   })
 
   it('requests agent remediation for unsafe merge conflicts without publishing', () => {
