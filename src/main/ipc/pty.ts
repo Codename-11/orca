@@ -598,7 +598,6 @@ export function registerPtyHandlers(
   ipcMain.removeHandler('pty:hasChildProcesses')
   ipcMain.removeHandler('pty:getForegroundProcess')
   ipcMain.removeHandler('pty:getCwd')
-  ipcMain.removeHandler('pty:serializeHeadlessBuffer')
   ipcMain.removeHandler('pty:declarePendingPaneSerializer')
   ipcMain.removeHandler('pty:settlePaneSerializer')
   ipcMain.removeHandler('pty:clearPendingPaneSerializer')
@@ -685,18 +684,6 @@ export function registerPtyHandlers(
     }
     clearTimeout(flushTimer)
     flushTimer = null
-  }
-
-  const flushPendingDataForPty = (id: string): void => {
-    const data = pendingData.get(id)
-    if (!data) {
-      return
-    }
-    pendingData.delete(id)
-    if (!mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('pty:data', { id, data })
-    }
-    clearFlushTimerIfIdle()
   }
 
   // Why: extracted so the "Restart daemon" flow can rebind against the fresh
@@ -1829,34 +1816,6 @@ export function registerPtyHandlers(
       return ''
     }
   })
-
-  ipcMain.handle(
-    'pty:serializeHeadlessBuffer',
-    async (
-      _event,
-      args: { id?: unknown; scrollbackRows?: unknown }
-    ): Promise<{ data: string; cols: number; rows: number } | null> => {
-      if (!runtime || typeof args?.id !== 'string') {
-        return null
-      }
-      const opts: { scrollbackRows?: number } = {}
-      if (
-        typeof args.scrollbackRows === 'number' &&
-        Number.isFinite(args.scrollbackRows) &&
-        args.scrollbackRows >= 0
-      ) {
-        opts.scrollbackRows = Math.floor(args.scrollbackRows)
-      }
-      // Why: hidden-pane reveal uses the headless snapshot as the authoritative
-      // paint. Flush any ≤8ms main-process PTY batch before and after the
-      // snapshot so renderer-side hydration can drop its duplicate fallback
-      // queue without losing bytes that already reached the headless model.
-      flushPendingDataForPty(args.id)
-      const snapshot = await runtime.serializeHeadlessTerminalBufferForRenderer(args.id, opts)
-      flushPendingDataForPty(args.id)
-      return snapshot
-    }
-  )
 
   // Why: pre-signal handshake handlers. See
   // docs/mobile-prefer-renderer-scrollback.md and the rationale on
