@@ -227,7 +227,10 @@ jobs:
           tag="${{ steps.check.outputs.fork_tag }}"
           title="Axiom Orca ${{ steps.check.outputs.fork_version }} (upstream ${{ steps.check.outputs.upstream_tag }})"
           release_flags=()
-          if [[ "${{ steps.check.outputs.fork_version }}" == *-* ]]; then
+          # Why: every Axiom fork version contains an `-axiom.N` suffix, but
+          # stable upstream releases must still be GitHub "latest" candidates.
+          # Only mirror upstream prerelease status, not the fork suffix.
+          if [[ "${{ steps.check.outputs.upstream_prerelease }}" == "true" ]]; then
             release_flags+=(--prerelease)
           fi
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
