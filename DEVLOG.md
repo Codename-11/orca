@@ -10,6 +10,8 @@ merges into `axiom/deploy`.
 
 Resolved the agent-remediation merge for upstream `v1.4.22` on `bot/upstream-sync-axiom-v1.4.22-axiom.1` targeting `axiom/deploy`; no direct deploy-branch push was made. The conflict resolution keeps the fork semver at `1.4.22-axiom.1`, preserves the Axiom build label in Settings → General → Updates while adopting upstream's settings subsection header, keeps Forge-aware task provider sidebar shortcuts alongside upstream's opt-out mobile sidebar entry, and combines Axiom's Windows Kitty-keyboard guard with upstream's Windows PTY compatibility options. Protected deletion review found no protected Axiom files removed by the merge.
 
+CI-only follow-up fixes updated terminal settings tests for upstream's shared `SettingsFormControls` extraction and waited for deferred remote PTY title/status side effects after the upstream processor began flushing them on the next event-loop turn.
+
 Verification:
 
 - `pnpm install --frozen-lockfile` → passed. Node engine warning only: project wants Node 24; local runtime is Node v25.6.0.

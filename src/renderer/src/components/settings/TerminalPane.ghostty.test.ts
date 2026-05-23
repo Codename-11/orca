@@ -80,6 +80,18 @@ vi.mock('../ui/toggle-group', () => ({
 }))
 
 vi.mock('./SettingsFormControls', () => ({
+  SettingsRow: function SettingsRow() {
+    return null
+  },
+  SettingsSegmentedControl: function SettingsSegmentedControl() {
+    return null
+  },
+  SettingsSubsectionHeader: function SettingsSubsectionHeader() {
+    return null
+  },
+  SettingsSwitchRow: function SettingsSwitchRow() {
+    return null
+  },
   NumberField: function NumberField() {
     return null
   },
