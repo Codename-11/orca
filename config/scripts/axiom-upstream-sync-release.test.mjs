@@ -17,9 +17,14 @@ import {
   parseReleasePlatforms
 } from './verify-release-required-assets.mjs'
 
+import { extractRemediatedRelease } from './axiom-dispatch-remediated-release.mjs'
 import { classifyMergeRemediation } from './axiom-request-merge-remediation.mjs'
 
 const workflow = readFileSync('.github/workflows/axiom-upstream-sync-release.yml', 'utf8')
+const remediationResumeWorkflow = readFileSync(
+  '.github/workflows/axiom-remediated-release-resume.yml',
+  'utf8'
+)
 const mirrorWorkflow = readFileSync('.github/workflows/axiom-upstream-main-sync.yml', 'utf8')
 const checkScript = readFileSync('config/scripts/axiom-check-upstream-release.mjs', 'utf8')
 const syncScript = readFileSync('config/scripts/axiom-sync-upstream-release.mjs', 'utf8')
@@ -341,6 +346,50 @@ describe('Axiom upstream sync release workflow', () => {
     expect(remediationPolicy).toContain('protectedDeletionPaths')
     expect(remediationPolicy).toContain('src/**/forge/**')
     expect(remediationPolicy).toContain('config/electron-builder.config.cjs')
+  })
+
+  it('resumes release publishing after a remediation PR merges', () => {
+    expect(remediationResumeWorkflow).toContain('name: Axiom Resume Remediated Release')
+    expect(remediationResumeWorkflow).toContain('pull_request:')
+    expect(remediationResumeWorkflow).toContain('types: [closed]')
+    expect(remediationResumeWorkflow).toContain('actions: write')
+    expect(remediationResumeWorkflow).toContain(
+      "startsWith(github.event.pull_request.head.ref, 'bot/upstream-sync-')"
+    )
+    expect(remediationResumeWorkflow).toContain(
+      'node config/scripts/axiom-dispatch-remediated-release.mjs'
+    )
+
+    const result = extractRemediatedRelease({
+      pullRequest: {
+        number: 10,
+        merged: true,
+        base: { ref: 'axiom/deploy' },
+        head: { ref: 'bot/upstream-sync-axiom-v1.4.22-axiom.1' },
+        body: [
+          '## Summary',
+          '- Upstream ref/tag: `v1.4.22`',
+          '- Intended Axiom version/tag: `1.4.22-axiom.1 / axiom-v1.4.22-axiom.1`'
+        ].join('\n')
+      }
+    })
+
+    expect(result).toMatchObject({
+      shouldDispatch: true,
+      upstreamTag: 'v1.4.22',
+      forkTag: 'axiom-v1.4.22-axiom.1',
+      pullRequestNumber: 10
+    })
+    expect(
+      extractRemediatedRelease({
+        pullRequest: {
+          merged: true,
+          base: { ref: 'axiom/deploy' },
+          head: { ref: 'feature/not-remediation' },
+          body: ''
+        }
+      })
+    ).toMatchObject({ shouldDispatch: false })
   })
 
   it('classifies regular code conflicts for agent PR remediation', () => {
