@@ -11,8 +11,8 @@ import {
   CircleX,
   Ellipsis,
   Eye,
-  Palette,
   Plus,
+  Shapes,
   SlidersHorizontal,
   Trash2,
   Workflow
@@ -69,6 +69,8 @@ import {
 import {
   estimateRenderRowSize,
   getActiveStickyHeaderIndex,
+  getActiveStickyHeaderIndexForScroll,
+  getPreviousStickyHeaderIndex,
   getStickyHeaderIndexes,
   getVirtualRowTransform,
   shouldUseHeaderTopSpacing,
@@ -127,9 +129,14 @@ import { branchDisplayName } from './WorktreeCardHelpers'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
 import { getRepoHeaderCreateState } from './repo-header-create-state'
 import type { PendingSidebarWorktreeReveal } from '@/store/slices/ui'
-import { getRepositoryBadgeColorSectionId } from '@/components/settings/repository-settings-targets'
+import { getRepositoryIconSectionId } from '@/components/settings/repository-settings-targets'
 import { keybindingMatchesAction } from '../../../../shared/keybindings'
 import { isGitRepoKind } from '../../../../shared/repo-kind'
+import {
+  effectiveExternalWorktreeVisibility,
+  isLegacyRepoForExternalWorktreeVisibility
+} from '../../../../shared/worktree-ownership'
+import { RepoIconGlyph } from '@/components/repo/repo-icon'
 
 // How long to wait after a sortEpoch bump before actually re-sorting.
 // Prevents jarring position shifts when background events (AI starting work,
@@ -207,12 +214,21 @@ function getWorktreeOptionId(worktreeId: string): string {
   return `worktree-list-option-${encodeURIComponent(worktreeId)}`
 }
 
+function getWorktreeVisibilityMenuLabel(repo: Repo): string {
+  const visibility = effectiveExternalWorktreeVisibility(
+    repo,
+    isLegacyRepoForExternalWorktreeVisibility(repo)
+  )
+  return visibility === 'show' ? 'Hide non-Orca worktrees' : 'Import Worktrees'
+}
+
 const LINEAGE_INDENT = 18
 const SIDEBAR_POINTER_DRAG_THRESHOLD_PX = 4
 
 type VirtualizedWorktreeViewportProps = {
   rows: Row[]
   activeWorktreeId: string | null
+  currentWorktreeId: string | null
   groupBy: WorktreeGroupBy
   repoGroupOrdering: RepoGroupOrdering
   toggleGroup: (key: string) => void
@@ -505,6 +521,7 @@ function getVirtualRowKey(element: Element): string | null {
 const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewport({
   rows,
   activeWorktreeId,
+  currentWorktreeId,
   groupBy,
   repoGroupOrdering,
   toggleGroup,
@@ -671,6 +688,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   const stickyHeaderIndexesRef = useRef(stickyHeaderIndexes)
   stickyHeaderIndexesRef.current = stickyHeaderIndexes
   const activeStickyHeaderIndexRef = useRef<number | null>(null)
+  const stickyRangeStartIndexRef = useRef(0)
   const activeWorktreeRowIndex = useMemo(
     () => renderRows.findIndex((row) => renderRowContainsWorktree(row, activeWorktreeId)),
     [renderRows, activeWorktreeId]
@@ -799,20 +817,28 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
       ),
     measureElement: measureCurrentVirtualRowElement,
     rangeExtractor: useCallback((range: Range) => {
+      stickyRangeStartIndexRef.current = range.startIndex
       const activeStickyHeaderIndex = getActiveStickyHeaderIndex(
         stickyHeaderIndexesRef.current,
         range.startIndex
       )
-      activeStickyHeaderIndexRef.current = activeStickyHeaderIndex
       if (activeStickyHeaderIndex === null) {
         return defaultRangeExtractor(range)
       }
 
       // Why: this mirrors TanStack Virtual's sticky example — the active
       // section header remains a real virtual row even after it scrolls out.
-      return Array.from(new Set([activeStickyHeaderIndex, ...defaultRangeExtractor(range)])).sort(
-        (a, b) => a - b
+      const previousStickyHeaderIndex = getPreviousStickyHeaderIndex(
+        stickyHeaderIndexesRef.current,
+        activeStickyHeaderIndex
       )
+      return Array.from(
+        new Set([
+          activeStickyHeaderIndex,
+          ...(previousStickyHeaderIndex === null ? [] : [previousStickyHeaderIndex]),
+          ...defaultRangeExtractor(range)
+        ])
+      ).sort((a, b) => a - b)
     }, []),
     overscan: 10,
     gap: 6,
@@ -944,6 +970,15 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   )
   const totalSize = virtualizer.getTotalSize()
   const virtualItems = virtualizer.getVirtualItems()
+  const activeStickyHeaderIndex = getActiveStickyHeaderIndexForScroll({
+    firstHeaderIndex,
+    rangeStartIndex: stickyRangeStartIndexRef.current,
+    rows: renderRows,
+    scrollOffset: virtualizer.scrollOffset ?? scrollOffsetRef.current,
+    stickyHeaderIndexes,
+    virtualItems
+  })
+  activeStickyHeaderIndexRef.current = activeStickyHeaderIndex
 
   const measureMountedRows = useCallback(() => {
     virtualizer.elementsCache.forEach((element) => {
@@ -1812,8 +1847,11 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                   className={cn(
                     'left-0 right-0',
                     // Why: keep the secondary-header spacer on the measured
-                    // virtual row so sticky swaps do not change row height.
-                    hasHeaderTopSpacing && 'pt-2',
+                    // virtual row only while it scrolls in normally. The
+                    // active sticky row is measured from estimates, and moving
+                    // the painted header with a transform makes the repo label
+                    // visibly hop during sticky handoff.
+                    hasHeaderTopSpacing && !isActiveStickyHeader && 'pt-2',
                     isActiveStickyHeader ? 'sticky -top-px z-20 bg-sidebar' : 'absolute top-0'
                   )}
                   style={
@@ -1840,11 +1878,6 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                       isPinnedHeader &&
                         pinDragOver &&
                         'rounded-md bg-sidebar-accent ring-1 ring-sidebar-ring/40',
-                      // First header sits directly under SidebarHeader, which
-                      // already supplies its own spacing. Secondary sticky
-                      // headers keep their spacer measured while the painted
-                      // header stays flush to the scrollport top.
-                      isActiveStickyHeader && hasHeaderTopSpacing && '-translate-y-2',
                       row.repo && 'overflow-hidden'
                     )}
                     onDragOver={
@@ -1885,9 +1918,17 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                           'flex size-4 shrink-0 items-center justify-center rounded-[4px]',
                           repoHeaderColor ? 'text-muted-foreground' : row.tone
                         )}
-                        style={repoHeaderColor ? { color: repoHeaderColor } : undefined}
                       >
-                        <row.icon className={row.repo ? 'size-3.5' : 'size-3'} />
+                        {row.repo ? (
+                          <RepoIconGlyph
+                            repoIcon={row.repo.repoIcon}
+                            color={repoHeaderColor}
+                            className="size-4"
+                            iconClassName="size-3.5"
+                          />
+                        ) : (
+                          <row.icon className="size-3" />
+                        )}
                       </div>
                     ) : null}
 
@@ -1948,20 +1989,20 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                             }}
                           >
                             <SlidersHorizontal className="size-3.5" />
-                            Repo Settings
+                            Project Settings
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             onSelect={() => {
                               if (row.repo) {
                                 handleOpenRepoSettings(
                                   row.repo.id,
-                                  getRepositoryBadgeColorSectionId(row.repo.id)
+                                  getRepositoryIconSectionId(row.repo.id)
                                 )
                               }
                             }}
                           >
-                            <Palette className="size-3.5" />
-                            Change Repo Color
+                            <Shapes className="size-3.5" />
+                            Change Project Icon
                           </DropdownMenuItem>
                           {row.repo && isGitRepoKind(row.repo) ? (
                             <DropdownMenuItem
@@ -1972,7 +2013,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                               }}
                             >
                               <Eye className="size-3.5" />
-                              Import Worktrees
+                              {getWorktreeVisibilityMenuLabel(row.repo)}
                             </DropdownMenuItem>
                           ) : null}
                           <DropdownMenuSeparator />
@@ -2090,6 +2131,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                     worktree={itemRow.worktree}
                     repo={itemRow.repo}
                     isActive={activeWorktreeId === itemRow.worktree.id}
+                    isCurrentWorktree={currentWorktreeId === itemRow.worktree.id}
                     // Why: a child-active parent should look active without
                     // running active-card side effects such as SSH reconnect UI.
                     isActiveSurface={forceActiveSurface || activeWorktreeId === itemRow.worktree.id}
@@ -3004,6 +3046,7 @@ const WorktreeList = React.memo(function WorktreeList({
       key={viewportResetKey}
       rows={rows}
       activeWorktreeId={selectedSidebarWorktreeId}
+      currentWorktreeId={activeWorktreeId}
       groupBy={groupBy}
       repoGroupOrdering={repoGroupOrdering}
       toggleGroup={toggleGroup}

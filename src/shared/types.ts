@@ -15,6 +15,7 @@ import type { TaskProvider } from './task-providers'
 import type { FeatureTipId } from './feature-tips'
 import type { GitBranchChangeStatus } from './git-status-types'
 import type { KeybindingOverrides, TerminalShortcutPolicy } from './keybindings'
+import type { RepoIcon } from './repo-icon'
 
 // Re-exported for backward compat with renderer call sites that import
 // `WorkspaceCreateTelemetrySource` from '../../../shared/types'.
@@ -75,6 +76,7 @@ export type Repo = {
   path: string
   displayName: string
   badgeColor: string
+  repoIcon?: RepoIcon | null
   addedAt: number
   kind?: RepoKind
   gitUsername?: string
@@ -2030,7 +2032,7 @@ export type OnboardingChecklistState = {
 export type OnboardingState = {
   closedAt: number | null
   outcome: OnboardingOutcome | null
-  // Sentinel `-1` = not started; `1..4` = highest wizard step the user
+  // Sentinel `-1` = not started; `1..5` = highest wizard step the user
   // finished. Kept as `number` (not a literal union) because callers clamp
   // via `Math.max`/`Math.min` against arbitrary numerics.
   lastCompletedStep: number
@@ -2048,9 +2050,13 @@ export type WorktreeCardProperty =
   | 'unread'
   // Legacy persisted preference. CI status is now represented by linked PR metadata.
   | 'ci'
+  // GitHub issue metadata shown on workspace cards.
   | 'issue'
+  // Linear issue metadata shown on workspace cards.
+  | 'linear-issue'
   | 'pr'
   | 'comment'
+  | 'ports'
   // Why: inline list of agent activity rendered directly inside each
   // workspace card when the experimental agent-activity feature is on. On by
   // default (see DEFAULT_WORKTREE_CARD_PROPERTIES in shared/constants.ts) —
@@ -2175,6 +2181,10 @@ export type PersistedUIState = {
    *  stamped on every prior load and so is permanently dirty for the
    *  prior-RC opt-out cohort the widened migration is meant to reach. */
   _inlineAgentsDefaultedForAllUsers?: boolean
+  /** One-shot migration flag for card properties that were split out after
+   *  the original metadata toggles shipped. Set once so later deliberate
+   *  unchecks of Linear issue and Ports stick across restarts. */
+  _expandedWorktreeCardPropertiesDefaulted?: boolean
   /** Snapshot of totalAgentsSpawned captured the first time we see the current
    *  app version. Why: the nag threshold counts agents spawned *since the
    *  user's last update* so a fresh install or new release does not trigger

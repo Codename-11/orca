@@ -3323,4 +3323,114 @@ describe('registerPtyHandlers', () => {
       await expect(pending).resolves.toBeNull()
     })
   })
+
+  describe('serializeHeadlessBuffer IPC', () => {
+    function setup() {
+      const runtime = {
+        setPtyController: vi.fn(),
+        onPtySpawned: vi.fn(),
+        onPtyData: vi.fn(),
+        onPtyExit: vi.fn(),
+        preAllocateHandleForPty: vi.fn(),
+        serializeHeadlessTerminalBufferForRenderer: vi.fn().mockResolvedValue({
+          data: 'headless',
+          cols: 100,
+          rows: 30
+        })
+      }
+      handlers.clear()
+      registerPtyHandlers(mainWindow as never, runtime as never)
+      const handler = handlers.get('pty:serializeHeadlessBuffer')
+      if (!handler) {
+        throw new Error('expected pty:serializeHeadlessBuffer handler registration')
+      }
+      return { runtime, handler }
+    }
+
+    it('delegates valid requests to the runtime headless terminal serializer', async () => {
+      const { runtime, handler } = setup()
+
+      await expect(handler(null, { id: 'pty-1', scrollbackRows: 1000.8 })).resolves.toEqual({
+        data: 'headless',
+        cols: 100,
+        rows: 30
+      })
+
+      expect(runtime.serializeHeadlessTerminalBufferForRenderer).toHaveBeenCalledWith('pty-1', {
+        scrollbackRows: 1000
+      })
+    })
+
+    it('ignores invalid ids and unsafe scrollback values', async () => {
+      const { runtime, handler } = setup()
+
+      await expect(handler(null, { id: 42, scrollbackRows: 1000 })).resolves.toBeNull()
+      await handler(null, { id: 'pty-2', scrollbackRows: -1 })
+      await handler(null, { id: 'pty-3', scrollbackRows: Number.POSITIVE_INFINITY })
+
+      expect(runtime.serializeHeadlessTerminalBufferForRenderer).toHaveBeenCalledTimes(2)
+      expect(runtime.serializeHeadlessTerminalBufferForRenderer).toHaveBeenNthCalledWith(
+        1,
+        'pty-2',
+        {}
+      )
+      expect(runtime.serializeHeadlessTerminalBufferForRenderer).toHaveBeenNthCalledWith(
+        2,
+        'pty-3',
+        {}
+      )
+    })
+
+    it('flushes pending renderer PTY batches around headless serialization', async () => {
+      vi.useFakeTimers()
+      try {
+        const mockProc = createMockProc()
+        spawnMock.mockReturnValue(mockProc.proc)
+        const runtime = {
+          setPtyController: vi.fn(),
+          onPtySpawned: vi.fn(),
+          onPtyData: vi.fn(),
+          onPtyExit: vi.fn(),
+          preAllocateHandleForPty: vi.fn(),
+          serializeHeadlessTerminalBufferForRenderer: vi.fn(async () => {
+            mockProc.emitData('during-serialize')
+            return {
+              data: 'headless',
+              cols: 100,
+              rows: 30
+            }
+          })
+        }
+        handlers.clear()
+        registerPtyHandlers(mainWindow as never, runtime as never)
+        const spawnResult = (await handlers.get('pty:spawn')!(null, {
+          cols: 80,
+          rows: 24,
+          cwd: '/tmp'
+        })) as { id: string }
+        mainWindow.webContents.send.mockClear()
+        mockProc.emitData('before-serialize')
+
+        await handlers.get('pty:serializeHeadlessBuffer')!(null, { id: spawnResult.id })
+
+        expect(mainWindow.webContents.send).toHaveBeenCalledWith('pty:data', {
+          id: spawnResult.id,
+          data: 'before-serialize'
+        })
+        expect(mainWindow.webContents.send).toHaveBeenCalledWith('pty:data', {
+          id: spawnResult.id,
+          data: 'during-serialize'
+        })
+        expect(runtime.serializeHeadlessTerminalBufferForRenderer).toHaveBeenCalledWith(
+          spawnResult.id,
+          {}
+        )
+        mainWindow.webContents.send.mockClear()
+        vi.advanceTimersByTime(8)
+        expect(mainWindow.webContents.send).not.toHaveBeenCalled()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+  })
 })

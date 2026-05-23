@@ -80,22 +80,34 @@ vi.mock('../ui/toggle-group', () => ({
 }))
 
 vi.mock('./SettingsFormControls', () => ({
-  SettingsRow: function SettingsRow() {
-    return null
-  },
-  SettingsSegmentedControl: function SettingsSegmentedControl() {
-    return null
-  },
-  SettingsSubsectionHeader: function SettingsSubsectionHeader() {
-    return null
-  },
-  SettingsSwitchRow: function SettingsSwitchRow() {
-    return null
+  SettingsRow: function SettingsRow({
+    description,
+    control,
+    children
+  }: {
+    description?: unknown
+    control?: unknown
+    children?: unknown
+  }) {
+    return [description, control, children]
   },
   NumberField: function NumberField() {
     return null
   },
   FontAutocomplete: function FontAutocomplete() {
+    return null
+  },
+  SettingsSegmentedControl: function SettingsSegmentedControl({
+    options
+  }: {
+    options?: readonly { label: string }[]
+  }) {
+    return options?.map((option) => option.label) ?? null
+  },
+  SettingsSubsectionHeader: function SettingsSubsectionHeader() {
+    return null
+  },
+  SettingsSwitchRow: function SettingsSwitchRow() {
     return null
   }
 }))
@@ -154,6 +166,15 @@ type ReactElementLike = {
 
 const TEXT_PROPS = ['children', 'label', 'description', 'control', 'title'] as const
 
+function getSearchNodes(el: ReactElementLike): unknown[] {
+  const nodes = TEXT_PROPS.map((prop) => el.props?.[prop])
+  const options = el.props?.options
+  if (Array.isArray(options)) {
+    nodes.push(...options.map((option) => (option as { label?: unknown }).label))
+  }
+  return nodes
+}
+
 function collectText(node: unknown): string {
   if (node == null) {
     return ''
@@ -168,19 +189,7 @@ function collectText(node: unknown): string {
     return node.map(collectText).join('')
   }
   const el = node as ReactElementLike
-  const propText = TEXT_PROPS.map((prop) => collectText(el.props?.[prop])).join('')
-  const optionText = Array.isArray(el.props?.options)
-    ? el.props.options.map((option) => collectText((option as { label?: unknown }).label)).join('')
-    : ''
-  return `${propText}${optionText}`
-}
-
-function getSearchNodes(el: ReactElementLike): unknown[] {
-  const nodes = TEXT_PROPS.map((prop) => el.props?.[prop])
-  if (Array.isArray(el.props?.options)) {
-    nodes.push(...el.props.options.map((option) => (option as { label?: unknown }).label))
-  }
-  return nodes
+  return getSearchNodes(el).map(collectText).join('')
 }
 
 function findAnchorByText(node: unknown, text: string): ReactElementLike | null {
