@@ -9,7 +9,8 @@ import {
   Wrench,
   Shield,
   LifeBuoy,
-  Terminal as TerminalIcon
+  Terminal as TerminalIcon,
+  CloudUpload
 } from 'lucide-react-native'
 import { colors, spacing, typography } from '../src/theme/mobile-theme'
 
@@ -42,6 +43,15 @@ export default function SettingsScreen() {
         >
           <Bell size={16} color={colors.textSecondary} />
           <Text style={styles.rowLabel}>Notifications</Text>
+          <ChevronRight size={16} color={colors.textMuted} />
+        </Pressable>
+        <View style={styles.separator} />
+        <Pressable
+          style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+          onPress={() => router.push('/import-connections')}
+        >
+          <CloudUpload size={16} color={colors.textSecondary} />
+          <Text style={styles.rowLabel}>Import saved connections</Text>
           <ChevronRight size={16} color={colors.textMuted} />
         </Pressable>
         <View style={styles.separator} />
