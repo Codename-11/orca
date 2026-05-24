@@ -6,6 +6,25 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-23 — Fixed mobile host import file reader for Expo 55
+
+Fixed the Axiom mobile import flow after Expo 55 started throwing at runtime when `readAsStringAsync` is imported from the top-level `expo-file-system` module. The import screen now reads picked backup JSON files through a small transport helper that imports the legacy filesystem API from `expo-file-system/legacy`, matching the SDK migration guidance while keeping the existing import parser/storage behavior unchanged.
+
+Bumped the Axiom Android `versionCode` to `2` for the patched local APK so it can install over the first Axiom fork build. Built and verified a local arm64 release artifact at `mobile/axiom-orca-mobile-0.0.9-vc2-import-fix-arm64-release.apk` (not intended for source control).
+
+Verification:
+
+- `pnpm exec vitest run src/transport/import-file-reader.test.ts` → 1 test passed after first confirming the new regression test failed before the helper existed.
+- `pnpm exec tsc --noEmit` → passed.
+- `pnpm test` → 106 tests passed.
+- `pnpm exec oxlint app/import-connections.tsx src/transport/import-file-reader.ts src/transport/import-file-reader.test.ts` → 0 warnings / 0 errors.
+- `pnpm exec expo prebuild --platform android --clean` → passed.
+- `./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a` → passed.
+- `apksigner verify --verbose --print-certs mobile/axiom-orca-mobile-0.0.9-vc2-import-fix-arm64-release.apk` → verified v2 signing; signer SHA-256 `fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c`.
+- `aapt dump badging mobile/axiom-orca-mobile-0.0.9-vc2-import-fix-arm64-release.apk` → package `com.axiomlabs.orca.mobile`, versionCode `2`, versionName `0.0.9`.
+
+---
+
 ## 2026-05-23 — Remediated upstream v1.4.23-rc.0 bot PR
 
 Resolved the agent-remediation merge for upstream `v1.4.23-rc.0` on `bot/upstream-sync-axiom-v1.4.23-rc.0.axiom.1` targeting `axiom/deploy`; no direct deploy-branch push was made. The conflict resolution keeps the fork semver at `1.4.23-rc.0.axiom.1`, preserves Axiom side-by-side app/updater identity, keeps profile portability and Forge provider/task-registry changes intact, and accepts upstream's terminal/settings test updates with the prior deferred PTY callback safeguards. Protected deletion review found no protected Axiom files removed by the merge.

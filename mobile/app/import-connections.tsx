@@ -3,9 +3,9 @@ import { Alert, Pressable, StyleSheet, Text, View } from 'react-native'
 import { useRouter } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as DocumentPicker from 'expo-document-picker'
-import * as FileSystem from 'expo-file-system'
 import { ChevronLeft, FileJson, ShieldAlert } from 'lucide-react-native'
 import { colors, radii, spacing, typography } from '../src/theme/mobile-theme'
+import { readImportFileText } from '../src/transport/import-file-reader'
 import {
   parseHostConnectionImportPayload,
   summarizeHostConnectionImport
@@ -39,9 +39,7 @@ export default function ImportConnectionsScreen() {
       if (!asset?.uri) {
         throw new Error('No file was selected.')
       }
-      const text = await FileSystem.readAsStringAsync(asset.uri, {
-        encoding: 'utf8'
-      })
+      const text = await readImportFileText(asset.uri)
       const importedHosts = parseHostConnectionImportPayload(text)
       const existingHosts = await loadHosts()
       const summary = summarizeHostConnectionImport(existingHosts, importedHosts)
