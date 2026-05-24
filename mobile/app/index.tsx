@@ -12,7 +12,8 @@ import {
   RefreshCw,
   PowerOff,
   Edit3,
-  ListTodo
+  ListTodo,
+  CloudUpload
 } from 'lucide-react-native'
 import { ClaudeIcon, OpenAIIcon } from '../src/components/AgentIcons'
 import {
@@ -694,6 +695,13 @@ export default function HomeScreen() {
             <Pressable style={styles.primaryButton} onPress={() => router.push('/pair-scan')}>
               <QrCode size={17} color={colors.bgBase} />
               <Text style={styles.primaryButtonText}>Pair Desktop</Text>
+            </Pressable>
+            <Pressable
+              style={styles.secondaryButton}
+              onPress={() => router.push('/import-connections')}
+            >
+              <CloudUpload size={16} color={colors.textSecondary} />
+              <Text style={styles.secondaryButtonText}>Import Saved Connections</Text>
             </Pressable>
           </View>
 
@@ -1456,6 +1464,23 @@ const styles = StyleSheet.create({
   primaryButtonText: {
     color: colors.bgBase,
     fontSize: 15,
+    fontWeight: '700'
+  },
+  secondaryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderColor: colors.borderSubtle,
+    borderWidth: 1,
+    backgroundColor: colors.bgPanel,
+    paddingHorizontal: 22,
+    paddingVertical: 12,
+    borderRadius: radii.card,
+    marginTop: spacing.sm
+  },
+  secondaryButtonText: {
+    color: colors.textSecondary,
+    fontSize: 14,
     fontWeight: '700'
   },
 

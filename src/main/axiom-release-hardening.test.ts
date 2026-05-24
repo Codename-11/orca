@@ -101,11 +101,12 @@ describe('Axiom release hardening', () => {
     expect(config.publish).toMatchObject({ owner: 'Codename-11', repo: 'orca' })
   })
 
-  it('uses the fork-owned Android package for side-by-side mobile installs', () => {
+  it('brands the fork Android app while keeping a fork-owned package for side-by-side installs', () => {
     const app = JSON.parse(readFileSync(MOBILE_APP_PATH, 'utf8')) as {
-      expo?: { android?: { package?: string } }
+      expo?: { name?: string; android?: { package?: string } }
     }
 
+    expect(app.expo?.name).toBe('Axiom Orca')
     expect(app.expo?.android?.package).toBe('com.axiomlabs.orca.mobile')
   })
 })
