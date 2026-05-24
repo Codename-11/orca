@@ -1,6 +1,7 @@
-import { readFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { resolve } from 'node:path'
+import { join, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 const require = createRequire(import.meta.url)
@@ -30,6 +31,11 @@ type BuilderConfig = {
   appImage?: { artifactName?: string }
   deb?: { packageName?: string; artifactName?: string }
   publish?: { provider?: string; owner?: string; repo?: string }
+  afterPack?: (context: {
+    electronPlatformName: string
+    appOutDir: string
+    packager: { appInfo: { productFilename: string } }
+  }) => Promise<void>
 }
 
 function loadBuilderConfig(): BuilderConfig {
@@ -99,6 +105,29 @@ describe('Axiom release hardening', () => {
     expect(config.dmg?.artifactName).toBe('axiom-orca-macos-${arch}.${ext}')
     expect(config.appImage?.artifactName).toBe('axiom-orca-linux.${ext}')
     expect(config.publish).toMatchObject({ owner: 'Codename-11', repo: 'orca' })
+  })
+
+  it('writes the configured Windows executable name for the packaged CLI launcher', async () => {
+    process.env.ORCA_PRODUCT_NAME = 'Axiom Orca'
+    process.env.ORCA_WINDOWS_EXECUTABLE_NAME = 'Axiom Orca'
+
+    const config = loadBuilderConfig()
+    const appOutDir = mkdtempSync(join(tmpdir(), 'orca-win-pack-'))
+    try {
+      mkdirSync(join(appOutDir, 'resources'), { recursive: true })
+
+      await config.afterPack?.({
+        electronPlatformName: 'win32',
+        appOutDir,
+        packager: { appInfo: { productFilename: 'Axiom Orca' } }
+      })
+
+      expect(
+        readFileSync(join(appOutDir, 'resources', 'orca-electron-executable.txt'), 'utf8')
+      ).toBe('Axiom Orca.exe\n')
+    } finally {
+      rmSync(appOutDir, { recursive: true, force: true })
+    }
   })
 
   it('brands the fork Android app while keeping a fork-owned package for side-by-side installs', () => {

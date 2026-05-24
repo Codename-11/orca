@@ -4,13 +4,18 @@ set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..") do set "RESOURCES_DIR=%%~fI"
 REM Why: once %%~fI canonicalizes RESOURCES_DIR it no longer ends with a slash,
 REM so Windows batch needs an explicit "\.." segment here. Without it the CLI
-REM launcher resolves APP_DIR back to resources/ and `orca open` cannot find
-REM Orca.exe on packaged Windows installs.
+REM launcher resolves APP_DIR back to resources/ and `orca open` cannot find the
+REM packaged app executable on Windows installs.
 for %%I in ("%RESOURCES_DIR%\..") do set "APP_DIR=%%~fI"
-set "ELECTRON=%APP_DIR%\Orca.exe"
+set "ELECTRON_EXE=Orca.exe"
+set "ELECTRON_NAME_FILE=%RESOURCES_DIR%\orca-electron-executable.txt"
+if exist "%ELECTRON_NAME_FILE%" (
+  set /p ELECTRON_EXE=<"%ELECTRON_NAME_FILE%"
+)
+set "ELECTRON=%APP_DIR%\%ELECTRON_EXE%"
 
 if not exist "%ELECTRON%" (
-  echo Unable to locate Orca.exe next to "%RESOURCES_DIR%" 1>&2
+  echo Unable to locate %ELECTRON_EXE% next to "%RESOURCES_DIR%" 1>&2
   exit /b 1
 )
 
