@@ -9,7 +9,6 @@ import { SETTINGS_CHANGED_WHITELIST, type SettingsChangedKey } from '../../share
 import type { AgentAwakeService } from '../agent-awake-service'
 import type { ProfileExportSection } from '../../shared/profile-portability'
 import { sanitizeFloatingWorkspaceDirectorySetting } from './floating-workspace-directory'
-import { applyAgentStatusHooksEnabled } from '../agent-hooks/managed-agent-hook-controls'
 
 // Why: the whitelist is the source-of-truth for which keys we emit on. Casting
 // to a Set once at module load lets the IPC handler's per-key membership
@@ -56,16 +55,6 @@ export function registerSettingsHandlers(
     const result = store.updateSettings(sanitizedArgs)
     if ('keepComputerAwakeWhileAgentsRun' in sanitizedArgs) {
       agentAwakeService?.setEnabled(result.keepComputerAwakeWhileAgentsRun)
-    }
-    if (
-      'agentStatusHooksEnabled' in sanitizedArgs &&
-      before.agentStatusHooksEnabled !== result.agentStatusHooksEnabled
-    ) {
-      try {
-        applyAgentStatusHooksEnabled(result.agentStatusHooksEnabled)
-      } catch (error) {
-        console.warn('[settings] failed to apply agentStatusHooksEnabled:', error)
-      }
     }
     if (APPEARANCE_MENU_KEYS.some((key) => key in sanitizedArgs)) {
       rebuildAppMenu()

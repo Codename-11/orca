@@ -10,7 +10,6 @@ const UnknownRecordArray = z.array(UnknownRecord)
 const WorktreeCardProperty = z.enum([
   'status',
   'unread',
-  'branch',
   'ci',
   'issue',
   'linear-issue',
@@ -81,7 +80,6 @@ const SettingsUpdate = z
     defaultTaskViewPreset: z
       .enum(['issues', 'my-issues', 'prs', 'my-prs', 'review', 'all'])
       .optional(),
-    agentStatusHooksEnabled: z.boolean().optional(),
     defaultRepoSelection: z.array(z.string()).nullable().optional(),
     defaultLinearTeamSelection: z.array(z.string()).nullable().optional(),
     githubProjects: GitHubProjectSettings.optional()
