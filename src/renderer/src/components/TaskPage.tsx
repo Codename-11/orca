@@ -70,7 +70,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import RepoMultiCombobox from '@/components/ui/repo-multi-combobox'
 import TeamMultiCombobox from '@/components/ui/team-multi-combobox'
-import RepoDotLabel from '@/components/repo/RepoDotLabel'
+import RepoBadgeLabel from '@/components/repo/RepoBadgeLabel'
 import IssueSourceIndicator, { sameGitHubOwnerRepo } from '@/components/github/IssueSourceIndicator'
 import IssueSourceSelector, { issueSourceChipClass } from '@/components/github/IssueSourceSelector'
 import { reconcileLinearTeamSelection } from '@/components/task-page-linear-team-selection'
@@ -4894,7 +4894,7 @@ export default function TaskPage(): React.JSX.Element {
                       // Why: unify feature 1 (indicator) and feature 2 (selector)
                       // into a single chip per repo. Rendering both separately
                       // produced visually redundant output — two local-repo
-                      // dot-labels, duplicate slugs. The selector's active pill
+                      // badge labels, duplicate slugs. The selector's active pill
                       // + tooltip already announce the source, so the "Issues
                       // from {slug}" chip is only shown when the selector does
                       // not render (no upstream remote — nothing to toggle).
@@ -4908,7 +4908,7 @@ export default function TaskPage(): React.JSX.Element {
                         <div className="mt-2 flex flex-wrap items-center gap-2">
                           {rows.map((s) => {
                             const repo = selectedRepos.find((r) => r.id === s.repoId)
-                            const showDotLabel = selectedRepos.length > 1 && repo
+                            const showRepoBadgeLabel = selectedRepos.length > 1 && repo
                             const selectorRenderable = hasUpstreamCandidateDivergence(s)
                             // Why: the static indicator has its own wrapping
                             // chip styles, so we render it standalone and don't
@@ -4921,7 +4921,7 @@ export default function TaskPage(): React.JSX.Element {
                                   issues={s.sources.issues}
                                   prs={s.sources.prs}
                                   localRepo={
-                                    showDotLabel && repo
+                                    showRepoBadgeLabel && repo
                                       ? { displayName: repo.displayName, color: repo.badgeColor }
                                       : undefined
                                   }
@@ -4939,11 +4939,11 @@ export default function TaskPage(): React.JSX.Element {
                             // uses `inline-flex`, so the visual rendering is identical.
                             return (
                               <div key={s.repoId} className={issueSourceChipClass}>
-                                {showDotLabel ? (
-                                  <RepoDotLabel
+                                {showRepoBadgeLabel ? (
+                                  <RepoBadgeLabel
                                     name={repo.displayName}
                                     color={repo.badgeColor}
-                                    dotClassName="size-1.5"
+                                    badgeClassName="size-1.5"
                                     className="text-[10px] text-muted-foreground"
                                   />
                                 ) : null}
@@ -5657,10 +5657,10 @@ export default function TaskPage(): React.JSX.Element {
                               {selectedRepos.length > 1 && itemRepo ? (
                                 // Why: disambiguate rows when multiple repos are in
                                 // the merged list — a single-repo view doesn't need it.
-                                <RepoDotLabel
+                                <RepoBadgeLabel
                                   name={itemRepo.displayName}
                                   color={itemRepo.badgeColor}
-                                  dotClassName="size-1.5"
+                                  badgeClassName="size-1.5"
                                   className="shrink-0 text-[11px] text-muted-foreground"
                                 />
                               ) : null}
@@ -6942,7 +6942,7 @@ export default function TaskPage(): React.JSX.Element {
                   <SelectContent>
                     {selectedRepos.map((r) => (
                       <SelectItem key={r.id} value={r.id}>
-                        <RepoDotLabel name={r.displayName} color={r.badgeColor} />
+                        <RepoBadgeLabel name={r.displayName} color={r.badgeColor} />
                       </SelectItem>
                     ))}
                   </SelectContent>

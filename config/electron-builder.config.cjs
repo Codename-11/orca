@@ -1,4 +1,4 @@
-const { chmodSync, existsSync, readdirSync } = require('node:fs')
+const { chmodSync, existsSync, readdirSync, writeFileSync } = require('node:fs')
 const { execFileSync } = require('node:child_process')
 const { join, resolve } = require('node:path')
 
@@ -50,6 +50,10 @@ const relayExtraResource = {
   from: 'out/relay',
   to: 'relay'
 }
+const windowsCliExecutableMarker = 'orca-electron-executable.txt'
+const windowsExecutableFilename = windowsExecutableName.endsWith('.exe')
+  ? windowsExecutableName
+  : `${windowsExecutableName}.exe`
 
 /** @type {import('electron-builder').Configuration} */
 module.exports = {
@@ -126,6 +130,17 @@ module.exports = {
       // platform binaries (notably darwin-x64). child_process.execFile needs
       // the copied binary to be executable in packaged apps.
       chmodSync(join(resourcesDir, filename), 0o755)
+    }
+    if (context.electronPlatformName === 'win32') {
+      // Why: fork builds can rename the Windows app executable via
+      // ORCA_WINDOWS_EXECUTABLE_NAME/productName. The packaged CLI launcher is
+      // copied as a static extraResource, so pass the built executable filename
+      // through a generated resources marker instead of hardcoding Orca.exe.
+      writeFileSync(
+        join(resourcesDir, windowsCliExecutableMarker),
+        `${windowsExecutableFilename}\n`,
+        'utf8'
+      )
     }
     if (context.electronPlatformName === 'darwin') {
       await signMacComputerUseHelper(join(resourcesDir, 'Orca Computer Use.app'), context.packager)

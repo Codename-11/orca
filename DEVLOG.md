@@ -6,6 +6,21 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-24 — Fixed Axiom Windows packaged CLI launcher
+
+Merged latest upstream `main` / `v1.4.27-rc.0` into the Axiom deploy update branch and resolved the expected package-version conflict as `1.4.27-rc.0.axiom.1`. Fixed the packaged Windows CLI launcher regression caused by Axiom's fork executable rename: `resources/win32/bin/orca.cmd` no longer hardcodes `Orca.exe`. Windows packaging now writes `resources/orca-electron-executable.txt` during `afterPack` with the configured `ORCA_WINDOWS_EXECUTABLE_NAME` plus `.exe`, and the launcher reads that marker before falling back to upstream `Orca.exe`.
+
+Verification:
+
+- `pnpm exec vitest run --config config/vitest.config.ts src/main/cli/packaged-cli-assets.test.ts src/main/axiom-release-hardening.test.ts` → 7 tests passed.
+- `pnpm exec oxfmt --check config/electron-builder.config.cjs src/main/axiom-release-hardening.test.ts src/main/cli/packaged-cli-assets.test.ts` → passed after formatting.
+- `pnpm run typecheck` → passed; Node engine warning only (`wanted node 24`, local `v25.6.0`).
+- `pnpm exec vitest run --config config/vitest.config.ts src/main/cli/packaged-cli-assets.test.ts src/main/axiom-release-hardening.test.ts config/scripts/axiom-upstream-sync-release.test.mjs src/main/updater-endpoints.test.ts src/shared/task-providers.test.ts` → 50 tests passed.
+- `pnpm exec oxlint config/electron-builder.config.cjs resources/win32/bin/orca.cmd src/main/axiom-release-hardening.test.ts src/main/cli/packaged-cli-assets.test.ts .github/workflows/axiom-upstream-sync-release.yml config/scripts/axiom-upstream-sync-release.test.mjs` → 0 warnings / 0 errors.
+- `git diff --check` → passed.
+
+---
+
 ## 2026-05-23 — Restored Forge visibility in mobile task sources
 
 Verified the mobile Tasks path already had Forge list/detail/create support, but two mobile/desktop bridge gaps could hide it from the phone: the mobile home/tasks source filter treated `forge.status.connected === false` as "do not show Forge" instead of "show Forge with setup state", and the runtime `settings.update` RPC rejected `defaultTaskSource: 'forge'` plus did not accept `visibleTaskProviders` updates from mobile.
