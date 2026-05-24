@@ -3,7 +3,8 @@ import {
   filterAvailableTaskProviders,
   MOBILE_TASK_PROVIDERS,
   normalizeVisibleTaskProviders,
-  resolveVisibleTaskProvider
+  resolveVisibleTaskProvider,
+  toggleVisibleTaskProvider
 } from './mobile-task-providers'
 
 describe('mobile task providers', () => {
@@ -37,5 +38,23 @@ describe('mobile task providers', () => {
 
   it('resolves Forge when it is visible', () => {
     expect(resolveVisibleTaskProvider('forge', ['github', 'forge'])).toBe('forge')
+  })
+
+  it('keeps Forge visible when support is unknown so the task screen can show setup state', () => {
+    expect(
+      filterAvailableTaskProviders(['forge'], {
+        gitlabInstalled: false,
+        linearConnected: false
+      })
+    ).toEqual(['forge'])
+  })
+
+  it('toggles visible task providers in canonical order without hiding the last provider', () => {
+    expect(toggleVisibleTaskProvider(['github'], 'forge')).toEqual(['github', 'forge'])
+    expect(toggleVisibleTaskProvider(['github', 'linear', 'forge'], 'linear')).toEqual([
+      'github',
+      'forge'
+    ])
+    expect(toggleVisibleTaskProvider(['forge'], 'forge')).toEqual(['forge'])
   })
 })

@@ -32,7 +32,10 @@ export function normalizeVisibleTaskProviders(value: unknown): TaskProvider[] {
 export type TaskProviderAvailability = {
   gitlabInstalled: boolean
   linearConnected: boolean
-  forgeConnected: boolean
+  /** Why: Forge should remain selectable when a host supports the Forge RPC
+   * surface but the account itself is not configured yet; the Tasks screen can
+   * then render the setup/error state instead of hiding the source entirely. */
+  forgeConnected?: boolean
 }
 
 export function filterAvailableTaskProviders(
@@ -49,10 +52,28 @@ export function filterAvailableTaskProviders(
     if (provider === 'linear') {
       return availability.linearConnected
     }
-    return availability.forgeConnected
+    return availability.forgeConnected !== false
   })
 
   return available.length > 0 ? available : ['github']
+}
+
+export function toggleVisibleTaskProvider(
+  visibleProviders: readonly TaskProvider[],
+  provider: TaskProvider
+): TaskProvider[] {
+  const normalized = normalizeVisibleTaskProviders([...visibleProviders])
+  const isVisible = normalized.includes(provider)
+
+  if (isVisible && normalized.length === 1) {
+    return normalized
+  }
+
+  if (isVisible) {
+    return normalized.filter((entry) => entry !== provider)
+  }
+
+  return MOBILE_TASK_PROVIDERS.filter((entry) => entry === provider || normalized.includes(entry))
 }
 
 export function resolveVisibleTaskProvider(

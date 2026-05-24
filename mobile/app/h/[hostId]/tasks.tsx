@@ -2934,10 +2934,11 @@ export default function MobileTasksScreen() {
       const preferredProviders = normalizeVisibleTaskProviders(settings.visibleTaskProviders)
       const linearIsConnected = linearStatus?.connected === true
       const forgeIsConnected = forgeStatus?.connected === true
+      const forgeIsSupported = isSuccess(forgeStatusResponse)
       const availableProviders = filterAvailableTaskProviders(preferredProviders, {
         gitlabInstalled: preflight?.glab?.installed === true,
         linearConnected: linearIsConnected,
-        forgeConnected: forgeIsConnected
+        forgeConnected: forgeIsSupported
       })
       const nextVisibleProviders =
         preferredProviders.includes('linear') && !availableProviders.includes('linear')
@@ -3226,6 +3227,9 @@ export default function MobileTasksScreen() {
         }
         if (provider === 'forge' && !forgeConnected) {
           setItems([])
+          setError(
+            'Forge is not connected on this desktop. Configure Forge on the desktop, then refresh.'
+          )
           return
         }
         const currentRepos = reposRef.current.length > 0 ? reposRef.current : await loadRepos()

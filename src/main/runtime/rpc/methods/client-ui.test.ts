@@ -85,6 +85,31 @@ describe('client UI RPC methods', () => {
     expect(response).toMatchObject({ ok: true, result: { settings } })
   })
 
+  it('accepts Forge as a mobile-visible task source setting', async () => {
+    const settings = {
+      defaultTaskSource: 'forge',
+      visibleTaskProviders: ['github', 'forge']
+    }
+    const runtime = {
+      getRuntimeId: () => 'test-runtime',
+      updateClientSettings: vi.fn(() => settings)
+    } as unknown as OrcaRuntimeService
+    const dispatcher = new RpcDispatcher({ runtime, methods: CLIENT_UI_METHODS })
+
+    const response = await dispatcher.dispatch(
+      makeRequest('settings.update', {
+        defaultTaskSource: 'forge',
+        visibleTaskProviders: ['github', 'forge']
+      })
+    )
+
+    expect(runtime.updateClientSettings).toHaveBeenCalledWith({
+      defaultTaskSource: 'forge',
+      visibleTaskProviders: ['github', 'forge']
+    })
+    expect(response).toMatchObject({ ok: true, result: { settings } })
+  })
+
   it('returns the runtime host persisted UI state', async () => {
     const ui: PersistedUIState = {
       ...getDefaultUIState(),
