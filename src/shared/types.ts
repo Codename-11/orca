@@ -1793,6 +1793,9 @@ export type GlobalSettings = {
   geminiCliOAuthEnabled: boolean
   /** Per-agent CLI command overrides. A missing key means use the catalog default binary name. */
   agentCmdOverrides: Partial<Record<TuiAgent, string>>
+  /** Why: disabling must persist so startup does not reinstall global agent
+   *  hook entries right after the user removes them from Settings or CLI. */
+  agentStatusHooksEnabled: boolean
   /** When true, Orca requests local awake assertions while hook-reported agents are working. */
   keepComputerAwakeWhileAgentsRun: boolean
   /** Why: macOS terminals must choose between letting Option compose layout
@@ -2048,6 +2051,9 @@ export type NotificationPermissionStatusResult = {
 export type WorktreeCardProperty =
   | 'status'
   | 'unread'
+  // Git branch metadata shown on workspace cards. Hidden by default because
+  // workspace names already carry the primary identity for most lists.
+  | 'branch'
   // Legacy persisted preference. CI status is now represented by linked PR metadata.
   | 'ci'
   // GitHub issue metadata shown on workspace cards.
