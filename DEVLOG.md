@@ -6,6 +6,22 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-24 — Remediated upstream v1.4.27 bot PR
+
+Resolved the agent-remediation merge for upstream `v1.4.27` on `bot/upstream-sync-axiom-v1.4.27-axiom.1` targeting `axiom/deploy`; no direct deploy-branch push was made. The conflict resolution keeps the fork semver at `1.4.27-axiom.1`, preserves Axiom side-by-side app/updater identity, profile portability, and Forge provider/task-registry changes, and combines upstream's remote PTY parser test expectations with Axiom's deferred callback waits. Protected deletion review found no protected Axiom files removed by the merge.
+
+Verification:
+
+- `pnpm install --frozen-lockfile` → passed. Node engine warning only: project wants Node 24; local runtime is Node v25.6.0.
+- `pnpm run typecheck` → passed.
+- `pnpm exec vitest run --config config/vitest.config.ts src/shared/task-providers.test.ts src/main/axiom-release-hardening.test.ts src/main/updater-endpoints.test.ts src/main/app-build-identity.test.ts config/scripts/axiom-upstream-sync-release.test.mjs` → 50 tests passed.
+- `pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/remote-runtime-pty-transport.test.ts` → 23 tests passed.
+- `pnpm exec oxlint config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml` → 0 warnings / 0 errors.
+- `pnpm exec oxfmt --check config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml config/axiom-merge-remediation-policy.json` → passed.
+- `git diff --check` → passed.
+
+---
+
 ## 2026-05-24 — Fixed Axiom Windows packaged CLI launcher
 
 Merged latest upstream `main` / `v1.4.27-rc.0` into the Axiom deploy update branch and resolved the expected package-version conflict as `1.4.27-rc.0.axiom.1`. Fixed the packaged Windows CLI launcher regression caused by Axiom's fork executable rename: `resources/win32/bin/orca.cmd` no longer hardcodes `Orca.exe`. Windows packaging now writes `resources/orca-electron-executable.txt` during `afterPack` with the configured `ORCA_WINDOWS_EXECUTABLE_NAME` plus `.exe`, and the launcher reads that marker before falling back to upstream `Orca.exe`.
