@@ -68,6 +68,8 @@ const GitHubProjectSettings = z
   })
   .strict()
 
+const TaskProvider = z.enum(['github', 'gitlab', 'linear', 'forge'])
+
 const SettingsUpdate = z
   .object({
     defaultTuiAgent: z
@@ -76,7 +78,8 @@ const SettingsUpdate = z
         value === null || value === 'blank' || isTuiAgent(value) ? value : undefined
       )
       .optional(),
-    defaultTaskSource: z.enum(['github', 'gitlab', 'linear']).optional(),
+    defaultTaskSource: TaskProvider.optional(),
+    visibleTaskProviders: z.array(TaskProvider).optional(),
     defaultTaskViewPreset: z
       .enum(['issues', 'my-issues', 'prs', 'my-prs', 'review', 'all'])
       .optional(),

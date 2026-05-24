@@ -6,6 +6,47 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-23 — Restored Forge visibility in mobile task sources
+
+Verified the mobile Tasks path already had Forge list/detail/create support, but two mobile/desktop bridge gaps could hide it from the phone: the mobile home/tasks source filter treated `forge.status.connected === false` as "do not show Forge" instead of "show Forge with setup state", and the runtime `settings.update` RPC rejected `defaultTaskSource: 'forge'` plus did not accept `visibleTaskProviders` updates from mobile.
+
+Fixed mobile to treat a successful `forge.status` RPC as Forge support even when the Forge account is not connected yet, so the source stays selectable and can explain the setup problem. Added a mobile Settings → Task Sources screen with per-paired-desktop switches for GitHub/GitLab/Linear/Forge visibility and tap-to-make-default behavior. Extended the desktop runtime RPC settings schema so mobile can persist Forge as a default source and update visible providers. Bumped the Axiom Android `versionCode` to `3` for an installable APK over the prior import-fix build.
+
+Verification:
+
+- `pnpm exec vitest run src/main/runtime/rpc/methods/client-ui.test.ts mobile/src/tasks/mobile-task-providers.test.ts` → 12 tests passed.
+- `pnpm test` in `mobile/` → 108 tests passed.
+- `pnpm exec tsc --noEmit` in `mobile/` → passed.
+- `pnpm exec expo export --platform android --output-dir /tmp/orca-mobile-export` in `mobile/` → passed.
+- `pnpm exec expo prebuild --platform android --clean` in `mobile/` → passed.
+- `JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a` in `mobile/android/` → passed after restoring `android/local.properties` SDK path created by local prebuild.
+- `apksigner verify --verbose --print-certs mobile/axiom-orca-mobile-0.0.9-vc3-forge-task-sources-arm64-release.apk` → verified v2 signing; signer SHA-256 `fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c`.
+- `aapt dump badging mobile/axiom-orca-mobile-0.0.9-vc3-forge-task-sources-arm64-release.apk` → package `com.axiomlabs.orca.mobile`, versionCode `3`, versionName `0.0.9`.
+- `pnpm run typecheck:node` → passed; Node engine warning only (`wanted node 24`, local `v25.6.0`).
+- `pnpm exec oxlint mobile/app/index.tsx mobile/app/settings.tsx mobile/app/task-settings.tsx mobile/app/_layout.tsx mobile/app/h/'[hostId]'/tasks.tsx mobile/src/tasks/mobile-task-providers.ts mobile/src/tasks/mobile-task-providers.test.ts src/main/runtime/rpc/methods/client-ui.ts src/main/runtime/rpc/methods/client-ui.test.ts` → 0 warnings / 0 errors.
+- `git diff --check` → passed.
+
+---
+
+## 2026-05-23 — Fixed mobile host import file reader for Expo 55
+
+Fixed the Axiom mobile import flow after Expo 55 started throwing at runtime when `readAsStringAsync` is imported from the top-level `expo-file-system` module. The import screen now reads picked backup JSON files through a small transport helper that imports the legacy filesystem API from `expo-file-system/legacy`, matching the SDK migration guidance while keeping the existing import parser/storage behavior unchanged.
+
+Bumped the Axiom Android `versionCode` to `2` for the patched local APK so it can install over the first Axiom fork build. Built and verified a local arm64 release artifact at `mobile/axiom-orca-mobile-0.0.9-vc2-import-fix-arm64-release.apk` (not intended for source control).
+
+Verification:
+
+- `pnpm exec vitest run src/transport/import-file-reader.test.ts` → 1 test passed after first confirming the new regression test failed before the helper existed.
+- `pnpm exec tsc --noEmit` → passed.
+- `pnpm test` → 106 tests passed.
+- `pnpm exec oxlint app/import-connections.tsx src/transport/import-file-reader.ts src/transport/import-file-reader.test.ts` → 0 warnings / 0 errors.
+- `pnpm exec expo prebuild --platform android --clean` → passed.
+- `./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a` → passed.
+- `apksigner verify --verbose --print-certs mobile/axiom-orca-mobile-0.0.9-vc2-import-fix-arm64-release.apk` → verified v2 signing; signer SHA-256 `fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c`.
+- `aapt dump badging mobile/axiom-orca-mobile-0.0.9-vc2-import-fix-arm64-release.apk` → package `com.axiomlabs.orca.mobile`, versionCode `2`, versionName `0.0.9`.
+
+---
+
 ## 2026-05-23 — Remediated upstream v1.4.23-rc.0 bot PR
 
 Resolved the agent-remediation merge for upstream `v1.4.23-rc.0` on `bot/upstream-sync-axiom-v1.4.23-rc.0.axiom.1` targeting `axiom/deploy`; no direct deploy-branch push was made. The conflict resolution keeps the fork semver at `1.4.23-rc.0.axiom.1`, preserves Axiom side-by-side app/updater identity, keeps profile portability and Forge provider/task-registry changes intact, and accepts upstream's terminal/settings test updates with the prior deferred PTY callback safeguards. Protected deletion review found no protected Axiom files removed by the merge.

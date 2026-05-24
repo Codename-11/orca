@@ -94,10 +94,6 @@ type HomeLinearStatus = {
   connected?: boolean
 }
 
-type HomeForgeStatus = {
-  connected?: boolean
-}
-
 const TASK_PROVIDER_LABELS: Record<TaskProvider, string> = {
   github: 'GitHub',
   gitlab: 'GitLab',
@@ -248,13 +244,13 @@ function fetchTaskProviders(
         ? (preflightResponse.result as HomePreflightStatus)
         : null
       const linear = linearResponse.ok ? (linearResponse.result as HomeLinearStatus) : null
-      const forge = forgeResponse.ok ? (forgeResponse.result as HomeForgeStatus) : null
+      const forgeSupported = forgeResponse.ok
       const providers = filterAvailableTaskProviders(
         normalizeVisibleTaskProviders(settings.visibleTaskProviders),
         {
           gitlabInstalled: preflight?.glab?.installed === true,
           linearConnected: linear?.connected === true,
-          forgeConnected: forge?.connected === true
+          forgeConnected: forgeSupported
         }
       )
       setProviders((prev) => ({ ...prev, [hostId]: providers }))
