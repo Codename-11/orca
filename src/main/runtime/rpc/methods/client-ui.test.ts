@@ -133,6 +133,8 @@ describe('client UI RPC methods', () => {
   it('persists UI updates on the runtime host and returns the updated state', async () => {
     const updated: PersistedUIState = {
       ...getDefaultUIState(),
+      rightSidebarOpen: false,
+      rightSidebarTab: 'checks',
       showActiveOnly: true,
       filterRepoIds: ['repo-1']
     }
@@ -144,6 +146,8 @@ describe('client UI RPC methods', () => {
 
     const response = await dispatcher.dispatch(
       makeRequest('ui.set', {
+        rightSidebarOpen: false,
+        rightSidebarTab: 'checks',
         showActiveOnly: true,
         hideSleepingWorkspaces: true,
         filterRepoIds: ['repo-1']
@@ -151,6 +155,8 @@ describe('client UI RPC methods', () => {
     )
 
     expect(runtime.updateUIState).toHaveBeenCalledWith({
+      rightSidebarOpen: false,
+      rightSidebarTab: 'checks',
       showActiveOnly: true,
       hideSleepingWorkspaces: true,
       filterRepoIds: ['repo-1']

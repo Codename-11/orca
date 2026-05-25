@@ -251,8 +251,6 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       createWorktree: s.createWorktree,
       updateWorktreeMeta: s.updateWorktreeMeta,
       setSidebarOpen: s.setSidebarOpen,
-      setRightSidebarOpen: s.setRightSidebarOpen,
-      setRightSidebarTab: s.setRightSidebarTab,
       closeModal: s.closeModal,
       openSettingsPage: s.openSettingsPage,
       openSettingsTarget: s.openSettingsTarget,
@@ -266,8 +264,6 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     createWorktree,
     updateWorktreeMeta,
     setSidebarOpen,
-    setRightSidebarOpen,
-    setRightSidebarTab,
     closeModal,
     openSettingsPage,
     openSettingsTarget,
@@ -1766,8 +1762,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
         prompt: startupPrompt,
         cmdOverrides: settings?.agentCmdOverrides ?? {},
         platform: CLIENT_PLATFORM,
-        useOrcaClaudeAgentStatusSettings: settings?.agentStatusHooksEnabled !== false,
-        useOrcaCodexAgentStatusProfile: settings?.agentStatusHooksEnabled !== false
+        useOrcaClaudeAgentStatusSettings: settings?.agentStatusHooksEnabled !== false
       })
 
       // Why: thread agent_started telemetry through the queued startup so
@@ -1802,10 +1797,6 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
         })
       }
       setSidebarOpen(true)
-      if (settings?.rightSidebarOpenByDefault) {
-        setRightSidebarTab('explorer')
-        setRightSidebarOpen(true)
-      }
       if (persistDraft) {
         clearNewWorkspaceDraft()
       }
@@ -1845,9 +1836,6 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     selectedRepoRequiresConnection,
     settings?.agentCmdOverrides,
     settings?.agentStatusHooksEnabled,
-    settings?.rightSidebarOpenByDefault,
-    setRightSidebarOpen,
-    setRightSidebarTab,
     setSidebarOpen,
     setupDecision,
     sparseEnabled,
@@ -1992,8 +1980,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
                 draft: quickDraftPrompt,
                 cmdOverrides: settings?.agentCmdOverrides ?? {},
                 platform: CLIENT_PLATFORM,
-                useOrcaClaudeAgentStatusSettings: settings?.agentStatusHooksEnabled !== false,
-                useOrcaCodexAgentStatusProfile: settings?.agentStatusHooksEnabled !== false
+                useOrcaClaudeAgentStatusSettings: settings?.agentStatusHooksEnabled !== false
               })
 
         let startupPlan: ReturnType<typeof buildAgentStartupPlan> = null
@@ -2012,8 +1999,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
             cmdOverrides: settings?.agentCmdOverrides ?? {},
             platform: CLIENT_PLATFORM,
             allowEmptyPromptLaunch: true,
-            useOrcaClaudeAgentStatusSettings: settings?.agentStatusHooksEnabled !== false,
-            useOrcaCodexAgentStatusProfile: settings?.agentStatusHooksEnabled !== false
+            useOrcaClaudeAgentStatusSettings: settings?.agentStatusHooksEnabled !== false
           })
           if (startupPlan && quickDraftPrompt) {
             startupPlan.draftPrompt = quickDraftPrompt
@@ -2052,10 +2038,6 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
           })
         }
         setSidebarOpen(true)
-        if (settings?.rightSidebarOpenByDefault) {
-          setRightSidebarTab('explorer')
-          setRightSidebarOpen(true)
-        }
         if (persistDraft) {
           clearNewWorkspaceDraft()
         }
@@ -2094,9 +2076,6 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       selectedRepoRequiresConnection,
       settings?.agentCmdOverrides,
       settings?.agentStatusHooksEnabled,
-      settings?.rightSidebarOpenByDefault,
-      setRightSidebarOpen,
-      setRightSidebarTab,
       setSidebarOpen,
       setupDecision,
       sparseEnabled,

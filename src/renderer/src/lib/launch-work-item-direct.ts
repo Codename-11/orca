@@ -299,8 +299,7 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
             draft: draftContent,
             cmdOverrides: settings?.agentCmdOverrides ?? {},
             platform: CLIENT_PLATFORM,
-            useOrcaClaudeAgentStatusSettings: settings?.agentStatusHooksEnabled !== false,
-            useOrcaCodexAgentStatusProfile: settings?.agentStatusHooksEnabled !== false
+            useOrcaClaudeAgentStatusSettings: settings?.agentStatusHooksEnabled !== false
           })
     if (draftLaunchPlan) {
       startupPlan = {
@@ -318,8 +317,7 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
         cmdOverrides: settings?.agentCmdOverrides ?? {},
         platform: CLIENT_PLATFORM,
         allowEmptyPromptLaunch: true,
-        useOrcaClaudeAgentStatusSettings: settings?.agentStatusHooksEnabled !== false,
-        useOrcaCodexAgentStatusProfile: settings?.agentStatusHooksEnabled !== false
+        useOrcaClaudeAgentStatusSettings: settings?.agentStatusHooksEnabled !== false
       })
     }
 
@@ -341,10 +339,6 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
   }
 
   store.setSidebarOpen(true)
-  if (settings?.rightSidebarOpenByDefault) {
-    store.setRightSidebarTab('explorer')
-    store.setRightSidebarOpen(true)
-  }
 
   // Why: at this point the workspace is live and the agent (if any) has
   // been queued on `primaryTabId`. The post-launch paste step below only
