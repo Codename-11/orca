@@ -39,6 +39,10 @@ Source-control and review changes must consider GitLab and other supported git p
 Be mindful of the user's `gh` CLI API rate limit — batch requests where possible and avoid unnecessary calls. All code, commands, and scripts must be compatible with macOS, Linux, and Windows.
 Never commit PR evidence images; attach them to the PR conversation instead.
 
+## Axiom Fork Releases
+
+Before changing release behavior or publishing fork builds, read [`FORK.md`](./FORK.md) and [`docs/reference/axiom-release-readiness.md`](./docs/reference/axiom-release-readiness.md). Axiom patch releases are not triggered by plain pushes to `axiom/deploy`; dispatch `.github/workflows/axiom-upstream-sync-release.yml` with `bump_axiom_revision=true` so the fork gets a new `axiom-v*` tag and updater-visible version.
+
 ## Type Declarations: Prefer `.ts` Over `.d.ts`
 
 Project-owned type declarations belong in `.ts` files. `.d.ts` is reserved for ambient shims (e.g., `env.d.ts`, `vite/client.d.ts`). TypeScript's `skipLibCheck: true` setting applies globally, including to our own `.d.ts` files, which means any unresolved type reference in a `.d.ts` silently becomes `any` at its call sites. Write your types in `.ts` files so the compiler actually checks them. CI enforces this for `src/preload/` and `src/shared/` — see `docs/preload-typecheck-hole.md`.

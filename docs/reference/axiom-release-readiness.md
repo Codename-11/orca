@@ -58,6 +58,39 @@ upstream `v*` tag. Manual Axiom-only update builds should use
 `bump_axiom_revision` or `axiom_revision` so the Electron updater sees a
 semantically newer fork version from the `Codename-11/orca` release feed.
 
+## Axiom patch release workflow
+
+Use this path when Axiom has a fork-only fix already on `axiom/deploy` and needs
+an update build before or instead of an upstream PR. A push to `axiom/deploy`
+does not publish a release by itself; it only updates the branch that the release
+workflow will check out.
+
+1. Confirm the patch is on `origin/axiom/deploy`.
+2. Identify the upstream base tag for the current Axiom release. For
+   `axiom-v1.4.27-axiom.1`, the upstream base tag is `v1.4.27`.
+3. Dispatch the release workflow with a fork revision bump:
+
+```bash
+gh workflow run axiom-upstream-sync-release.yml \
+  --repo Codename-11/orca \
+  --ref axiom/deploy \
+  -f upstream_tag=<upstream-v-tag> \
+  -f dry_run=false \
+  -f build_mobile=false \
+  -f force_rebuild=false \
+  -f bump_axiom_revision=true
+```
+
+The workflow computes the next `axiom.N` revision, updates `package.json`,
+pushes the release commit back to `axiom/deploy`, creates the `axiom-v*` tag,
+builds release assets from that tag, verifies required assets, and publishes the
+GitHub release. Stable upstream bases build both Windows and Android assets;
+upstream prerelease bases build mobile only when `build_mobile=true`.
+
+Use `axiom_revision=<number>` only when the revision number must be selected
+explicitly. Use `axiom_tag=<existing-axiom-v-tag>` with `force_rebuild=true` only
+when rebuilding and re-uploading assets for an existing fork release.
+
 ## Pre-release checklist
 
 Run these from the release branch before cutting or rebuilding a fork release:
