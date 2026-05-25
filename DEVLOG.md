@@ -6,6 +6,21 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-25 — Restored Axiom upstream RC release dispatches
+
+Fixed the Axiom upstream sync release detector so explicit upstream release/tag bridge payloads for prereleases are honored instead of being skipped as generic prerelease discovery. The release workflow now sets `AXIOM_INCLUDE_PRERELEASES=1`, matching the documented Axiom RC cadence, and the detector keeps stable-only discovery available only when prereleases are not included and no explicit upstream tag was provided. Verified `v1.4.28-rc.4` now resolves to `1.4.28-rc.4.axiom.1` / `axiom-v1.4.28-rc.4.axiom.1` with `should_release=true`.
+
+Verification:
+
+- `GITHUB_REPOSITORY=Codename-11/orca AXIOM_UPSTREAM_REPOSITORY=stablyai/orca AXIOM_INCLUDE_PRERELEASES=0 GH_TOKEN="$(gh auth token)" node config/scripts/axiom-check-upstream-release.mjs --upstream-tag v1.4.28-rc.4` → `should_release=true`.
+- `GITHUB_REPOSITORY=Codename-11/orca AXIOM_UPSTREAM_REPOSITORY=stablyai/orca AXIOM_INCLUDE_PRERELEASES=1 GH_TOKEN="$(gh auth token)" node config/scripts/axiom-check-upstream-release.mjs` → `should_release=true` for `v1.4.28-rc.4`.
+- `pnpm exec vitest run --config config/vitest.config.ts config/scripts/axiom-upstream-sync-release.test.mjs config/scripts/hermes-repository-dispatch-watcher.test.mjs` → 30 tests passed.
+- `pnpm exec oxlint config/scripts/axiom-check-upstream-release.mjs config/scripts/axiom-upstream-sync-release.test.mjs config/scripts/hermes-repository-dispatch-watcher.test.mjs` → 0 warnings / 0 errors.
+- `pnpm exec oxfmt --check config/scripts/axiom-check-upstream-release.mjs config/scripts/axiom-upstream-sync-release.test.mjs .github/workflows/axiom-upstream-sync-release.yml` → passed.
+- `git diff --check` → passed.
+
+---
+
 ## 2026-05-24 — Remediated upstream v1.4.27 bot PR
 
 Resolved the agent-remediation merge for upstream `v1.4.27` on `bot/upstream-sync-axiom-v1.4.27-axiom.1` targeting `axiom/deploy`; no direct deploy-branch push was made. The conflict resolution keeps the fork semver at `1.4.27-axiom.1`, preserves Axiom side-by-side app/updater identity, profile portability, and Forge provider/task-registry changes, and combines upstream's remote PTY parser test expectations with Axiom's deferred callback waits. Protected deletion review found no protected Axiom files removed by the merge.

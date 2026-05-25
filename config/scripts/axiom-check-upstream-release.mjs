@@ -181,6 +181,14 @@ export function isUpstreamPrereleaseRelease(release) {
   return Boolean(release?.prerelease) || isPrereleaseTag(release?.tag_name)
 }
 
+export function shouldSkipUpstreamPrerelease({
+  upstreamPrerelease,
+  includePrereleases,
+  explicitUpstreamTag
+}) {
+  return Boolean(upstreamPrerelease) && !includePrereleases && !explicitUpstreamTag
+}
+
 export function newestSemverTag(tags, { includePrereleases }) {
   return tags
     .filter((tag) => parseVersion(tag))
@@ -275,7 +283,13 @@ async function main() {
 
   const upstreamTag = release.tag_name
   const upstreamPrerelease = isUpstreamPrereleaseRelease(release)
-  if (upstreamPrerelease) {
+  if (
+    shouldSkipUpstreamPrerelease({
+      upstreamPrerelease,
+      includePrereleases,
+      explicitUpstreamTag: Boolean(args.upstreamTag)
+    })
+  ) {
     setOutput('source', 'upstream_tag')
     setOutput('upstream_tag', upstreamTag)
     setOutput('upstream_name', release.name || upstreamTag)
