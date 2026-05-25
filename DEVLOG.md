@@ -6,6 +6,20 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-25 — Remediated upstream v1.4.28-rc.4 bot PR
+
+Resolved the bot remediation merge for upstream `v1.4.28-rc.4` on `bot/upstream-sync-axiom-v1.4.28-rc.4.axiom.1` targeting `axiom/deploy`. Kept the fork version at `1.4.28-rc.4.axiom.1`, preserved Axiom side-by-side app/updater identity and Forge integration surface, and accepted upstream's settings navigation metadata extraction by adding Forge search metadata into the new shared integrations search file and nav description.
+
+Verification:
+
+- `pnpm run typecheck` → passed; Node engine warning only (`wanted node 24`, local `v25.6.0`).
+- `pnpm exec vitest run --config config/vitest.config.ts src/shared/task-providers.test.ts src/main/axiom-release-hardening.test.ts src/main/updater-endpoints.test.ts src/main/app-build-identity.test.ts config/scripts/axiom-upstream-sync-release.test.mjs src/renderer/src/hooks/useSettingsNavigationMetadata.test.ts src/renderer/src/components/settings/AgentsPane.test.tsx src/renderer/src/components/settings/QuickCommandsPane.test.ts` → 61 tests passed.
+- `pnpm exec oxlint config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml package.json src/renderer/src/components/settings/IntegrationsPane.tsx src/renderer/src/components/settings/Settings.tsx src/renderer/src/components/settings/integrations-search.ts src/renderer/src/hooks/useSettingsNavigationMetadata.ts` → 0 warnings / 0 errors.
+- `pnpm exec oxfmt --check config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml config/axiom-merge-remediation-policy.json package.json src/renderer/src/components/settings/IntegrationsPane.tsx src/renderer/src/components/settings/Settings.tsx src/renderer/src/components/settings/integrations-search.ts src/renderer/src/hooks/useSettingsNavigationMetadata.ts` → passed.
+- `git diff --check` → passed.
+
+---
+
 ## 2026-05-25 — Restored Axiom upstream RC release dispatches
 
 Fixed the Axiom upstream sync release detector so explicit upstream release/tag bridge payloads for prereleases are honored instead of being skipped as generic prerelease discovery. The release workflow now sets `AXIOM_INCLUDE_PRERELEASES=1`, matching the documented Axiom RC cadence, and the detector keeps stable-only discovery available only when prereleases are not included and no explicit upstream tag was provided. Verified `v1.4.28-rc.4` now resolves to `1.4.28-rc.4.axiom.1` / `axiom-v1.4.28-rc.4.axiom.1` with `should_release=true`.
