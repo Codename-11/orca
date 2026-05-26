@@ -80,10 +80,12 @@ import type {
   ForgeIssueStatus,
   ForgeIssueUpdate,
   ForgeLabel,
+  ForgeIssueSort,
   ForgeListFilter,
   ForgeMutationResult,
   ForgeProjectSummary,
   ForgeSaveConfigArgs,
+  ForgeWorkspaceSummary,
   MarkdownDocument,
   FloatingTerminalCwdRequest,
   GitHubIssueUpdate,
@@ -1242,15 +1244,22 @@ export type PreloadApi = {
     listProjects: () => Promise<ForgeProjectSummary[]>
     listLabels: () => Promise<ForgeLabel[]>
     listAgents: () => Promise<ForgeAgentSummary[]>
+    listWorkspaces: () => Promise<ForgeWorkspaceSummary[]>
     searchIssues: (args: {
       query: string
       limit?: number
       assignedAgentId?: string | null
+      projectId?: string | null
+      workspaceId?: string | null
+      sort?: ForgeIssueSort
     }) => Promise<ForgeIssue[]>
     listIssues: (args?: {
       filter?: ForgeListFilter
       limit?: number
       assignedAgentId?: string | null
+      projectId?: string | null
+      workspaceId?: string | null
+      sort?: ForgeIssueSort
     }) => Promise<ForgeIssue[]>
     listComments: (args: { issueId: string }) => Promise<ForgeComment[]>
     updateIssue: (args: { id: string; updates: ForgeIssueUpdate }) => Promise<ForgeMutationResult>

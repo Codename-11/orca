@@ -13,7 +13,8 @@ import type {
   ForgeIssueStatus,
   ForgeIssueStatusCategory,
   ForgeLabel,
-  ForgeProjectSummary
+  ForgeProjectSummary,
+  ForgeWorkspaceSummary
 } from '../../shared/types'
 import { getForgeBaseUrl, getForgeToken } from './config'
 
@@ -101,6 +102,22 @@ export function normalizeAgent(value: unknown): ForgeAgentSummary | null {
     id,
     name: typeof obj.name === 'string' ? obj.name : undefined,
     profileKey: typeof obj.profileKey === 'string' ? obj.profileKey : undefined
+  }
+}
+
+export function normalizeWorkspace(value: unknown): ForgeWorkspaceSummary | null {
+  if (!value || typeof value !== 'object') {
+    return null
+  }
+  const obj = value as Record<string, unknown>
+  const id = typeof obj.id === 'string' && obj.id.trim() ? obj.id : null
+  if (!id) {
+    return null
+  }
+  return {
+    id,
+    name: String(obj.name ?? obj.slug ?? id),
+    slug: typeof obj.slug === 'string' ? obj.slug : undefined
   }
 }
 
@@ -254,4 +271,8 @@ export function commentArray(json: unknown): ForgeComment[] {
 
 export function agentArray(json: unknown): ForgeAgentSummary[] {
   return arrayFrom(json, ['agents', 'members', 'data', 'results'], normalizeAgent)
+}
+
+export function workspaceArray(json: unknown): ForgeWorkspaceSummary[] {
+  return arrayFrom(json, ['workspaces', 'data', 'results'], normalizeWorkspace)
 }

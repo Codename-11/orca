@@ -13,11 +13,15 @@ import type {
   ForgeIssueCreate,
   ForgeIssueCreateResult,
   ForgeIssueListOptions,
+  ForgeIssueSort,
   ForgeIssueStatus,
   ForgeIssueUpdate,
   ForgeListFilter,
-  ForgeMutationResult
+  ForgeMutationResult,
+  ForgeWorkspaceSummary
 } from '../../shared/types'
+import { DEFAULT_FORGE_SORT } from '../../shared/forge-types'
+import { sortForgeIssues } from '../../shared/forge-issue-sort'
 import { resolveForgeConfig } from './config'
 import {
   agentArray,
@@ -26,8 +30,47 @@ import {
   issueArray,
   normalizeComment,
   normalizeIssue,
-  statusArray
+  statusArray,
+  workspaceArray
 } from './client'
+
+/** Maps our sort keys to the field names the Forge MCP `issues.list` accepts. */
+const SORT_KEY_TO_API: Record<ForgeIssueSort['key'], string> = {
+  updated: 'updatedAt',
+  created: 'createdAt',
+  priority: 'priority',
+  identifier: 'identifier',
+  title: 'title'
+}
+
+/** Applies sort/workspace/project params to an issues.list-style payload. */
+function applyListParams(input: Record<string, unknown>, options: ForgeIssueListOptions): void {
+  if (Object.prototype.hasOwnProperty.call(options, 'assignedAgentId')) {
+    input.assignedAgentId = options.assignedAgentId ?? null
+  }
+  if (options.projectId) {
+    input.projectId = options.projectId
+  }
+  if (options.workspaceId) {
+    input.workspaceId = options.workspaceId
+  }
+  const sort = options.sort ?? DEFAULT_FORGE_SORT
+  input.orderBy = SORT_KEY_TO_API[sort.key]
+  input.order = sort.direction
+}
+
+/**
+ * Why: the Forge MCP surface does not guarantee order or honor every filter,
+ * so we re-apply the project filter and sort locally. This makes the result
+ * deterministic and correct even when the server ignores a hint.
+ */
+function finalizeIssues(issues: ForgeIssue[], options: ForgeIssueListOptions): ForgeIssue[] {
+  let result = issues
+  if (options.projectId) {
+    result = result.filter((issue) => issue.project?.id === options.projectId)
+  }
+  return sortForgeIssues(result, options.sort ?? DEFAULT_FORGE_SORT)
+}
 
 export async function getStatus(): Promise<ForgeConnectionStatus> {
   const resolved = resolveForgeConfig()
@@ -48,6 +91,7 @@ export async function getStatus(): Promise<ForgeConnectionStatus> {
       baseUrl: resolved.baseUrl,
       hasToken: resolved.hasToken,
       configSource: resolved.baseUrlSource,
+      workspaceId: typeof workspace.id === 'string' ? workspace.id : null,
       workspaceName: typeof workspace.name === 'string' ? workspace.name : null,
       workspaceSlug: typeof workspace.slug === 'string' ? workspace.slug : null
     }
@@ -68,28 +112,31 @@ export async function listIssues(
   options: ForgeIssueListOptions = {}
 ): Promise<ForgeIssue[]> {
   if (filter === 'assigned' && !Object.prototype.hasOwnProperty.call(options, 'assignedAgentId')) {
-    const json = await forgeTool('issues.assigned', { limit, includeDone: false })
-    return issueArray(json)
+    const input: Record<string, unknown> = { limit, includeDone: false }
+    applyListParams(input, options)
+    const json = await forgeTool('issues.assigned', input)
+    return finalizeIssues(issueArray(json), options)
   }
 
   const input: Record<string, unknown> = { limit }
-  if (Object.prototype.hasOwnProperty.call(options, 'assignedAgentId')) {
-    input.assignedAgentId = options.assignedAgentId ?? null
-  }
+  applyListParams(input, options)
   if (filter === 'done') {
     input.includeDone = true
     input.statusCategories = ['DONE']
   } else if (filter === 'all') {
     input.includeDone = true
+  } else if (filter === 'created') {
+    // Why: best-effort "created by me" — Forge may honor `createdByViewer`.
+    // finalizeIssues still sorts; if the server ignores the flag the tab
+    // degrades to the full list rather than breaking.
+    input.includeDone = true
+    input.createdByViewer = true
   } else {
-    // Why: Forge's MCP surface does not expose a "created by me" filter yet.
-    // Keep that tab useful by showing the active queue instead of pretending
-    // to filter server-side.
     input.statusCategories = ['BACKLOG', 'TODO', 'IN_PROGRESS', 'IN_REVIEW']
   }
 
   const json = await forgeTool('issues.list', input)
-  return issueArray(json)
+  return finalizeIssues(issueArray(json), options)
 }
 
 export async function searchIssues(
@@ -102,11 +149,9 @@ export async function searchIssues(
     return []
   }
   const input: Record<string, unknown> = { query: trimmed, limit, includeDone: true }
-  if (Object.prototype.hasOwnProperty.call(options, 'assignedAgentId')) {
-    input.assignedAgentId = options.assignedAgentId ?? null
-  }
+  applyListParams(input, options)
   const json = await forgeTool('issues.list', input)
-  return issueArray(json)
+  return finalizeIssues(issueArray(json), options)
 }
 
 export async function listStatuses(): Promise<ForgeIssueStatus[]> {
@@ -218,6 +263,28 @@ export async function createComment(
     return { ok: true, comment }
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+export async function listWorkspaces(): Promise<ForgeWorkspaceSummary[]> {
+  // Why: most tokens are scoped to one workspace, but orgs with several expose
+  // `workspaces.list`. Fall back to the single connected workspace so the UI
+  // can always render at least the current one.
+  try {
+    const json = await forgeTool('workspaces.list')
+    const workspaces = workspaceArray(json)
+    if (workspaces.length > 0) {
+      return workspaces
+    }
+  } catch {
+    // fall through to the single-workspace path
+  }
+  try {
+    const json = await forgeTool('workspace.get')
+    const workspace = workspaceArray({ workspaces: [json] })
+    return workspace
+  } catch {
+    return []
   }
 }
 

@@ -1,5 +1,5 @@
 import type { TuiAgent } from '../../../src/shared/types'
-import { resolveMobileWorkspaceCreateName } from './mobile-workspace-name'
+import { resolveWorkspaceCreateName } from '../../../src/shared/workspace-name'
 import type { WorkspaceAgentChoice } from './workspace-agent-selection'
 
 export type WorkspaceCreateSetupDecision = 'inherit' | 'run' | 'skip'
@@ -112,7 +112,7 @@ export function buildTaskWorkspaceCreateParams(args: {
     const fallback = `${item.source.type}-${item.source.number}`
     return {
       repo: `id:${item.source.repoId}`,
-      name: resolveMobileWorkspaceCreateName({ draft: workspaceName, fallback }),
+      name: resolveWorkspaceCreateName({ draft: workspaceName, fallback }),
       displayName: item.source.title,
       ...common,
       ...(item.source.type === 'issue'
@@ -125,7 +125,7 @@ export function buildTaskWorkspaceCreateParams(args: {
     const fallback = `${item.source.type}-${item.source.number}`
     return {
       repo: `id:${item.source.repoId}`,
-      name: resolveMobileWorkspaceCreateName({ draft: workspaceName, fallback }),
+      name: resolveWorkspaceCreateName({ draft: workspaceName, fallback }),
       displayName: item.source.title,
       ...common,
       ...(item.source.type === 'issue'
@@ -136,7 +136,7 @@ export function buildTaskWorkspaceCreateParams(args: {
 
   return {
     repo: `id:${targetRepoId}`,
-    name: resolveMobileWorkspaceCreateName({
+    name: resolveWorkspaceCreateName({
       draft: workspaceName,
       fallback: item.source.identifier.toLowerCase()
     }),

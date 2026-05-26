@@ -2,6 +2,7 @@
 import type { SshRemotePtyLease, SshTarget } from './ssh-types'
 import type { Automation, AutomationRun } from './automations-types'
 import type { WorkspaceSource } from './workspace-source'
+import type { ForgeIssueSort, ForgeListFilter } from './forge-types'
 import type { GitHubProjectSettings } from './github-project-types'
 import type {
   AgentStatusState,
@@ -1109,6 +1110,8 @@ export type {
   ForgeIssueCreateResult,
   ForgeIssueListOptions,
   ForgeIssuePriority,
+  ForgeIssueSort,
+  ForgeIssueSortKey,
   ForgeIssueStatus,
   ForgeIssueStatusCategory,
   ForgeIssueUpdate,
@@ -1116,7 +1119,9 @@ export type {
   ForgeListFilter,
   ForgeMutationResult,
   ForgeProjectSummary,
-  ForgeSaveConfigArgs
+  ForgeSaveConfigArgs,
+  ForgeSortDirection,
+  ForgeWorkspaceSummary
 } from './forge-types'
 
 export type {
@@ -1786,6 +1791,16 @@ export type GlobalSettings = {
   defaultForgeProjectId?: string | null
   /** Default Forge status to apply after issue creation. Null keeps Forge server default. */
   defaultForgeStatusId?: string | null
+  /** Persisted Forge task view layout so it survives tab switches and restarts. */
+  defaultForgeViewMode?: 'list' | 'board'
+  /** Persisted Forge issue ordering. Defaults to most-recently-updated first. */
+  defaultForgeSort?: ForgeIssueSort
+  /** Persisted Forge preset filter (active/assigned/created/all/done). */
+  defaultForgePreset?: ForgeListFilter
+  /** Persisted Forge agent filter selection ('all-agents' | 'unassigned' | agentId). */
+  defaultForgeAgentFilter?: string
+  /** Persisted Forge project filter for the list/board. Null/undefined = all projects. */
+  defaultForgeProjectFilterId?: string | null
   /** Session cookie for OpenCode Go rate-limit fetching. Stored encrypted. */
   opencodeSessionCookie: string
   /** Optional workspace ID override for OpenCode Go. When set, skips the

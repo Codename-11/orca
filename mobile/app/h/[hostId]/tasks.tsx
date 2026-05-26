@@ -61,7 +61,20 @@ import {
   type WorkspaceAgentChoice
 } from '../../../src/tasks/workspace-agent-selection'
 import { shouldResolveHostedReviewStartPoint } from '../../../src/tasks/hosted-review-start-point'
-import { getLinkedWorkItemSuggestedName } from '../../../src/tasks/mobile-workspace-name'
+import { getLinkedWorkItemSuggestedName } from '../../../../src/shared/workspace-name'
+import { sortForgeIssues } from '../../../../src/shared/forge-issue-sort'
+import {
+  DEFAULT_FORGE_SORT,
+  type ForgeAgentSummary,
+  type ForgeIssueListOptions,
+  type ForgeIssuePriority,
+  type ForgeIssueSort,
+  type ForgeIssueSortKey,
+  type ForgeIssueStatusCategory,
+  type ForgeListFilter,
+  type ForgeProjectSummary,
+  type ForgeSortDirection
+} from '../../../../src/shared/forge-types'
 import {
   filterGitHubProjectRowsForRepos,
   findRepoForGitHubProjectRepository,
@@ -295,11 +308,13 @@ type ForgeIssue = {
   title: string
   description?: string
   url: string
-  status: { id: string; name: string; category: string; color?: string }
-  priority?: string
-  project?: { id: string; name: string; key?: string } | null
+  status: { id: string; name: string; category: ForgeIssueStatusCategory; color?: string }
+  // Why: align with the shared ForgeIssue shape so this row type is assignable to
+  // sortForgeIssues() (the single source of truth for Forge ordering).
+  priority: ForgeIssuePriority
+  project?: ForgeProjectSummary | null
   labels?: string[]
-  assignedAgent?: { id: string; name?: string; profileKey?: string } | null
+  assignedAgent?: ForgeAgentSummary | null
   updatedAt: string
   createdAt?: string
 }
@@ -441,6 +456,10 @@ type TaskResumeState = {
   githubProjectHiddenFieldIdsByView?: Record<string, string[]>
   linearPreset?: LinearFilter
   linearQuery?: string
+  forgePreset?: ForgeListFilter
+  forgeSort?: ForgeIssueSort
+  forgeProjectId?: string | null
+  forgeAgentId?: string | null
 }
 type RuntimeTaskSettings = {
   defaultTuiAgent?: TuiAgent | 'blank' | null
@@ -843,6 +862,27 @@ const LINEAR_ORDER_OPTIONS: PickerOption<LinearOrderBy>[] = [
   { value: 'identifier', label: 'Identifier' }
 ]
 
+const FORGE_FILTER_OPTIONS: PickerOption<ForgeListFilter>[] = [
+  { value: 'active', label: 'Active', subtitle: 'Open, in-progress issues' },
+  { value: 'assigned', label: 'Assigned', subtitle: 'Issues assigned to an agent' },
+  { value: 'created', label: 'Created', subtitle: 'Recently created issues' },
+  { value: 'all', label: 'All', subtitle: 'Every issue in the workspace' },
+  { value: 'done', label: 'Done', subtitle: 'Completed and canceled issues' }
+]
+
+const FORGE_ORDER_OPTIONS: PickerOption<ForgeIssueSortKey>[] = [
+  { value: 'updated', label: 'Updated' },
+  { value: 'created', label: 'Created' },
+  { value: 'priority', label: 'Priority' },
+  { value: 'identifier', label: 'Identifier' },
+  { value: 'title', label: 'Title' }
+]
+
+const FORGE_DIRECTION_OPTIONS: PickerOption<ForgeSortDirection>[] = [
+  { value: 'desc', label: 'Descending' },
+  { value: 'asc', label: 'Ascending' }
+]
+
 const LINEAR_DISPLAY_OPTIONS: PickerOption<LinearDisplayProperty>[] = [
   { value: 'state', label: 'Status' },
   { value: 'priority', label: 'Priority' },
@@ -975,6 +1015,36 @@ function normalizeLinearFilter(value: unknown): LinearFilter {
   return value === 'assigned' || value === 'created' || value === 'completed' || value === 'all'
     ? value
     : 'all'
+}
+
+function normalizeForgeFilter(value: unknown): ForgeListFilter {
+  return value === 'active' ||
+    value === 'assigned' ||
+    value === 'created' ||
+    value === 'all' ||
+    value === 'done'
+    ? value
+    : 'active'
+}
+
+function normalizeForgeSort(value: unknown): ForgeIssueSort {
+  if (!value || typeof value !== 'object') {
+    return DEFAULT_FORGE_SORT
+  }
+  const candidate = value as { key?: unknown; direction?: unknown }
+  const key: ForgeIssueSortKey =
+    candidate.key === 'created' ||
+    candidate.key === 'priority' ||
+    candidate.key === 'identifier' ||
+    candidate.key === 'title' ||
+    candidate.key === 'updated'
+      ? candidate.key
+      : DEFAULT_FORGE_SORT.key
+  const direction: ForgeSortDirection =
+    candidate.direction === 'asc' || candidate.direction === 'desc'
+      ? candidate.direction
+      : DEFAULT_FORGE_SORT.direction
+  return { key, direction }
 }
 
 function githubKindFromQuery(query: string, fallbackPreset: GitHubPreset): GitHubTaskKind {
@@ -1187,13 +1257,19 @@ function createLinearTask(issue: LinearIssue): TaskItem {
   }
 }
 
+function forgeAssigneeLabel(issue: ForgeIssue): string {
+  return issue.assignedAgent?.name ?? issue.assignedAgent?.profileKey ?? 'Unassigned'
+}
+
 function createForgeTask(issue: ForgeIssue): TaskItem {
   const projectName = issue.project?.name ?? 'Forge'
   return {
     key: `forge:${issue.id}`,
     provider: 'forge',
     title: issue.title,
-    subtitle: `${issue.identifier} · ${projectName}`,
+    // Why: surface the assigned agent alongside id/project, matching how Linear
+    // shows assignee so mobile rows reach desktop parity.
+    subtitle: `${issue.identifier} · ${projectName} · ${forgeAssigneeLabel(issue)}`,
     status: issue.status.name,
     updatedAt: issue.updatedAt,
     source: issue
@@ -2117,6 +2193,12 @@ export default function MobileTasksScreen() {
     null
   )
   const [selectedLinearTeamIds, setSelectedLinearTeamIds] = useState<Set<string>>(new Set())
+  const [forgeFilter, setForgeFilter] = useState<ForgeListFilter>('active')
+  const [forgeSort, setForgeSort] = useState<ForgeIssueSort>(DEFAULT_FORGE_SORT)
+  const [forgeProjects, setForgeProjects] = useState<ForgeProjectSummary[]>([])
+  const [forgeAgents, setForgeAgents] = useState<ForgeAgentSummary[]>([])
+  const [selectedForgeProjectId, setSelectedForgeProjectId] = useState<string | null>(null)
+  const [selectedForgeAgentId, setSelectedForgeAgentId] = useState<string | null>(null)
   const defaultRepoSelectionRef = useRef<string[] | null>(null)
   const repoSelectionHydratedRef = useRef(false)
   const defaultLinearTeamSelectionRef = useRef<string[] | null>(null)
@@ -2161,6 +2243,11 @@ export default function MobileTasksScreen() {
   const [showGitLabViewPicker, setShowGitLabViewPicker] = useState(false)
   const [showGitLabFilterPicker, setShowGitLabFilterPicker] = useState(false)
   const [showLinearFilterPicker, setShowLinearFilterPicker] = useState(false)
+  const [showForgeFilterPicker, setShowForgeFilterPicker] = useState(false)
+  const [showForgeOrderPicker, setShowForgeOrderPicker] = useState(false)
+  const [showForgeDirectionPicker, setShowForgeDirectionPicker] = useState(false)
+  const [showForgeProjectPicker, setShowForgeProjectPicker] = useState(false)
+  const [showForgeAgentPicker, setShowForgeAgentPicker] = useState(false)
   const [showSortPicker, setShowSortPicker] = useState(false)
   const [showRepoPicker, setShowRepoPicker] = useState(false)
   const [showGitHubIssueSourcePicker, setShowGitHubIssueSourcePicker] = useState(false)
@@ -2970,6 +3057,8 @@ export default function MobileTasksScreen() {
           : getTaskPresetQuery(preset)
       const nextLinearFilter = normalizeLinearFilter(resume.linearPreset)
       const nextLinearQuery = resume.linearQuery ?? ''
+      const nextForgeFilter = normalizeForgeFilter(resume.forgePreset)
+      const nextForgeSort = normalizeForgeSort(resume.forgeSort)
       defaultRepoSelectionRef.current = settings.defaultRepoSelection ?? null
       defaultLinearTeamSelectionRef.current = settings.defaultLinearTeamSelection ?? null
       const nextQuery =
@@ -2986,6 +3075,10 @@ export default function MobileTasksScreen() {
       setGithubPreset(preset)
       setGithubKind(githubKindFromQuery(githubQuery, preset))
       setLinearFilter(nextLinearFilter)
+      setForgeFilter(nextForgeFilter)
+      setForgeSort(nextForgeSort)
+      setSelectedForgeProjectId(resume.forgeProjectId ?? null)
+      setSelectedForgeAgentId(resume.forgeAgentId ?? null)
       setGithubProjectSettings(settings.githubProjects ?? EMPTY_GITHUB_PROJECT_SETTINGS)
       setQuery(nextQuery)
       setAppliedQuery(nextAppliedQuery)
@@ -3062,6 +3155,22 @@ export default function MobileTasksScreen() {
     setLinearTeams(teams)
     setSelectedLinearTeamIds(reconcileTeamSelection(teams, defaultLinearTeamSelectionRef.current))
   }, [client, connState, tasksSupported])
+
+  // Why: load project/agent options so the Forge filters can offer real choices;
+  // best-effort because an unconfigured Forge workspace still renders the list.
+  const loadForgeContext = useCallback(async (): Promise<void> => {
+    if (!client || connState !== 'connected' || !tasksSupported || !forgeConnected) return
+    const [projectsResponse, agentsResponse] = await Promise.all([
+      client.sendRequest('forge.listProjects'),
+      client.sendRequest('forge.listAgents')
+    ])
+    if (isSuccess(projectsResponse)) {
+      setForgeProjects(projectsResponse.result as ForgeProjectSummary[])
+    }
+    if (isSuccess(agentsResponse)) {
+      setForgeAgents(agentsResponse.result as ForgeAgentSummary[])
+    }
+  }, [client, connState, forgeConnected, tasksSupported])
 
   const persistLinearTeamSelection = useCallback(
     (teamIds: Set<string>, allTeams: LinearTeam[]) => {
@@ -3356,25 +3465,31 @@ export default function MobileTasksScreen() {
           }
         } else if (provider === 'forge') {
           const normalizedQuery = appliedQuery.trim()
+          const forgeOptions: ForgeIssueListOptions = {
+            assignedAgentId: selectedForgeAgentId,
+            projectId: selectedForgeProjectId,
+            sort: forgeSort
+          }
           const response = normalizedQuery
             ? await requestClient.sendRequest('forge.searchIssues', {
                 query: normalizedQuery,
-                limit: LINEAR_LIMIT
+                limit: LINEAR_LIMIT,
+                ...forgeOptions
               })
             : await requestClient.sendRequest('forge.listIssues', {
-                filter: 'active',
-                limit: LINEAR_LIMIT
+                filter: forgeFilter,
+                limit: LINEAR_LIMIT,
+                ...forgeOptions
               })
           if (!isSuccess(response)) {
             throw new Error(response.error.message)
           }
           const issues = response.result as ForgeIssue[]
           if (!isCurrent()) return
-          setItems(
-            issues
-              .map(createForgeTask)
-              .sort((a, b) => taskTime(b.updatedAt) - taskTime(a.updatedAt))
-          )
+          // Why: defer ordering to the shared sortForgeIssues helper so mobile
+          // matches the desktop list/board ordering exactly.
+          const sorted = sortForgeIssues(issues, forgeSort) as ForgeIssue[]
+          setItems(sorted.map(createForgeTask))
         } else {
           const normalizedQuery = appliedQuery.trim()
           const response = normalizedQuery
@@ -3420,6 +3535,8 @@ export default function MobileTasksScreen() {
       countGitHubItems,
       fetchGitHubItemsPage,
       forgeConnected,
+      forgeFilter,
+      forgeSort,
       gitlabFilter,
       gitlabView,
       githubMode,
@@ -3428,6 +3545,8 @@ export default function MobileTasksScreen() {
       linearOrderBy,
       loadRepos,
       provider,
+      selectedForgeAgentId,
+      selectedForgeProjectId,
       selectedLinearTeamIds,
       selectedLinearWorkspaceId,
       selectedRepoIds,
@@ -3875,6 +3994,13 @@ export default function MobileTasksScreen() {
       setError(err instanceof Error ? err.message : 'Failed to load Linear context')
     })
   }, [linearConnected, loadLinearContext, provider, taskStateHydrated])
+
+  useEffect(() => {
+    if (!taskStateHydrated || provider !== 'forge' || !forgeConnected) return
+    void loadForgeContext().catch((err) => {
+      console.warn('[mobile tasks] failed to load Forge context', err)
+    })
+  }, [forgeConnected, loadForgeContext, provider, taskStateHydrated])
 
   useEffect(() => {
     if (!taskUiReady || provider !== 'github' || githubMode !== 'project') return
@@ -8171,6 +8297,24 @@ export default function MobileTasksScreen() {
     LINEAR_GROUP_OPTIONS.find((option) => option.value === linearGroupBy)?.label ?? 'No grouping'
   const linearOrderLabel =
     LINEAR_ORDER_OPTIONS.find((option) => option.value === linearOrderBy)?.label ?? 'Priority'
+  const forgeFilterLabel =
+    FORGE_FILTER_OPTIONS.find((option) => option.value === forgeFilter)?.label ?? 'Active'
+  const forgeOrderLabel =
+    FORGE_ORDER_OPTIONS.find((option) => option.value === forgeSort.key)?.label ?? 'Updated'
+  const forgeDirectionLabel =
+    FORGE_DIRECTION_OPTIONS.find((option) => option.value === forgeSort.direction)?.label ??
+    'Descending'
+  const forgeProjectLabel =
+    selectedForgeProjectId === null
+      ? 'All projects'
+      : (forgeProjects.find((project) => project.id === selectedForgeProjectId)?.name ?? 'Project')
+  const forgeAgentLabel =
+    selectedForgeAgentId === null
+      ? 'All agents'
+      : (() => {
+          const agent = forgeAgents.find((entry) => entry.id === selectedForgeAgentId)
+          return agent?.name ?? agent?.profileKey ?? 'Agent'
+        })()
   const linearWorkspaceLabel =
     selectedLinearWorkspaceId === 'all'
       ? 'All workspaces'
@@ -8644,7 +8788,68 @@ export default function MobileTasksScreen() {
             </>
           )}
 
-          {provider !== 'linear' && !(provider === 'github' && githubMode === 'project') ? (
+          {provider === 'forge' && forgeConnected && (
+            <>
+              <Pressable
+                style={styles.segmentButton}
+                disabled={!taskUiReady}
+                onPress={() => {
+                  if (!taskUiReady) return
+                  setShowForgeFilterPicker(true)
+                }}
+              >
+                <Text style={styles.segmentSecondaryText}>{forgeFilterLabel}</Text>
+              </Pressable>
+              {forgeProjects.length > 0 ? (
+                <Pressable
+                  style={styles.segmentButton}
+                  disabled={!taskUiReady}
+                  onPress={() => {
+                    if (!taskUiReady) return
+                    setShowForgeProjectPicker(true)
+                  }}
+                >
+                  <Text style={styles.segmentSecondaryText}>{forgeProjectLabel}</Text>
+                </Pressable>
+              ) : null}
+              {forgeAgents.length > 0 ? (
+                <Pressable
+                  style={styles.segmentButton}
+                  disabled={!taskUiReady}
+                  onPress={() => {
+                    if (!taskUiReady) return
+                    setShowForgeAgentPicker(true)
+                  }}
+                >
+                  <Text style={styles.segmentSecondaryText}>{forgeAgentLabel}</Text>
+                </Pressable>
+              ) : null}
+              <Pressable
+                style={styles.segmentButton}
+                disabled={!taskUiReady}
+                onPress={() => {
+                  if (!taskUiReady) return
+                  setShowForgeOrderPicker(true)
+                }}
+              >
+                <Text style={styles.segmentSecondaryText}>Order: {forgeOrderLabel}</Text>
+              </Pressable>
+              <Pressable
+                style={styles.segmentButton}
+                disabled={!taskUiReady}
+                onPress={() => {
+                  if (!taskUiReady) return
+                  setShowForgeDirectionPicker(true)
+                }}
+              >
+                <Text style={styles.segmentSecondaryText}>{forgeDirectionLabel}</Text>
+              </Pressable>
+            </>
+          )}
+
+          {provider !== 'linear' &&
+          provider !== 'forge' &&
+          !(provider === 'github' && githubMode === 'project') ? (
             <Pressable
               style={styles.segmentButton}
               disabled={!taskUiReady}
@@ -10022,6 +10227,86 @@ export default function MobileTasksScreen() {
           persistTaskResumeState({ linearPreset: filter, linearQuery: '' })
         }}
         onClose={() => setShowLinearFilterPicker(false)}
+      />
+
+      <PickerModal
+        visible={taskUiReady && showForgeFilterPicker}
+        title="Forge Filter"
+        options={FORGE_FILTER_OPTIONS}
+        selected={forgeFilter}
+        onSelect={(filter) => {
+          setForgeFilter(filter)
+          setQuery('')
+          setAppliedQuery('')
+          persistTaskResumeState({ forgePreset: filter })
+        }}
+        onClose={() => setShowForgeFilterPicker(false)}
+      />
+
+      <PickerModal
+        visible={taskUiReady && showForgeOrderPicker}
+        title="Order Forge Issues"
+        options={FORGE_ORDER_OPTIONS}
+        selected={forgeSort.key}
+        onSelect={(key) => {
+          const nextSort: ForgeIssueSort = { key, direction: forgeSort.direction }
+          setForgeSort(nextSort)
+          persistTaskResumeState({ forgeSort: nextSort })
+        }}
+        onClose={() => setShowForgeOrderPicker(false)}
+      />
+
+      <PickerModal
+        visible={taskUiReady && showForgeDirectionPicker}
+        title="Sort Direction"
+        options={FORGE_DIRECTION_OPTIONS}
+        selected={forgeSort.direction}
+        onSelect={(direction) => {
+          const nextSort: ForgeIssueSort = { key: forgeSort.key, direction }
+          setForgeSort(nextSort)
+          persistTaskResumeState({ forgeSort: nextSort })
+        }}
+        onClose={() => setShowForgeDirectionPicker(false)}
+      />
+
+      <PickerModal
+        visible={taskUiReady && showForgeProjectPicker}
+        title="Forge Project"
+        options={[
+          { value: '', label: 'All projects' },
+          ...forgeProjects.map((project) => ({
+            value: project.id,
+            label: project.name,
+            subtitle: project.key
+          }))
+        ]}
+        selected={selectedForgeProjectId ?? ''}
+        onSelect={(projectId) => {
+          const next = projectId === '' ? null : projectId
+          setSelectedForgeProjectId(next)
+          persistTaskResumeState({ forgeProjectId: next })
+        }}
+        onClose={() => setShowForgeProjectPicker(false)}
+      />
+
+      <PickerModal
+        visible={taskUiReady && showForgeAgentPicker}
+        title="Forge Agent"
+        options={[
+          { value: '', label: 'All agents' },
+          ...forgeAgents.map((agent) => ({
+            value: agent.id,
+            label: agent.name ?? agent.profileKey ?? agent.id,
+            subtitle: agent.name ? agent.profileKey : undefined
+          }))
+        ]}
+        selected={selectedForgeAgentId ?? ''}
+        onSelect={(agentId) => {
+          const next = agentId === '' ? null : agentId
+          setSelectedForgeAgentId(next)
+          persistTaskResumeState({ forgeAgentId: next })
+        }}
+        onClose={() => setShowForgeAgentPicker(false)}
       />
 
       <PickerModal

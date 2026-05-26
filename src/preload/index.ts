@@ -1211,15 +1211,22 @@ const api = {
     listProjects: (): Promise<unknown[]> => ipcRenderer.invoke('forge:listProjects'),
     listLabels: (): Promise<unknown[]> => ipcRenderer.invoke('forge:listLabels'),
     listAgents: (): Promise<unknown[]> => ipcRenderer.invoke('forge:listAgents'),
+    listWorkspaces: (): Promise<unknown[]> => ipcRenderer.invoke('forge:listWorkspaces'),
     searchIssues: (args: {
       query: string
       limit?: number
       assignedAgentId?: string | null
+      projectId?: string | null
+      workspaceId?: string | null
+      sort?: { key: string; direction: 'asc' | 'desc' }
     }): Promise<unknown[]> => ipcRenderer.invoke('forge:searchIssues', args),
     listIssues: (args?: {
       filter?: 'active' | 'assigned' | 'created' | 'all' | 'done'
       limit?: number
       assignedAgentId?: string | null
+      projectId?: string | null
+      workspaceId?: string | null
+      sort?: { key: string; direction: 'asc' | 'desc' }
     }): Promise<unknown[]> => ipcRenderer.invoke('forge:listIssues', args),
     listComments: (args: { issueId: string }): Promise<unknown[]> =>
       ipcRenderer.invoke('forge:listComments', args),
