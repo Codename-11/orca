@@ -12,6 +12,12 @@ describe('compareVersions', () => {
     expect(compareVersions('1.0.70+build.5', '1.0.70')).toBe(0)
     expect(compareVersions('v1.0.70-beta.2', '1.0.70-beta.1')).toBeGreaterThan(0)
   })
+
+  it('treats Axiom stable fork revisions as newer than same-core RC builds', () => {
+    expect(compareVersions('1.4.28-axiom.1', '1.4.28-rc.7.axiom.1')).toBeGreaterThan(0)
+    expect(compareVersions('1.4.28-rc.7.axiom.1', '1.4.28-axiom.1')).toBeLessThan(0)
+    expect(compareVersions('1.4.28-axiom.2', '1.4.28-axiom.1')).toBeGreaterThan(0)
+  })
 })
 
 describe('isPrereleaseVersion', () => {
@@ -20,6 +26,13 @@ describe('isPrereleaseVersion', () => {
     expect(isPrereleaseVersion('v1.3.17-rc.2')).toBe(true)
     expect(isPrereleaseVersion('1.0.0-beta.5')).toBe(true)
     expect(isPrereleaseVersion('2.1.0-alpha')).toBe(true)
+  })
+
+  it('treats Axiom stable fork revisions as stable and Axiom RC revisions as prereleases', () => {
+    expect(isPrereleaseVersion('1.4.28-axiom.1')).toBe(false)
+    expect(isPrereleaseVersion('axiom-v1.4.28-axiom.1')).toBe(false)
+    expect(isPrereleaseVersion('1.4.28-rc.7.axiom.1')).toBe(true)
+    expect(isPrereleaseVersion('axiom-v1.4.28-rc.7.axiom.1')).toBe(true)
   })
 
   it('returns false for stable releases and unparseable values', () => {

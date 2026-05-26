@@ -67,6 +67,20 @@ describe('fetchNewerReleaseTag', () => {
     )
   })
 
+  it('prefers an Axiom stable fork release over same-core Axiom RC releases', async () => {
+    respondWithAtom([
+      'axiom-v1.4.28-rc.7.axiom.1',
+      'axiom-v1.4.28-rc.6.axiom.1',
+      'axiom-v1.4.28-axiom.1'
+    ])
+    const { fetchNewerReleaseTag } = await import('./updater-prerelease-feed')
+
+    expect(await fetchNewerReleaseTag('1.4.27-axiom.1', { includePrerelease: true })).toBe(
+      'axiom-v1.4.28-axiom.1'
+    )
+    expect(await fetchNewerReleaseTag('1.4.28-axiom.1', { includePrerelease: false })).toBeNull()
+  })
+
   it('returns the newest stable tag when the user is on an RC and a newer stable exists', async () => {
     respondWithAtom(['v1.3.19', 'v1.3.19-rc.6', 'v1.3.19-rc.4', 'v1.3.18'])
     const { fetchNewerReleaseTag } = await import('./updater-prerelease-feed')

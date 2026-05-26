@@ -6,6 +6,26 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-26 — Fixed Axiom updater stable-vs-RC ordering
+
+Fixed the updater's fork-aware version semantics so Axiom stable fork revisions like `1.4.28-axiom.1` are treated as stable builds, while upstream prerelease-derived builds like `1.4.28-rc.7.axiom.1` remain prereleases. The release feed resolver now ranks stable Axiom releases above same-core Axiom RC tags, preventing `releases.atom` publish order from pinning clients to an older RC when a stable fork release exists.
+
+Investigation notes:
+
+- The alert for `Axiom Upstream Sync Release` run `26470723699` was caused by the optional Android mobile APK job failing to resolve `../../../../src/shared/workspace-name` from `mobile/app/h/[hostId]/tasks.tsx` while building `axiom-v1.4.28-rc.5.axiom.2`.
+- The follow-up tag-push run `26470772225` auto-rebuilt/published the same RC tag successfully with mobile skipped, so the notification was actionable signal for the failed manual run, not a required operator intervention.
+
+Verification:
+
+- `pnpm exec vitest run --config config/vitest.config.ts src/main/updater.fallback.test.ts src/main/updater-prerelease-feed.test.ts src/main/updater.test.ts src/main/updater-endpoints.test.ts src/main/updater-nudge.test.ts src/main/updater-changelog.test.ts` → 104 tests passed.
+- `pnpm exec vitest run --config config/vitest.config.ts src/main/axiom-release-hardening.test.ts src/main/app-build-identity.test.ts config/scripts/axiom-upstream-sync-release.test.mjs` → 31 tests passed.
+- `pnpm run typecheck` → passed; Node engine warning only (`wanted node 24`, local `v25.6.0`).
+- `pnpm exec oxfmt --check src/main/updater-fallback.ts src/main/updater.fallback.test.ts src/main/updater-prerelease-feed.test.ts` → passed.
+- `pnpm exec oxlint src/main/updater-fallback.ts src/main/updater.fallback.test.ts src/main/updater-prerelease-feed.test.ts` → 0 warnings / 0 errors.
+- `git diff --check` → passed.
+
+---
+
 ## 2026-05-26 — Hardened release-cut GitHub Actions auth
 
 Updated `.github/workflows/release-cut.yml` so every checkout and `gh` release API call uses `AXIOM_AUTOMATION_TOKEN` when present, falling back to `github.token`. This aligns release-cut with the Axiom upstream mirror/sync workflows and avoids the default scheduled-run token path that produced GitHub's misleading checkout-time `Your account is suspended` 403.

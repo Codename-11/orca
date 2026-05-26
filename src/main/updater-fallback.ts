@@ -87,10 +87,33 @@ export function isBenignCheckFailure(message: string): boolean {
 type ParsedVersion = {
   core: [number, number, number]
   prerelease: string[]
+  axiomRevision: string[]
+}
+
+function splitForkPrerelease(
+  value: string | undefined
+): Pick<ParsedVersion, 'prerelease' | 'axiomRevision'> {
+  const identifiers = value?.split('.') ?? []
+  const axiomIndex = identifiers.findIndex((identifier) => identifier.toLowerCase() === 'axiom')
+  if (axiomIndex === -1) {
+    return { prerelease: identifiers, axiomRevision: [] }
+  }
+
+  // Why: Axiom stable fork builds use semver-prerelease syntax
+  // (`1.4.28-axiom.1`) for updater visibility, but `axiom.N` is a fork
+  // revision, not an upstream prerelease channel. Only identifiers before the
+  // `axiom` marker (for example `rc.7`) should opt the app into prereleases.
+  return {
+    prerelease: identifiers.slice(0, axiomIndex),
+    axiomRevision: identifiers.slice(axiomIndex + 1)
+  }
 }
 
 function parseVersion(value: string): ParsedVersion | null {
-  const normalized = value.trim().replace(/^v/i, '')
+  const normalized = value
+    .trim()
+    .replace(/^axiom-v/i, '')
+    .replace(/^v/i, '')
   const match = normalized.match(
     /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-.]+))?(?:\+([0-9A-Za-z-.]+))?$/
   )
@@ -100,7 +123,7 @@ function parseVersion(value: string): ParsedVersion | null {
 
   return {
     core: [Number(match[1]), Number(match[2]), Number(match[3])],
-    prerelease: match[4]?.split('.') ?? []
+    ...splitForkPrerelease(match[4])
   }
 }
 
@@ -136,6 +159,26 @@ function compareIdentifiers(left: string, right: string): number {
   return left.localeCompare(right)
 }
 
+function compareIdentifierLists(left: string[], right: string[]): number {
+  for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+    const leftPart = left[index]
+    const rightPart = right[index]
+    if (leftPart === undefined) {
+      return -1
+    }
+    if (rightPart === undefined) {
+      return 1
+    }
+
+    const comparison = compareIdentifiers(leftPart, rightPart)
+    if (comparison !== 0) {
+      return comparison
+    }
+  }
+
+  return 0
+}
+
 /** Returns negative if left < right, 0 if equal, positive if left > right. */
 export function compareVersions(left: string, right: string): number {
   const leftVersion = parseVersion(left)
@@ -154,31 +197,31 @@ export function compareVersions(left: string, right: string): number {
 
   const leftPrerelease = leftVersion.prerelease
   const rightPrerelease = rightVersion.prerelease
-  if (leftPrerelease.length === 0 && rightPrerelease.length === 0) {
-    return 0
-  }
-  if (leftPrerelease.length === 0) {
-    return 1
-  }
-  if (rightPrerelease.length === 0) {
-    return -1
-  }
-
-  for (let index = 0; index < Math.max(leftPrerelease.length, rightPrerelease.length); index += 1) {
-    const leftPart = leftPrerelease[index]
-    const rightPart = rightPrerelease[index]
-    if (leftPart === undefined) {
-      return -1
-    }
-    if (rightPart === undefined) {
+  if (leftPrerelease.length > 0 || rightPrerelease.length > 0) {
+    if (leftPrerelease.length === 0) {
       return 1
     }
+    if (rightPrerelease.length === 0) {
+      return -1
+    }
 
-    const comparison = compareIdentifiers(leftPart, rightPart)
-    if (comparison !== 0) {
-      return comparison
+    const prereleaseComparison = compareIdentifierLists(leftPrerelease, rightPrerelease)
+    if (prereleaseComparison !== 0) {
+      return prereleaseComparison
     }
   }
 
-  return 0
+  const leftAxiomRevision = leftVersion.axiomRevision
+  const rightAxiomRevision = rightVersion.axiomRevision
+  if (leftAxiomRevision.length === 0 && rightAxiomRevision.length === 0) {
+    return 0
+  }
+  if (leftAxiomRevision.length === 0) {
+    return -1
+  }
+  if (rightAxiomRevision.length === 0) {
+    return 1
+  }
+
+  return compareIdentifierLists(leftAxiomRevision, rightAxiomRevision)
 }
