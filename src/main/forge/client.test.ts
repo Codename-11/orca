@@ -14,6 +14,29 @@ vi.mock('electron', () => ({
   }
 }))
 
+// Why: resolve config from env only (mirroring the real trailing-slash trim)
+// so a developer's actual ~/.orca/forge-config.json can't outrank the env the
+// transport tests set — disk config otherwise breaks the "not configured" and
+// exact-URL assertions.
+vi.mock('./config', () => {
+  const baseUrl = () => {
+    const raw = process.env.FORGE_BASE_URL?.trim()
+    return raw ? raw.replace(/\/+$/, '') : null
+  }
+  return {
+    getForgeBaseUrl: baseUrl,
+    getForgeToken: () => process.env.FORGE_API_TOKEN?.trim() || null,
+    resolveForgeConfig: () => {
+      const url = baseUrl()
+      return {
+        baseUrl: url,
+        hasToken: Boolean(process.env.FORGE_API_TOKEN),
+        baseUrlSource: url ? ('env' as const) : ('none' as const)
+      }
+    }
+  }
+})
+
 import {
   agentArray,
   commentArray,

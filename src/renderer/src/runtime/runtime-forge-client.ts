@@ -15,6 +15,7 @@ import type {
   ForgeMutationResult,
   ForgeProjectSummary,
   ForgeSaveConfigArgs,
+  ForgeWorkspaceSummary,
   GlobalSettings
 } from '../../../shared/types'
 import { callRuntimeRpc, getActiveRuntimeTarget } from './runtime-rpc-client'
@@ -121,6 +122,17 @@ export async function forgeListAgents(
         timeoutMs: READ_TIMEOUT_MS
       })
     : window.api.forge.listAgents()
+}
+
+export async function forgeListWorkspaces(
+  settings: RuntimeForgeSettings
+): Promise<ForgeWorkspaceSummary[]> {
+  const remote = remoteTarget(settings)
+  return remote
+    ? callRuntimeRpc<ForgeWorkspaceSummary[]>(remote, 'forge.listWorkspaces', undefined, {
+        timeoutMs: READ_TIMEOUT_MS
+      })
+    : window.api.forge.listWorkspaces()
 }
 
 export async function forgeListIssues(

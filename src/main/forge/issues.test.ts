@@ -1,7 +1,10 @@
+/* eslint-disable max-lines -- Why: one file per source module (issues.ts) keeps
+   the mocked-transport setup shared across every operation's cases; splitting
+   would duplicate the fixture and risk the layers drifting apart. */
 /*
  * Why: exercise the issue-operation surface (listIssues, searchIssues,
- * updateIssue, createIssue, comments) via a mocked transport so the tool
- * names and payload shapes don't drift from Forge's MCP contract.
+ * updateIssue, createIssue, comments, listWorkspaces) via a mocked transport so
+ * the tool names and payload shapes don't drift from Forge's MCP contract.
  */
 import type * as Client from './client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -13,6 +16,25 @@ vi.mock('electron', () => ({
     decryptString: (value: Buffer) => value.toString('utf-8')
   }
 }))
+
+// Why: resolve config from env only so the suite is hermetic — a real
+// ~/.orca/forge-config.json on a developer machine must not outrank the
+// env vars these tests set (disk config otherwise wins and flips results).
+vi.mock('./config', () => {
+  const resolve = () => {
+    const baseUrl = process.env.FORGE_BASE_URL?.trim() || null
+    return {
+      baseUrl,
+      hasToken: Boolean(process.env.FORGE_API_TOKEN),
+      baseUrlSource: baseUrl ? ('env' as const) : ('none' as const)
+    }
+  }
+  return {
+    resolveForgeConfig: resolve,
+    getForgeBaseUrl: () => resolve().baseUrl,
+    getForgeToken: () => process.env.FORGE_API_TOKEN ?? null
+  }
+})
 
 type ToolCall = { tool: string; input: Record<string, unknown> }
 
@@ -84,7 +106,7 @@ describe('listIssues', () => {
     await listIssues('assigned', 20)
     expect(calls).toHaveLength(1)
     expect(calls[0].tool).toBe('issues.assigned')
-    expect(calls[0].input).toEqual({ limit: 20, includeDone: false })
+    expect(calls[0].input).toMatchObject({ limit: 20, includeDone: false })
   })
 
   it('calls issues.list with includeDone for the all filter', async () => {
@@ -92,7 +114,60 @@ describe('listIssues', () => {
     const { listIssues } = await import('./issues')
     await listIssues('all', 50)
     expect(calls[0].tool).toBe('issues.list')
-    expect(calls[0].input).toEqual({ limit: 50, includeDone: true })
+    expect(calls[0].input).toMatchObject({ limit: 50, includeDone: true })
+  })
+
+  it('defaults to ordering by most-recently updated', async () => {
+    const calls = setupTransport(() => ({ issues: [] }))
+    const { listIssues } = await import('./issues')
+    await listIssues('all', 50)
+    expect(calls[0].input).toMatchObject({ orderBy: 'updatedAt', order: 'desc' })
+  })
+
+  it('forwards an explicit sort and project filter to issues.list', async () => {
+    const calls = setupTransport(() => ({ issues: [] }))
+    const { listIssues } = await import('./issues')
+    await listIssues('active', 30, {
+      projectId: 'proj-1',
+      sort: { key: 'priority', direction: 'asc' }
+    })
+    expect(calls[0].input).toMatchObject({
+      projectId: 'proj-1',
+      orderBy: 'priority',
+      order: 'asc'
+    })
+  })
+
+  it('sends createdByViewer for the created filter', async () => {
+    const calls = setupTransport(() => ({ issues: [] }))
+    const { listIssues } = await import('./issues')
+    await listIssues('created', 50)
+    expect(calls[0].tool).toBe('issues.list')
+    expect(calls[0].input).toMatchObject({ createdByViewer: true, includeDone: true })
+  })
+
+  it('drops issues outside the requested project as a server fallback', async () => {
+    setupTransport(() => ({
+      issues: [
+        { id: 'a', title: 'In project', project: { id: 'proj-1' } },
+        { id: 'b', title: 'Other project', project: { id: 'proj-2' } }
+      ]
+    }))
+    const { listIssues } = await import('./issues')
+    const result = await listIssues('all', 50, { projectId: 'proj-1' })
+    expect(result.map((i) => i.id)).toEqual(['a'])
+  })
+
+  it('returns issues sorted most-recently updated first by default', async () => {
+    setupTransport(() => ({
+      issues: [
+        { id: 'old', title: 'Old', updatedAt: '2024-01-01T00:00:00.000Z' },
+        { id: 'new', title: 'New', updatedAt: '2024-09-01T00:00:00.000Z' }
+      ]
+    }))
+    const { listIssues } = await import('./issues')
+    const result = await listIssues('all', 50)
+    expect(result.map((i) => i.id)).toEqual(['new', 'old'])
   })
 
   it('scopes the active filter to non-done categories', async () => {
@@ -115,13 +190,11 @@ describe('listIssues', () => {
     const calls = setupTransport(() => ({ issues: [] }))
     const { listIssues } = await import('./issues')
     await listIssues('active', 25, { assignedAgentId: 'agent-victor' })
-    expect(calls[0]).toEqual({
-      tool: 'issues.list',
-      input: {
-        limit: 25,
-        assignedAgentId: 'agent-victor',
-        statusCategories: ['BACKLOG', 'TODO', 'IN_PROGRESS', 'IN_REVIEW']
-      }
+    expect(calls[0].tool).toBe('issues.list')
+    expect(calls[0].input).toMatchObject({
+      limit: 25,
+      assignedAgentId: 'agent-victor',
+      statusCategories: ['BACKLOG', 'TODO', 'IN_PROGRESS', 'IN_REVIEW']
     })
   })
 
@@ -129,10 +202,8 @@ describe('listIssues', () => {
     const calls = setupTransport(() => ({ issues: [] }))
     const { listIssues } = await import('./issues')
     await listIssues('all', 25, { assignedAgentId: null })
-    expect(calls[0]).toEqual({
-      tool: 'issues.list',
-      input: { limit: 25, assignedAgentId: null, includeDone: true }
-    })
+    expect(calls[0].tool).toBe('issues.list')
+    expect(calls[0].input).toMatchObject({ limit: 25, assignedAgentId: null, includeDone: true })
   })
 })
 
@@ -148,10 +219,35 @@ describe('searchIssues', () => {
     const calls = setupTransport(() => ({ issues: [{ id: '1', title: 'T' }] }))
     const { searchIssues } = await import('./issues')
     await searchIssues('  forge ', 25, { assignedAgentId: 'agent-victor' })
-    expect(calls[0]).toEqual({
-      tool: 'issues.list',
-      input: { query: 'forge', limit: 25, includeDone: true, assignedAgentId: 'agent-victor' }
+    expect(calls[0].tool).toBe('issues.list')
+    expect(calls[0].input).toMatchObject({
+      query: 'forge',
+      limit: 25,
+      includeDone: true,
+      assignedAgentId: 'agent-victor'
     })
+  })
+})
+
+describe('listWorkspaces', () => {
+  it('returns workspaces from workspaces.list when available', async () => {
+    setupTransport(() => ({ workspaces: [{ id: 'w1', name: 'One' }, { id: 'w2', name: 'Two' }] }))
+    const { listWorkspaces } = await import('./issues')
+    const workspaces = await listWorkspaces()
+    expect(workspaces.map((w) => w.id)).toEqual(['w1', 'w2'])
+  })
+
+  it('falls back to the single connected workspace', async () => {
+    const calls = setupTransport((call) => {
+      if (call.tool === 'workspaces.list') {
+        throw new Error('not supported')
+      }
+      return { id: 'w-solo', name: 'Solo', slug: 'solo' }
+    })
+    const { listWorkspaces } = await import('./issues')
+    const workspaces = await listWorkspaces()
+    expect(workspaces).toEqual([{ id: 'w-solo', name: 'Solo', slug: 'solo' }])
+    expect(calls.map((c) => c.tool)).toEqual(['workspaces.list', 'workspace.get'])
   })
 })
 

@@ -21,6 +21,12 @@ export type ForgeProjectSummary = {
   name: string
 }
 
+export type ForgeWorkspaceSummary = {
+  id: string
+  name: string
+  slug?: string
+}
+
 export type ForgeAgentSummary = {
   id: string
   name?: string
@@ -48,6 +54,7 @@ export type ForgeConnectionStatus = {
   baseUrl: string | null
   hasToken?: boolean
   configSource?: 'config' | 'env' | 'none'
+  workspaceId?: string | null
   workspaceName?: string | null
   workspaceSlug?: string | null
   error?: string
@@ -55,8 +62,25 @@ export type ForgeConnectionStatus = {
 
 export type ForgeListFilter = 'active' | 'assigned' | 'created' | 'all' | 'done'
 
+/** Fields the issue list can be ordered by. `updated` is the product default. */
+export type ForgeIssueSortKey = 'updated' | 'created' | 'priority' | 'identifier' | 'title'
+
+export type ForgeSortDirection = 'asc' | 'desc'
+
+export type ForgeIssueSort = {
+  key: ForgeIssueSortKey
+  direction: ForgeSortDirection
+}
+
+/** Why: every Forge view (list, board, mobile) defaults to most-recently
+ *  updated first so the freshest work surfaces without the user choosing. */
+export const DEFAULT_FORGE_SORT: ForgeIssueSort = { key: 'updated', direction: 'desc' }
+
 export type ForgeIssueListOptions = {
   assignedAgentId?: string | null
+  projectId?: string | null
+  workspaceId?: string | null
+  sort?: ForgeIssueSort
 }
 
 export type ForgeIssueUpdate = {

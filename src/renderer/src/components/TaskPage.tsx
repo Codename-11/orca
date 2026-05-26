@@ -6,8 +6,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import {
   AlertCircle,
+  ArrowDown,
   ArrowDownUp,
   ArrowRight,
+  ArrowUp,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -19,6 +21,7 @@ import {
   ExternalLink,
   Eye,
   Files,
+  FolderKanban,
   GitMerge,
   GitPullRequest,
   LayoutGrid,
@@ -142,10 +145,14 @@ import type {
   ForgeComment,
   ForgeConnectionStatus,
   ForgeIssue,
+  ForgeIssueSort,
+  ForgeIssueSortKey,
   ForgeIssueStatus,
   ForgeIssueUpdate,
   ForgeLabel,
+  ForgeListFilter,
   ForgeProjectSummary,
+  ForgeWorkspaceSummary,
   LinearIssue,
   LinearTeam,
   LinearWorkflowState,
@@ -171,10 +178,13 @@ import {
   forgeListLabels,
   forgeListProjects,
   forgeListStatuses,
+  forgeListWorkspaces,
   forgeSearchIssues,
   forgeStatus,
   forgeUpdateIssue
 } from '@/runtime/runtime-forge-client'
+import { sortForgeIssues } from '../../../shared/forge-issue-sort'
+import { DEFAULT_FORGE_SORT } from '../../../shared/forge-types'
 import {
   normalizeVisibleTaskProviders,
   restoreAvailableDefaultTaskProvider,
@@ -264,6 +274,20 @@ const FORGE_PRESETS: { id: ForgePresetId; label: string }[] = [
   { id: 'all', label: 'All' },
   { id: 'done', label: 'Done' }
 ]
+
+const FORGE_SORT_OPTIONS: { id: ForgeIssueSortKey; label: string }[] = [
+  { id: 'updated', label: 'Updated' },
+  { id: 'created', label: 'Created' },
+  { id: 'priority', label: 'Priority' },
+  { id: 'identifier', label: 'Identifier' },
+  { id: 'title', label: 'Title' }
+]
+const FORGE_PROJECT_FILTER_ALL = 'all-projects'
+
+/** Display label for an issue's assignee, falling back to profile key then Unassigned. */
+function getForgeAssigneeLabel(issue: ForgeIssue): string {
+  return issue.assignedAgent?.name ?? issue.assignedAgent?.profileKey ?? 'Unassigned'
+}
 
 const GITHUB_TASK_GRID_CLASS =
   'min-w-[790px] grid-cols-[72px_minmax(320px,1fr)_84px_100px_92px_122px]'
@@ -2178,15 +2202,37 @@ export default function TaskPage(): React.JSX.Element {
   const [forgeError, setForgeError] = useState<string | null>(null)
   const [forgeSearchInput, setForgeSearchInput] = useState('')
   const [appliedForgeSearch, setAppliedForgeSearch] = useState('')
-  const [activeForgePreset, setActiveForgePreset] = useState<ForgePresetId>('active')
-  const [activeForgeAgentFilter, setActiveForgeAgentFilter] =
-    useState<ForgeAgentFilterValue>(ALL_FORGE_AGENTS_FILTER)
+  // Why: hydrate the Forge view prefs from saved settings so the user's last
+  // chosen preset/agent/view survive reloads. Falls back to product defaults
+  // when settings have not yet populated these fields.
+  const [activeForgePreset, setActiveForgePreset] = useState<ForgePresetId>(
+    () => settings?.defaultForgePreset ?? 'active'
+  )
+  const [activeForgeAgentFilter, setActiveForgeAgentFilter] = useState<ForgeAgentFilterValue>(
+    () => settings?.defaultForgeAgentFilter ?? ALL_FORGE_AGENTS_FILTER
+  )
+  const [activeForgeSort, setActiveForgeSort] = useState<ForgeIssueSort>(
+    () => settings?.defaultForgeSort ?? DEFAULT_FORGE_SORT
+  )
+  const [activeForgeProjectFilter, setActiveForgeProjectFilter] = useState<string | null>(
+    () => settings?.defaultForgeProjectFilterId ?? null
+  )
   const [forgeRefreshNonce, setForgeRefreshNonce] = useState(0)
   const [forgeStatuses, setForgeStatuses] = useState<ForgeIssueStatus[]>([])
   const [forgeUpdatingIssueIds, setForgeUpdatingIssueIds] = useState<ReadonlySet<string>>(
     () => new Set()
   )
-  const [forgeViewMode, setForgeViewMode] = useState<'list' | 'board'>('list')
+  const [forgeViewMode, setForgeViewMode] = useState<'list' | 'board'>(
+    () => settings?.defaultForgeViewMode ?? 'list'
+  )
+  // Why: workspace list + selection drive the optional multi-workspace picker.
+  // Selection is session-only (not persisted) — it follows the connected
+  // workspace by default and resets on reconnect.
+  const [forgeWorkspaces, setForgeWorkspaces] = useState<ForgeWorkspaceSummary[]>([])
+  const [selectedForgeWorkspaceId, setSelectedForgeWorkspaceId] = useState<string | null>(null)
+  // Why: projects feed the control-bar project filter; kept separate from the
+  // detail-drawer project list so the filter can load even before a drawer opens.
+  const [forgeFilterProjects, setForgeFilterProjects] = useState<ForgeProjectSummary[]>([])
   const [selectedForgeIssue, setSelectedForgeIssue] = useState<ForgeIssue | null>(null)
   const [forgeDetailComments, setForgeDetailComments] = useState<ForgeComment[]>([])
   const [forgeDetailCommentsLoading, setForgeDetailCommentsLoading] = useState(false)
@@ -2220,6 +2266,51 @@ export default function TaskPage(): React.JSX.Element {
     }
     setNewForgeIssueOpen(true)
   }, [forgeDetailProjects.length, settings])
+
+  // Why: Forge view prefs persist on each user change rather than via an effect
+  // so hydration (state initialized from settings) never races a save-back.
+  const handleForgePresetChange = useCallback(
+    (presetId: ForgePresetId) => {
+      setForgeSearchInput('')
+      setAppliedForgeSearch('')
+      setActiveForgePreset(presetId)
+      setForgeRefreshNonce((n) => n + 1)
+      void updateSettings({ defaultForgePreset: presetId as ForgeListFilter }).catch(() => {})
+    },
+    [updateSettings]
+  )
+  const handleForgeViewModeChange = useCallback(
+    (mode: 'list' | 'board') => {
+      setForgeViewMode(mode)
+      void updateSettings({ defaultForgeViewMode: mode }).catch(() => {})
+    },
+    [updateSettings]
+  )
+  const handleForgeAgentFilterChange = useCallback(
+    (value: ForgeAgentFilterValue) => {
+      setActiveForgeAgentFilter(value)
+      setForgeRefreshNonce((n) => n + 1)
+      void updateSettings({ defaultForgeAgentFilter: value }).catch(() => {})
+    },
+    [updateSettings]
+  )
+  const handleForgeSortChange = useCallback(
+    (sort: ForgeIssueSort) => {
+      setActiveForgeSort(sort)
+      setForgeRefreshNonce((n) => n + 1)
+      void updateSettings({ defaultForgeSort: sort }).catch(() => {})
+    },
+    [updateSettings]
+  )
+  const handleForgeProjectFilterChange = useCallback(
+    (projectId: string | null) => {
+      setActiveForgeProjectFilter(projectId)
+      setForgeRefreshNonce((n) => n + 1)
+      void updateSettings({ defaultForgeProjectFilterId: projectId }).catch(() => {})
+    },
+    [updateSettings]
+  )
+
   // Why: Issues and MRs expose different filter sets. Reset before fetching
   // so a stale chip cannot become an invalid glab CLI flag.
   useEffect(() => {
@@ -4000,11 +4091,20 @@ export default function TaskPage(): React.JSX.Element {
     setForgeLoading(true)
     setForgeError(null)
     const trimmed = appliedForgeSearch.trim()
-    const agentOptions = getForgeAgentFilterOptions(activeForgeAgentFilter)
+    // Why: thread the agent, project, sort, and workspace filters into one
+    // options object so list and search requests stay in sync. Server sort is
+    // requested even though the renderer re-sorts, so paginated/limited results
+    // still reflect the chosen order.
+    const requestOptions = {
+      ...getForgeAgentFilterOptions(activeForgeAgentFilter),
+      ...(activeForgeProjectFilter ? { projectId: activeForgeProjectFilter } : {}),
+      sort: activeForgeSort,
+      ...(selectedForgeWorkspaceId ? { workspaceId: selectedForgeWorkspaceId } : {})
+    }
     const request =
       trimmed.length > 0
-        ? forgeSearchIssues(settings, trimmed, FORGE_ITEM_LIMIT, agentOptions)
-        : forgeListIssues(settings, activeForgePreset, FORGE_ITEM_LIMIT, agentOptions)
+        ? forgeSearchIssues(settings, trimmed, FORGE_ITEM_LIMIT, requestOptions)
+        : forgeListIssues(settings, activeForgePreset, FORGE_ITEM_LIMIT, requestOptions)
     void Promise.all([
       request,
       forgeListStatuses(settings).catch(() => [] as ForgeIssueStatus[]),
@@ -4040,8 +4140,51 @@ export default function TaskPage(): React.JSX.Element {
   }, [
     activeForgeAgentFilter,
     activeForgePreset,
+    activeForgeProjectFilter,
+    activeForgeSort,
     appliedForgeSearch,
     forgeRefreshNonce,
+    selectedForgeWorkspaceId,
+    settings,
+    taskResumeApplied,
+    taskSource
+  ])
+
+  // Why: load the workspace list and filter projects once Forge is connected
+  // so the optional workspace picker and project filter can populate. Default
+  // the workspace selection to the connected workspace on first load.
+  useEffect(() => {
+    if (!taskResumeApplied || taskSource !== 'forge' || !forgeConnectionStatus?.connected) {
+      return
+    }
+    let cancelled = false
+    void forgeListWorkspaces(settings)
+      .then((workspaces) => {
+        if (cancelled) {
+          return
+        }
+        setForgeWorkspaces(workspaces)
+        setSelectedForgeWorkspaceId((current) => {
+          if (current && workspaces.some((workspace) => workspace.id === current)) {
+            return current
+          }
+          return forgeConnectionStatus.workspaceId ?? workspaces[0]?.id ?? null
+        })
+      })
+      .catch(() => {})
+    void forgeListProjects(settings)
+      .then((projects) => {
+        if (!cancelled) {
+          setForgeFilterProjects(projects)
+        }
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [
+    forgeConnectionStatus?.connected,
+    forgeConnectionStatus?.workspaceId,
     settings,
     taskResumeApplied,
     taskSource
@@ -4206,6 +4349,13 @@ export default function TaskPage(): React.JSX.Element {
     [selectedForgeIssue, settings]
   )
 
+  // Why: re-sort on the client with the shared comparator so reordering is
+  // instant (no refetch round-trip) and matches every other Forge surface.
+  const sortedForgeIssues = useMemo(
+    () => sortForgeIssues(forgeIssues, activeForgeSort),
+    [forgeIssues, activeForgeSort]
+  )
+
   // Why: group Forge issues into board columns. statuses.list ordering wins
   // when available; otherwise fall back to canonical category order so the
   // board still renders coherently before the metadata fetch resolves.
@@ -4237,7 +4387,7 @@ export default function TaskPage(): React.JSX.Element {
         fallbackByCategory.set(status.category, status)
       }
     }
-    for (const issue of forgeIssues) {
+    for (const issue of sortedForgeIssues) {
       let bucket = byId.get(issue.status.id)
       if (!bucket) {
         const fallback = fallbackByCategory.get(issue.status.category)
@@ -4252,7 +4402,7 @@ export default function TaskPage(): React.JSX.Element {
       bucket.issues.push(issue)
     }
     return Array.from(byId.values()).filter((section) => section.issues.length > 0 || true)
-  }, [forgeIssues, forgeStatuses])
+  }, [sortedForgeIssues, forgeStatuses])
 
   const activeForgePresetLabel =
     FORGE_PRESETS.find((preset) => preset.id === activeForgePreset)?.label ?? 'Active'
@@ -4965,19 +5115,40 @@ export default function TaskPage(): React.JSX.Element {
                 ) : taskSource === 'forge' ? (
                   <div className="min-w-0 rounded-md rounded-b-none border border-border/50 bg-muted/50 p-3 shadow-sm">
                     <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="flex flex-wrap gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* Why: only surface a workspace picker when more than one
+                            workspace is reachable; otherwise the connection badge
+                            already conveys the single active workspace. */}
+                        {forgeWorkspaces.length > 1 ? (
+                          <Select
+                            value={selectedForgeWorkspaceId ?? undefined}
+                            onValueChange={(value) => {
+                              setSelectedForgeWorkspaceId(value)
+                              setForgeRefreshNonce((n) => n + 1)
+                            }}
+                          >
+                            <SelectTrigger
+                              aria-label="Select Forge workspace"
+                              className="h-8 w-auto min-w-[150px] max-w-[220px] border-border/50 bg-background text-xs"
+                            >
+                              <SelectValue placeholder="Workspace" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {forgeWorkspaces.map((workspace) => (
+                                <SelectItem key={workspace.id} value={workspace.id}>
+                                  {workspace.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : null}
                         {FORGE_PRESETS.map((preset) => {
                           const active = !forgeSearchInput && activeForgePreset === preset.id
                           return (
                             <button
                               key={preset.id}
                               type="button"
-                              onClick={() => {
-                                setForgeSearchInput('')
-                                setAppliedForgeSearch('')
-                                setActiveForgePreset(preset.id)
-                                setForgeRefreshNonce((n) => n + 1)
-                              }}
+                              onClick={() => handleForgePresetChange(preset.id)}
                               className={cn(
                                 'rounded-md border px-2 py-1 text-xs transition',
                                 active
@@ -5017,7 +5188,7 @@ export default function TaskPage(): React.JSX.Element {
                               <button
                                 key={id}
                                 type="button"
-                                onClick={() => setForgeViewMode(id)}
+                                onClick={() => handleForgeViewModeChange(id)}
                                 aria-pressed={active}
                                 aria-label={`${label} view`}
                                 className={cn(
@@ -5135,10 +5306,9 @@ export default function TaskPage(): React.JSX.Element {
                       </div>
                       <Select
                         value={activeForgeAgentFilter}
-                        onValueChange={(value) => {
-                          setActiveForgeAgentFilter(value as ForgeAgentFilterValue)
-                          setForgeRefreshNonce((n) => n + 1)
-                        }}
+                        onValueChange={(value) =>
+                          handleForgeAgentFilterChange(value as ForgeAgentFilterValue)
+                        }
                       >
                         <SelectTrigger
                           aria-label="Filter Forge issues by assigned agent"
@@ -5162,6 +5332,87 @@ export default function TaskPage(): React.JSX.Element {
                           ))}
                         </SelectContent>
                       </Select>
+                      <Select
+                        value={activeForgeProjectFilter ?? FORGE_PROJECT_FILTER_ALL}
+                        onValueChange={(value) =>
+                          handleForgeProjectFilterChange(
+                            value === FORGE_PROJECT_FILTER_ALL ? null : value
+                          )
+                        }
+                      >
+                        <SelectTrigger
+                          aria-label="Filter Forge issues by project"
+                          className="h-8 w-full min-w-[160px] max-w-[220px] border-border/50 bg-background text-xs sm:w-auto"
+                        >
+                          <FolderKanban className="mr-2 size-3.5 text-muted-foreground" />
+                          <SelectValue placeholder="All projects" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={FORGE_PROJECT_FILTER_ALL}>All projects</SelectItem>
+                          {forgeFilterProjects.map((project) => (
+                            <SelectItem key={project.id} value={project.id}>
+                              {project.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <div className="flex items-center gap-1">
+                        <Select
+                          value={activeForgeSort.key}
+                          onValueChange={(value) =>
+                            handleForgeSortChange({
+                              ...activeForgeSort,
+                              key: value as ForgeIssueSortKey
+                            })
+                          }
+                        >
+                          <SelectTrigger
+                            aria-label="Sort Forge issues"
+                            className="h-8 w-full min-w-[140px] max-w-[180px] border-border/50 bg-background text-xs sm:w-auto"
+                          >
+                            <ArrowDownUp className="mr-2 size-3.5 text-muted-foreground" />
+                            <SelectValue placeholder="Sort" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {FORGE_SORT_OPTIONS.map((option) => (
+                              <SelectItem key={option.id} value={option.id}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {/* Why: a compact arrow toggle flips sort direction without a
+                            second dropdown; aria-label reflects the next action. */}
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              onClick={() =>
+                                handleForgeSortChange({
+                                  ...activeForgeSort,
+                                  direction: activeForgeSort.direction === 'asc' ? 'desc' : 'asc'
+                                })
+                              }
+                              aria-label={
+                                activeForgeSort.direction === 'asc'
+                                  ? 'Sort descending'
+                                  : 'Sort ascending'
+                              }
+                              className="h-8 w-8 shrink-0 border-border/50 bg-background hover:bg-muted/50"
+                            >
+                              {activeForgeSort.direction === 'asc' ? (
+                                <ArrowUp className="size-4" />
+                              ) : (
+                                <ArrowDown className="size-4" />
+                              )}
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom" sideOffset={6}>
+                            {activeForgeSort.direction === 'asc' ? 'Ascending' : 'Descending'}
+                          </TooltipContent>
+                        </Tooltip>
+                      </div>
                     </div>
                   </div>
                 ) : taskSource === 'linear' && linearStatus.connected ? (
@@ -6002,12 +6253,13 @@ export default function TaskPage(): React.JSX.Element {
                 <div className="text-[11px] text-muted-foreground">{forgeIssues.length} shown</div>
               </div>
               {forgeViewMode === 'list' ? (
-                <div className="grid h-8 flex-none grid-cols-[96px_minmax(0,3fr)_140px_130px_110px_86px] items-center gap-3 border-b border-border/50 bg-muted/25 px-3 text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground max-lg:hidden">
+                <div className="grid h-8 flex-none grid-cols-[96px_minmax(0,3fr)_140px_110px_110px_120px_86px] items-center gap-3 border-b border-border/50 bg-muted/25 px-3 text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground max-lg:hidden">
                   <span>Key</span>
                   <span>Issue</span>
                   <span>Status</span>
                   <span>Priority</span>
                   <span>Project</span>
+                  <span>Assignee</span>
                   <span />
                 </div>
               ) : null}
@@ -6096,6 +6348,12 @@ export default function TaskPage(): React.JSX.Element {
                                       <h4 className="text-[12px] font-medium leading-tight text-foreground">
                                         {issue.title}
                                       </h4>
+                                      <div className="flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground">
+                                        <Users className="size-3 shrink-0" />
+                                        <span className="truncate">
+                                          {getForgeAssigneeLabel(issue)}
+                                        </span>
+                                      </div>
                                       <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
                                         <span className="truncate">
                                           {issue.project?.name ?? ''}
@@ -6176,7 +6434,7 @@ export default function TaskPage(): React.JSX.Element {
                   />
                 ) : null}
                 <div className="divide-y divide-border/50">
-                  {forgeIssues.map((issue) => {
+                  {sortedForgeIssues.map((issue) => {
                     const updating = forgeUpdatingIssueIds.has(issue.id)
                     const otherStatuses = forgeStatuses.filter(
                       (status) => status.id !== issue.status.id
@@ -6194,7 +6452,7 @@ export default function TaskPage(): React.JSX.Element {
                           }
                         }}
                         className={cn(
-                          'group/row grid min-h-12 cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3 py-2 text-left transition hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring lg:grid-cols-[96px_minmax(0,3fr)_140px_130px_110px_86px]',
+                          'group/row grid min-h-12 cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3 py-2 text-left transition hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring lg:grid-cols-[96px_minmax(0,3fr)_140px_110px_110px_120px_86px]',
                           updating && 'cursor-wait opacity-70'
                         )}
                       >
@@ -6216,6 +6474,10 @@ export default function TaskPage(): React.JSX.Element {
                             {issue.project ? (
                               <span className="truncate">{issue.project.name}</span>
                             ) : null}
+                            <span className="flex min-w-0 items-center gap-1 truncate">
+                              <Users className="size-3 shrink-0" />
+                              {getForgeAssigneeLabel(issue)}
+                            </span>
                           </div>
                         </div>
                         <DropdownMenu>
@@ -6251,6 +6513,10 @@ export default function TaskPage(): React.JSX.Element {
                         </span>
                         <span className="hidden truncate text-[12px] text-muted-foreground lg:block">
                           {issue.project?.name ?? 'No project'}
+                        </span>
+                        <span className="hidden min-w-0 items-center gap-1 truncate text-[12px] text-muted-foreground lg:flex">
+                          <Users className="size-3 shrink-0" />
+                          <span className="truncate">{getForgeAssigneeLabel(issue)}</span>
                         </span>
                         <div className="flex shrink-0 items-center justify-end gap-1 md:opacity-0 md:transition-opacity md:group-hover/row:opacity-100 md:group-focus-within/row:opacity-100">
                           <Button
