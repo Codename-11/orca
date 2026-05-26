@@ -6,6 +6,18 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-26 — Hardened release-cut GitHub Actions auth
+
+Updated `.github/workflows/release-cut.yml` so every checkout and `gh` release API call uses `AXIOM_AUTOMATION_TOKEN` when present, falling back to `github.token`. This aligns release-cut with the Axiom upstream mirror/sync workflows and avoids the default scheduled-run token path that produced GitHub's misleading checkout-time `Your account is suspended` 403.
+
+Verification:
+
+- `pnpm exec oxfmt --check .github/workflows/release-cut.yml` → passed.
+- `git diff --check -- .github/workflows/release-cut.yml` → passed.
+- PyYAML parse of `.github/workflows/release-cut.yml` → `yaml_ok Cut Release jobs= cut,create-release,e2e,build,publish-release,homebrew-bump`.
+
+---
+
 ## 2026-05-25 — Remediated upstream v1.4.28-rc.4 bot PR
 
 Resolved the bot remediation merge for upstream `v1.4.28-rc.4` on `bot/upstream-sync-axiom-v1.4.28-rc.4.axiom.1` targeting `axiom/deploy`. Kept the fork version at `1.4.28-rc.4.axiom.1`, preserved Axiom side-by-side app/updater identity and Forge integration surface, and accepted upstream's settings navigation metadata extraction by adding Forge search metadata into the new shared integrations search file and nav description.
