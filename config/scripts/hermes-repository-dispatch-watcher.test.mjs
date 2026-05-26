@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   buildDispatches,
+  buildFailureNotification,
   newestSemverTag,
   parseArgs,
   runWatcher
@@ -232,5 +233,22 @@ describe('Hermes repository dispatch watcher', () => {
       releaseEventType: 'source_release',
       mainEventType: 'source_main'
     })
+  })
+
+  it('formats actionable Discord-ready handoff output on watcher failures', () => {
+    const message = buildFailureNotification(new Error('GitHub dispatch failed: Bearer ghp_secret'), {
+      upstreamRepo: 'stablyai/orca',
+      targetRepo: 'Codename-11/orca',
+      stateFile: '/home/bailey/.hermes/state/orca-upstream-watcher.json'
+    })
+
+    expect(message).toContain('🚨 **Dev Automation: Orca Upstream Dispatch Watcher**')
+    expect(message).toContain('**Action**')
+    expect(message).toContain('- Required: `yes`')
+    expect(message).toContain('**Agent handoff**')
+    expect(message).toContain('cd /home/bailey/orca')
+    expect(message).toContain('node config/scripts/hermes-repository-dispatch-watcher.mjs')
+    expect(message).toContain('Bearer [REDACTED]')
+    expect(message).not.toContain('ghp_secret')
   })
 })

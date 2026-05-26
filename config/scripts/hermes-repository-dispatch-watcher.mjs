@@ -393,8 +393,36 @@ function redact(message) {
   return String(message).replace(/(Bearer\s+)[A-Za-z0-9._-]+/g, '$1[REDACTED]')
 }
 
-async function main() {
-  const args = parseArgs(process.argv.slice(2))
+function buildFailureNotification(error, args) {
+  const message = redact(error?.message ?? error)
+  return [
+    '🚨 **Dev Automation: Orca Upstream Dispatch Watcher**',
+    'Status: `failure`',
+    'Workflow: `Orca upstream repository dispatch`',
+    `Repo: \`${args.targetRepo || 'unknown'}\``,
+    `Upstream: \`${args.upstreamRepo || 'unknown'}\``,
+    `Failure summary: ${message}`,
+    '',
+    '**Action**',
+    '- Required: `yes`',
+    '- Owner: `dev automation agent`',
+    '- Next: inspect watcher auth/network/state, then rerun the watcher; if dispatch succeeded partially, verify the target GitHub Actions run before retrying.',
+    '',
+    '**Agent handoff**',
+    '```text',
+    `Repo: ${args.targetRepo || 'unknown'}`,
+    `Upstream repo: ${args.upstreamRepo || 'unknown'}`,
+    `State file: ${args.stateFile || 'unknown'}`,
+    'Start here:',
+    'cd /home/bailey/orca',
+    `node config/scripts/hermes-repository-dispatch-watcher.mjs --upstream-repo ${args.upstreamRepo || '<upstream>'} --target-repo ${args.targetRepo || '<target>'} --state-file ${args.stateFile || '<state-file>'} --dry-run --verbose`,
+    `gh run list --repo ${args.targetRepo || '<target>'} --limit 5`,
+    'Classify: informational / auto-retry likely / actionable.',
+    '```'
+  ].join('\n')
+}
+
+async function main(args = parseArgs(process.argv.slice(2))) {
   if (!args.targetRepo) {
     throw new Error('WATCHER_TARGET_REPOSITORY or --target-repo must be set')
   }
@@ -405,10 +433,11 @@ async function main() {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch((error) => {
-    console.error(`repository-dispatch-watcher failed: ${redact(error?.message ?? error)}`)
+  const args = parseArgs(process.argv.slice(2))
+  main(args).catch((error) => {
+    console.error(buildFailureNotification(error, args))
     process.exitCode = 1
   })
 }
 
-export { buildDispatches, compareVersions, newestSemverTag, parseArgs, parseVersion, runWatcher }
+export { buildDispatches, buildFailureNotification, compareVersions, newestSemverTag, parseArgs, parseVersion, runWatcher }
