@@ -305,6 +305,9 @@ describe('Axiom upstream sync release workflow', () => {
     expect(notifyScript).toContain('AXIOM_SYNC_FORGE_WEBHOOK')
     expect(notifyScript).toContain('postDiscordIfCritical')
     expect(notifyScript).toContain("severity !== 'critical'")
+    expect(notifyScript).toContain('**Action**')
+    expect(notifyScript).toContain('**Agent handoff**')
+    expect(notifyScript).toContain('Classify: informational / auto-retry likely / actionable.')
   })
 
   it('announces only stable published releases to Discord with release notes', () => {
@@ -365,6 +368,14 @@ describe('Axiom upstream sync release workflow', () => {
     expect(payload.embeds[0].fields.map((field) => field.name)).toContain('Axiom notes')
     expect(payload.embeds[0].fields.map((field) => field.name)).toContain('Upstream notes')
     expect(payload.embeds[0].fields.map((field) => field.name)).toContain('Downloads')
+    expect(payload.embeds[0].fields.map((field) => field.name)).toContain('Action')
+    expect(payload.embeds[0].fields.map((field) => field.name)).toContain('Agent handoff')
+    expect(payload.embeds[0].fields.find((field) => field.name === 'Action')?.value).toContain(
+      'Required: `no`'
+    )
+    expect(payload.embeds[0].fields.find((field) => field.name === 'Agent handoff')?.value).toContain(
+      'gh release view axiom-v1.4.22-axiom.1'
+    )
   })
 
   it('requests agent remediation for unsafe merge conflicts without publishing', () => {

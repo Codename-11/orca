@@ -92,6 +92,13 @@ export function buildDiscordPayload({ release, forkVersion, forkTag, upstreamTag
   const patchNotes = withoutPlaceholders(extractMarkdownSection(body, 'Axiom patch notes'))
   const forkDelta = withoutPlaceholders(extractMarkdownSection(body, 'Axiom commit fallback'))
   const downloads = assetSummary(release.assets)
+  const handoff = [
+    `Repo: ${repository}`,
+    `Release tag: ${forkTag}`,
+    `Release URL: ${releaseUrl}`,
+    `Latest manifest: https://github.com/${repository}/releases/latest/download/latest.yml`,
+    `Check: gh release view ${forkTag} --repo ${repository} --json tagName,isDraft,isPrerelease,publishedAt,assets,url`
+  ].join('\n')
 
   const fields = [
     {
@@ -120,6 +127,20 @@ export function buildDiscordPayload({ release, forkVersion, forkTag, upstreamTag
       inline: false
     })
   }
+
+  fields.push(
+    {
+      name: 'Action',
+      value:
+        'Required: `no`\nUse this as release confirmation. If updater behavior looks wrong, verify the latest manifest and release assets before escalating.',
+      inline: false
+    },
+    {
+      name: 'Agent handoff',
+      value: truncate(handoff, DISCORD_FIELD_LIMIT),
+      inline: false
+    }
+  )
 
   return {
     content: truncate(`🚀 ${title} is live: ${releaseUrl}`, DISCORD_CONTENT_LIMIT),

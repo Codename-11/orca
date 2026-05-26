@@ -58,10 +58,14 @@ function splitLines(output) {
     : []
 }
 
+function getRunId() {
+  return envString('GITHUB_RUN_ID')
+}
+
 function getRunUrl() {
   const server = envString('GITHUB_SERVER_URL', 'https://github.com')
   const repo = envString('GITHUB_REPOSITORY')
-  const runId = envString('GITHUB_RUN_ID')
+  const runId = getRunId()
   return repo && runId ? `${server}/${repo}/actions/runs/${runId}` : ''
 }
 
@@ -184,10 +188,50 @@ async function postDiscordIfCritical() {
   const upstreamTag = envString('AXIOM_UPSTREAM_TAG', 'unknown')
   const forkTag = envString('AXIOM_FORK_TAG', 'unknown')
   const conflicts = getConflictFiles()
+  const repo = envString('GITHUB_REPOSITORY', 'Codename-11/orca')
+  const runId = getRunId()
+  const failedStep = envString('AXIOM_FAILED_STEP', 'Axiom release build/publish')
+  const action = conflicts.length > 0
+    ? `Resolve merge conflicts (${conflicts.slice(0, 5).join(', ')}), preserve Axiom fork identity/update settings, then rerun the workflow.`
+    : `Triage the failed ${failedStep} job logs, patch deterministic failures, then rerun the workflow. This is not informational until assets/latest.yml are verified.`
+  const handoff = [
+    '```text',
+    `Repo: ${repo}`,
+    `Workflow: Axiom Upstream Sync Release`,
+    `Run ID: ${runId || 'unknown'}`,
+    `Run URL: ${runUrl || 'unknown'}`,
+    `Failed step: ${failedStep}`,
+    `Upstream: ${upstreamTag}`,
+    `Fork tag: ${forkTag}`,
+    '',
+    'Start here:',
+    'cd /home/bailey/orca',
+    runId
+      ? `gh run view ${runId} --repo ${repo} --json status,conclusion,jobs,url`
+      : `gh run list --repo ${repo} --workflow axiom-upstream-sync-release.yml --limit 5`,
+    runId ? `gh run view ${runId} --repo ${repo} --log-failed` : `gh run view <run-id> --repo ${repo} --log-failed`,
+    'Classify: informational / auto-retry likely / actionable.',
+    'If release workflow: verify tag, draft/prerelease flags, assets, and latest.yml before closing.',
+    '```'
+  ].join('\n')
   const content = [
-    `Critical Axiom Orca upstream sync failure: ${upstreamTag} -> ${forkTag}`,
-    runUrl,
-    conflicts.length > 0 ? `Conflicts: ${conflicts.join(', ')}` : 'No conflicted files captured.'
+    `🚨 **Dev Automation: Axiom Orca Release**`,
+    `Status: \`failure\``,
+    `Workflow: \`Axiom Upstream Sync Release\``,
+    `Run: ${runUrl || 'unknown'}`,
+    `Repo: \`${repo}\``,
+    `Upstream/fork: \`${upstreamTag}\` → \`${forkTag}\``,
+    conflicts.length > 0
+      ? `Failure summary: merge conflicts in ${conflicts.slice(0, 5).join(', ')}`
+      : `Failure summary: ${failedStep} failed; logs required for exact root cause.`,
+    '',
+    '**Action**',
+    '- Required: `yes`',
+    '- Owner: `dev automation agent`',
+    `- Next: ${action}`,
+    '',
+    '**Agent handoff**',
+    handoff
   ]
     .filter(Boolean)
     .join('\n')
