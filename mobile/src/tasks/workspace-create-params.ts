@@ -1,5 +1,5 @@
 import type { TuiAgent } from '../../../src/shared/types'
-import { resolveWorkspaceCreateName } from '../../../src/shared/workspace-name'
+import { resolveWorkspaceCreateName } from './workspace-name'
 import type { WorkspaceAgentChoice } from './workspace-agent-selection'
 
 export type WorkspaceCreateSetupDecision = 'inherit' | 'run' | 'skip'

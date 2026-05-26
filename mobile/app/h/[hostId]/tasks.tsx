@@ -61,10 +61,9 @@ import {
   type WorkspaceAgentChoice
 } from '../../../src/tasks/workspace-agent-selection'
 import { shouldResolveHostedReviewStartPoint } from '../../../src/tasks/hosted-review-start-point'
-import { getLinkedWorkItemSuggestedName } from '../../../../src/shared/workspace-name'
-import { sortForgeIssues } from '../../../../src/shared/forge-issue-sort'
+import { getLinkedWorkItemSuggestedName } from '../../../src/tasks/workspace-name'
+import { DEFAULT_FORGE_SORT, sortForgeIssues } from '../../../src/tasks/forge-issue-sort'
 import {
-  DEFAULT_FORGE_SORT,
   type ForgeAgentSummary,
   type ForgeIssueListOptions,
   type ForgeIssuePriority,

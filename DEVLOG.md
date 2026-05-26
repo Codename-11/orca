@@ -6,6 +6,20 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-26 — Fixed mobile Android release bundling for shared task helpers
+
+The Axiom release workflow for `axiom-v1.4.29-axiom.2` failed in the Android APK job because Metro could not resolve runtime imports from `mobile/app/h/[hostId]/tasks.tsx` to desktop-root shared modules outside the mobile package (`../../../../src/shared/workspace-name`). Added mobile-local mirrors for the workspace-name and Forge sort helpers, moved mobile runtime imports to those local modules, and added a regression test that blocks non-type mobile imports of desktop shared runtime modules.
+
+Verification:
+- `pnpm --dir mobile exec vitest run src/tasks/mobile-runtime-imports.test.ts src/tasks/workspace-create-params.test.ts`
+- `pnpm --dir mobile exec oxfmt --check src/tasks/mobile-runtime-imports.test.ts src/tasks/workspace-name.ts src/tasks/forge-issue-sort.ts src/tasks/workspace-create-params.ts app/h/'[hostId]'/tasks.tsx`
+- `pnpm --dir mobile exec oxlint src/tasks/mobile-runtime-imports.test.ts src/tasks/workspace-name.ts src/tasks/forge-issue-sort.ts src/tasks/workspace-create-params.ts app/h/'[hostId]'/tasks.tsx`
+- `pnpm exec tsc -p mobile/tsconfig.json --noEmit`
+
+Note: a local `expo export --platform android` progressed beyond the original `workspace-name` failure but stopped on local dependency resolution for `lowlight`; CI performs a fresh mobile install and did not hit that before the original failure.
+
+---
+
 ## 2026-05-26 — Fixed Axiom updater stable-vs-RC ordering
 
 Fixed the updater's fork-aware version semantics so Axiom stable fork revisions like `1.4.28-axiom.1` are treated as stable builds, while upstream prerelease-derived builds like `1.4.28-rc.7.axiom.1` remain prereleases. The release feed resolver now ranks stable Axiom releases above same-core Axiom RC tags, preventing `releases.atom` publish order from pinning clients to an older RC when a stable fork release exists.
