@@ -15,6 +15,7 @@ Verification:
 - `pnpm exec oxfmt --check .github/workflows/release-cut.yml` → passed.
 - `git diff --check -- .github/workflows/release-cut.yml` → passed.
 - PyYAML parse of `.github/workflows/release-cut.yml` → `yaml_ok Cut Release jobs= cut,create-release,e2e,build,publish-release,homebrew-bump`.
+- GitHub Actions dry-run `workflow_dispatch` for `release-cut.yml` (`26457342076`) → passed; checkout fetched `Codename-11/orca` without the prior `Your account is suspended` 403.
 
 ---
 
