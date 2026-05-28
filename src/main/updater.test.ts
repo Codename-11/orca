@@ -1281,6 +1281,7 @@ describe('updater', () => {
       expect(sendMock).toHaveBeenCalledWith('updater:status', {
         state: 'available',
         version: '1.4.26',
+        releaseUrl: 'https://github.com/stablyai/orca/releases/tag/v1.4.26',
         changelog: null
       })
     })
@@ -1432,6 +1433,7 @@ describe('updater', () => {
     expect(sendMock).toHaveBeenCalledWith('updater:status', {
       state: 'available',
       version: '1.4.27',
+      releaseUrl: 'https://github.com/stablyai/orca/releases/tag/v1.4.27',
       changelog: null,
       activeNudgeId: 'campaign-1'
     })
@@ -1499,6 +1501,7 @@ describe('updater', () => {
     expect(sendMock).toHaveBeenCalledWith('updater:status', {
       state: 'available',
       version: '1.4.27',
+      releaseUrl: 'https://github.com/stablyai/orca/releases/tag/v1.4.27',
       changelog: null,
       activeNudgeId: 'campaign-1'
     })
@@ -1549,6 +1552,7 @@ describe('updater', () => {
       expect(sendMock).toHaveBeenCalledWith('updater:status', {
         state: 'available',
         version: '1.4.26',
+        releaseUrl: 'https://github.com/stablyai/orca/releases/tag/v1.4.26',
         changelog: null
       })
     })
@@ -1578,6 +1582,7 @@ describe('updater', () => {
     expect(sendMock).toHaveBeenCalledWith('updater:status', {
       state: 'available',
       version: '1.4.27',
+      releaseUrl: 'https://github.com/stablyai/orca/releases/tag/v1.4.27',
       changelog: null,
       activeNudgeId: 'campaign-1'
     })

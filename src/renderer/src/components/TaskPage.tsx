@@ -35,7 +35,6 @@ import {
   SlidersHorizontal,
   Users,
   X,
-  FolderKanban,
   Tag,
   UserRound,
   AlertTriangle
