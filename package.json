@@ -1,6 +1,6 @@
 {
   "name": "orca",
-  "version": "1.4.34-axiom.1",
+  "version": "1.4.35-rc.0.axiom.1",
   "description": "Next-gen IDE for parallel agentic development",
   "homepage": "https://github.com/stablyai/orca",
   "author": "stablyai",
@@ -68,6 +68,7 @@
     "@parcel/watcher": "^2.5.6",
     "@tanstack/react-virtual": "^3.13.24",
     "@tiptap/extension-code-block-lowlight": "^3.22.5",
+    "@tiptap/extension-details": "^3.22.5",
     "@tiptap/extension-image": "^3.22.5",
     "@tiptap/extension-link": "^3.22.5",
     "@tiptap/extension-mathematics": "3.22.5",

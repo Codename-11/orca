@@ -166,16 +166,16 @@ export type TerminalSlice = {
   /** Live pane titles keyed by tabId then paneId. Unlike the legacy tab title,
    *  this preserves split-pane agent status per pane while TerminalPane is mounted. */
   runtimePaneTitlesByTabId: Record<string, Record<number, string>>
-  /** Why: per-tab activity indicators. A tab gets flagged unread when an
-   *  agent in any of its panes transitions working→idle (onAgentBecameIdle
-   *  in pty-connection.ts) while the tab is not currently focused. The flag
-   *  clears when the user activates the tab. This is ephemeral UI state
-   *  only — not persisted across restarts.
-   *
-   *  Note: BEL (0x07) bytes intentionally do NOT flip this flag. See the
-   *  long-form rationale in pty-connection.ts around `onAgentBecameIdle`
-   *  for why BEL is too ambiguous to drive cross-surface attention. */
+  /** Why: per-tab activity indicators. A tab gets flagged unread when terminal
+   *  output requests attention (BEL) or an agent-complete notification is
+   *  dispatched for one of its panes. The flag clears when the user activates
+   *  or interacts with the tab. This is ephemeral UI state only — not
+   *  persisted across restarts. */
   unreadTerminalTabs: Record<string, true>
+  /** Pane-keyed attention marker for split-pane precision. This is narrower
+   *  than unreadTerminalTabs and clears when the user interacts with the exact
+   *  pane that raised attention. */
+  unreadTerminalPanes: Record<string, true>
   suppressedPtyExitIds: Record<string, true>
   pendingCodexPaneRestartIds: Record<string, true>
   codexRestartNoticeByPtyId: Record<
@@ -263,6 +263,7 @@ export type TerminalSlice = {
       pendingActivationSpawn?: boolean
       initialPtyId?: string
       activate?: boolean
+      recordInteraction?: boolean
       /** Pre-allocated tab id (e.g. minted by main for CLI/runtime-spawned
        *  terminals whose PTY env already carries a pane key). Falls back to
        *  minting a fresh id when omitted or when the supplied id collides
@@ -272,7 +273,7 @@ export type TerminalSlice = {
     }
   ) => TerminalTab
   openNewTerminalTabInActiveWorkspace: (groupId: string) => Promise<void>
-  closeTab: (tabId: string) => void
+  closeTab: (tabId: string, opts?: { recordInteraction?: boolean }) => void
   reorderTabs: (worktreeId: string, tabIds: string[]) => void
   setTabBarOrder: (worktreeId: string, order: string[]) => void
   setActiveTab: (tabId: string) => void
@@ -286,12 +287,18 @@ export type TerminalSlice = {
    *  group within the active worktree. A visible tab is already "seen",
    *  so a flag would never clear naturally. */
   markTerminalTabUnread: (tabId: string) => void
+  markTerminalPaneUnread: (paneKey: string) => void
   /** Clear a tab's unread indicator. Called on user interaction with the
    *  pane (keystroke, click) — matches ghostty's "show until interact"
    *  model where the bell stays visible until the user engages with the
    *  surface that raised it. */
   clearTerminalTabUnread: (tabId: string) => void
-  setTabCustomTitle: (tabId: string, title: string | null) => void
+  clearTerminalPaneUnread: (paneKey: string) => void
+  setTabCustomTitle: (
+    tabId: string,
+    title: string | null,
+    opts?: { recordInteraction?: boolean }
+  ) => void
   setTabColor: (tabId: string, color: string | null) => void
   updateTabPtyId: (tabId: string, ptyId: string) => void
   clearTabPtyId: (tabId: string, ptyId?: string) => void
@@ -367,6 +374,7 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
   ptyIdsByTabId: {},
   runtimePaneTitlesByTabId: {},
   unreadTerminalTabs: {},
+  unreadTerminalPanes: {},
   suppressedPtyExitIds: {},
   pendingCodexPaneRestartIds: {},
   codexRestartNoticeByPtyId: {},
@@ -626,6 +634,11 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
         }
       }
     })
+    const shouldRecordInteraction =
+      options?.recordInteraction ?? (!options?.pendingActivationSpawn && !options?.initialPtyId)
+    if (shouldRecordInteraction) {
+      get().recordFeatureInteraction?.('terminal-tabs')
+    }
     return tab
   },
 
@@ -675,7 +688,7 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
     focusTerminalTabSurface(terminal.id)
   },
 
-  closeTab: (tabId) => {
+  closeTab: (tabId, opts) => {
     set((s) => {
       const next = { ...s.tabsByWorktree }
       let closingPtyId: string | null = null
@@ -709,6 +722,15 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
       if (s.unreadTerminalTabs[tabId]) {
         nextUnreadTerminalTabs = { ...s.unreadTerminalTabs }
         delete nextUnreadTerminalTabs[tabId]
+      }
+      let nextUnreadTerminalPanes = s.unreadTerminalPanes
+      for (const paneKey of Object.keys(s.unreadTerminalPanes)) {
+        if (paneKey.startsWith(`${tabId}:`)) {
+          if (nextUnreadTerminalPanes === s.unreadTerminalPanes) {
+            nextUnreadTerminalPanes = { ...s.unreadTerminalPanes }
+          }
+          delete nextUnreadTerminalPanes[paneKey]
+        }
       }
       const nextPendingStartupByTabId = { ...s.pendingStartupByTabId }
       delete nextPendingStartupByTabId[tabId]
@@ -775,6 +797,9 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
         ...(nextUnreadTerminalTabs !== s.unreadTerminalTabs
           ? { unreadTerminalTabs: nextUnreadTerminalTabs }
           : {}),
+        ...(nextUnreadTerminalPanes !== s.unreadTerminalPanes
+          ? { unreadTerminalPanes: nextUnreadTerminalPanes }
+          : {}),
         expandedPaneByTabId: nextExpanded,
         canExpandPaneByTabId: nextCanExpand,
         terminalLayoutsByTabId: nextLayouts,
@@ -799,7 +824,7 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
         (entry) => entry.contentType === 'terminal' && entry.entityId === tabId
       )
       if (workspaceItem) {
-        get().closeUnifiedTab(workspaceItem.id)
+        get().closeUnifiedTab(workspaceItem.id, opts)
       }
     }
   },
@@ -1064,9 +1089,9 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
     if (!ownerTab) {
       return
     }
-    // Why: BEL must fire regardless of focus (ghostty semantics — "show
-    // until interact"). A BEL on the focused tab sets the indicator; real
-    // user interaction with the pane dismisses it. Keystroke/pointerdown
+    // Why: terminal attention must stay visible until interaction ("show
+    // until interact"). A signal on the focused tab still sets the indicator;
+    // real user interaction with the pane dismisses it. Keystroke/pointerdown
     // routes through clearTerminalTabUnread (see pty-connection.ts and
     // TerminalPane.tsx); tab/group activation clears unreadTerminalTabs
     // directly in activateTab/focusGroup as a pre-existing side-effect.
@@ -1075,6 +1100,15 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
         return s
       }
       return { unreadTerminalTabs: { ...s.unreadTerminalTabs, [tabId]: true as const } }
+    })
+  },
+
+  markTerminalPaneUnread: (paneKey) => {
+    set((s) => {
+      if (s.unreadTerminalPanes[paneKey]) {
+        return s
+      }
+      return { unreadTerminalPanes: { ...s.unreadTerminalPanes, [paneKey]: true as const } }
     })
   },
 
@@ -1089,7 +1123,18 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
     })
   },
 
-  setTabCustomTitle: (tabId, title) => {
+  clearTerminalPaneUnread: (paneKey) => {
+    set((s) => {
+      if (!s.unreadTerminalPanes[paneKey]) {
+        return s
+      }
+      const copy = { ...s.unreadTerminalPanes }
+      delete copy[paneKey]
+      return { unreadTerminalPanes: copy }
+    })
+  },
+
+  setTabCustomTitle: (tabId, title, opts) => {
     set((s) => {
       const next = { ...s.tabsByWorktree }
       for (const wId of Object.keys(next)) {
@@ -1102,7 +1147,7 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
       .flat()
       .find((entry) => entry.contentType === 'terminal' && entry.entityId === tabId)
     if (item) {
-      get().setTabCustomLabel(item.id, title)
+      get().setTabCustomLabel(item.id, title, opts)
     }
   },
 
@@ -1376,6 +1421,7 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
       // selectors on unrelated shutdown calls. Mirrors the sibling pattern
       // in tabs.ts.
       let nextUnreadTerminalTabs = s.unreadTerminalTabs
+      let nextUnreadTerminalPanes = s.unreadTerminalPanes
       for (const tab of tabs) {
         if (!keepIdentifiers) {
           delete nextRuntimePaneTitlesByTabId[tab.id]
@@ -1387,6 +1433,14 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
             nextUnreadTerminalTabs = { ...s.unreadTerminalTabs }
           }
           delete nextUnreadTerminalTabs[tab.id]
+        }
+        for (const paneKey of Object.keys(nextUnreadTerminalPanes)) {
+          if (paneKey.startsWith(`${tab.id}:`)) {
+            if (nextUnreadTerminalPanes === s.unreadTerminalPanes) {
+              nextUnreadTerminalPanes = { ...s.unreadTerminalPanes }
+            }
+            delete nextUnreadTerminalPanes[paneKey]
+          }
         }
         if (!keepIdentifiers) {
           const existingLayout = nextTerminalLayoutsByTabId[tab.id]
@@ -1429,6 +1483,9 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
         // of full-state selectors. Mirrors the sibling pattern in tabs.ts.
         ...(nextUnreadTerminalTabs !== s.unreadTerminalTabs
           ? { unreadTerminalTabs: nextUnreadTerminalTabs }
+          : {}),
+        ...(nextUnreadTerminalPanes !== s.unreadTerminalPanes
+          ? { unreadTerminalPanes: nextUnreadTerminalPanes }
           : {})
       }
     })

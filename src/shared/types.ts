@@ -14,6 +14,7 @@ import type { WorkspaceCleanupUIState } from './workspace-cleanup'
 import type { GitLabProjectSettings } from './gitlab-types'
 import type { TaskProvider } from './task-providers'
 import type { FeatureTipId } from './feature-tips'
+import type { FeatureInteractionState } from './feature-interactions'
 import type { GitBranchChangeStatus } from './git-status-types'
 import type { KeybindingOverrides, TerminalShortcutPolicy } from './keybindings'
 import type { RepoIcon } from './repo-icon'
@@ -1940,6 +1941,10 @@ export type GlobalSettings = {
   /** One-shot migration guard for defaulting the Agents view off for all
    *  users. Once set, later explicit opt-ins persist normally. */
   experimentalActivityDefaultedOffForAllUsers?: boolean
+  /** Experimental: persistent terminal pane attention ring for terminal bell
+   *  and agent-completion events. Opt-in while the signal/noise balance is
+   *  being tested. */
+  experimentalTerminalAttention: boolean
   /** Experimental: when creating a worktree, automatically symlink a
    *  user-configured set of files/folders from the primary checkout (e.g.
    *  `.env`, `node_modules`) into the new worktree. Opt-in while the
@@ -2343,6 +2348,9 @@ export type PersistedUIState = {
   /** Feature tips already surfaced to the user. Startup only opens the tips
    *  modal when this list is missing one of the current tip ids. */
   featureTipsSeenIds?: FeatureTipId[]
+  /** Local product-state facts: feature ids the user has actually used.
+   *  Used by education surfaces to avoid teaching already-discovered features. */
+  featureInteractions?: FeatureInteractionState
 }
 
 export const PET_SIZE_MIN = 60

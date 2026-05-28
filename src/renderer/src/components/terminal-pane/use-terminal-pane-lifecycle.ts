@@ -126,8 +126,10 @@ type UseTerminalPaneLifecycleDeps = {
   updateTabPtyId: (tabId: string, ptyId: string) => void
   markWorktreeUnread: (worktreeId: string) => void
   markTerminalTabUnread: (tabId: string) => void
+  markTerminalPaneUnread: (paneKey: string) => void
   clearWorktreeUnread: (worktreeId: string) => void
   clearTerminalTabUnread: (tabId: string) => void
+  clearTerminalPaneUnread: (paneKey: string) => void
   dispatchNotification: (event: {
     source: 'terminal-bell' | 'agent-task-complete'
     terminalTitle?: string
@@ -271,8 +273,10 @@ export function useTerminalPaneLifecycle({
   updateTabPtyId,
   markWorktreeUnread,
   markTerminalTabUnread,
+  markTerminalPaneUnread,
   clearWorktreeUnread,
   clearTerminalTabUnread,
+  clearTerminalPaneUnread,
   dispatchNotification,
   setCacheTimerStartedAt,
   syncPanePtyLayoutBinding,
@@ -448,8 +452,10 @@ export function useTerminalPaneLifecycle({
       updateTabPtyId,
       markWorktreeUnread,
       markTerminalTabUnread,
+      markTerminalPaneUnread,
       clearWorktreeUnread,
       clearTerminalTabUnread,
+      clearTerminalPaneUnread,
       dispatchNotification,
       setCacheTimerStartedAt,
       syncPanePtyLayoutBinding,
@@ -767,6 +773,18 @@ export function useTerminalPaneLifecycle({
           panePtyBinding.dispose()
           panePtyBindings.delete(paneId)
         }
+        // Why: closing a pane is user-initiated teardown of this row — drop
+        // (not remove) so any retained `done` snapshot for this pane is also
+        // cleared and a same-frame live→gone transition cannot re-snapshot
+        // it via the retention sync. This is pane-keyed state, so it must
+        // clear even if the PTY transport was already removed.
+        const leafId = closedPane?.leafId
+        if (leafId) {
+          const paneKey = makePaneKey(tabId, leafId)
+          useAppStore.getState().setCacheTimerStartedAt(paneKey, null)
+          clearTerminalPaneUnread(paneKey)
+          useAppStore.getState().dropAgentStatus(paneKey)
+        }
         if (transport) {
           const ptyId = suppressIntentionalPaneCloseExit(
             transport,
@@ -778,16 +796,6 @@ export function useTerminalPaneLifecycle({
             // so the last-surviving pane is not mistaken for an exited tab.
             syncPanePtyLayoutBinding(paneId, null)
             clearTabPtyId(tabId, ptyId)
-          }
-          // Why: closing a pane is user-initiated teardown of this row — drop
-          // (not remove) so any retained `done` snapshot for this pane is also
-          // cleared and a same-frame live→gone transition cannot re-snapshot
-          // it via the retention sync.
-          const leafId = closedPane?.leafId
-          if (leafId) {
-            const paneKey = makePaneKey(tabId, leafId)
-            useAppStore.getState().setCacheTimerStartedAt(paneKey, null)
-            useAppStore.getState().dropAgentStatus(paneKey)
           }
           transport.destroy?.()
           paneTransportsRef.current.delete(paneId)
