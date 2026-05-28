@@ -134,6 +134,7 @@ export type IFilesystemProvider = {
   writeFileBase64(filePath: string, contentBase64: string): Promise<void>
   writeFileBase64Chunk(filePath: string, contentBase64: string, append: boolean): Promise<void>
   stat(filePath: string): Promise<FileStat>
+  lstat?(filePath: string): Promise<FileStat>
   deletePath(targetPath: string, recursive?: boolean): Promise<void>
   createFile(filePath: string): Promise<void>
   createDir(dirPath: string): Promise<void>
@@ -171,6 +172,7 @@ export type IGitProvider = {
   discardChanges(worktreePath: string, filePath: string): Promise<void>
   bulkDiscardChanges(worktreePath: string, filePaths: string[]): Promise<void>
   detectConflictOperation(worktreePath: string): Promise<GitConflictOperation>
+  abortMerge(worktreePath: string): Promise<void>
   getBranchCompare(worktreePath: string, baseRef: string): Promise<GitBranchCompareResult>
   getCommitCompare(worktreePath: string, commitId: string): Promise<GitCommitCompareResult>
   getUpstreamStatus(worktreePath: string, pushTarget?: GitPushTarget): Promise<GitUpstreamStatus>
@@ -204,10 +206,12 @@ export type IGitProvider = {
     force?: boolean,
     options?: { deleteBranch?: boolean }
   ): Promise<void>
+  renameCurrentBranch?(worktreePath: string, newBranch: string): Promise<void>
   isGitRepo(path: string): boolean
   isGitRepoAsync(dirPath: string): Promise<{ isRepo: boolean; rootPath: string | null }>
   exec(args: string[], cwd: string): Promise<{ stdout: string; stderr: string }>
   getRemoteFileUrl(worktreePath: string, relativePath: string, line: number): Promise<string | null>
+  worktreeIsClean(worktreePath: string): Promise<{ clean: boolean; stdout?: string }>
 }
 
 // ─── Provider Registry ──────────────────────────────────────────────

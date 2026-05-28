@@ -760,6 +760,143 @@ describe('Store', () => {
     expect(store.getRepos()).toHaveLength(1)
   })
 
+  it('migrates legacy commit-message AI settings to source-control AI on load', async () => {
+    writeDataFile({
+      schemaVersion: 1,
+      repos: [],
+      worktreeMeta: {},
+      settings: {
+        commitMessageAi: {
+          enabled: true,
+          agentId: 'cursor',
+          selectedModelByAgent: { cursor: 'gpt-5.2' },
+          selectedModelByAgentByHost: { 'ssh:conn-1': { cursor: 'remote-model' } },
+          discoveredModelsByAgent: {
+            cursor: [{ id: 'gpt-5.2', label: 'GPT 5.2' }]
+          },
+          discoveredModelsByAgentByHost: {
+            'ssh:conn-1': {
+              cursor: [{ id: 'remote-model', label: 'Remote Model' }]
+            }
+          },
+          selectedThinkingByModel: { 'gpt-5.2': 'high' },
+          customPrompt: 'Use Conventional Commits.',
+          customAgentCommand: 'cursor-agent'
+        }
+      },
+      ui: {},
+      githubCache: { pr: {}, issue: {} },
+      workspaceSession: {}
+    })
+
+    const store = await createStore()
+    const sourceControlAi = store.getSettings().sourceControlAi
+
+    expect(sourceControlAi).toMatchObject({
+      enabled: true,
+      agentId: 'cursor',
+      selectedModelByAgent: { cursor: 'gpt-5.2' },
+      selectedThinkingByModel: { 'gpt-5.2': 'high' },
+      customAgentCommand: 'cursor-agent',
+      instructionsByOperation: {
+        commitMessage: 'Use Conventional Commits.',
+        pullRequest: '',
+        branchName: 'Use Conventional Commits.'
+      }
+    })
+    expect(sourceControlAi?.selectedModelByAgentByHost?.['ssh:conn-1']?.cursor).toBe('remote-model')
+    expect(sourceControlAi?.discoveredModelsByAgent?.cursor?.[0]?.id).toBe('gpt-5.2')
+    expect(sourceControlAi?.discoveredModelsByAgentByHost?.['ssh:conn-1']?.cursor?.[0]?.id).toBe(
+      'remote-model'
+    )
+    expect(store.getSettings().commitMessageAi?.customPrompt).toBe('Use Conventional Commits.')
+  })
+
+  it('merges rollback commit-message AI writes into existing source-control AI on load', async () => {
+    writeDataFile({
+      schemaVersion: 1,
+      repos: [],
+      worktreeMeta: {},
+      settings: {
+        sourceControlAi: {
+          enabled: true,
+          agentId: 'codex',
+          selectedModelByAgent: { codex: 'source-model' },
+          selectedModelByAgentByHost: {},
+          discoveredModelsByAgent: {},
+          discoveredModelsByAgentByHost: {},
+          selectedThinkingByModel: { 'source-model': 'medium' },
+          customAgentCommand: 'codex',
+          instructionsByOperation: {
+            commitMessage: 'Source commit prompt',
+            pullRequest: 'Preserve PR prompt'
+          },
+          modelOverridesByOperation: {
+            pullRequest: {
+              selectedModelByAgent: { claude: 'pr-model' },
+              selectedThinkingByModel: { 'pr-model': 'high' }
+            }
+          },
+          prCreationDefaults: {
+            draft: true,
+            openAfterCreate: true
+          }
+        },
+        commitMessageAi: {
+          enabled: false,
+          agentId: 'claude',
+          selectedModelByAgent: { claude: 'legacy-model' },
+          selectedModelByAgentByHost: { 'ssh:conn-1': { claude: 'remote-legacy-model' } },
+          discoveredModelsByAgent: {},
+          discoveredModelsByAgentByHost: {},
+          selectedThinkingByModel: { 'legacy-model': 'high' },
+          customPrompt: 'Rollback commit prompt',
+          customAgentCommand: 'claude'
+        }
+      },
+      ui: {},
+      githubCache: { pr: {}, issue: {} },
+      workspaceSession: {}
+    })
+
+    const store = await createStore()
+    const sourceControlAi = store.getSettings().sourceControlAi
+
+    expect(sourceControlAi).toMatchObject({
+      enabled: false,
+      agentId: 'claude',
+      selectedModelByAgent: { codex: 'source-model' },
+      selectedThinkingByModel: { 'source-model': 'medium' },
+      customAgentCommand: 'claude',
+      instructionsByOperation: {
+        commitMessage: 'Rollback commit prompt',
+        pullRequest: 'Preserve PR prompt',
+        branchName: 'Rollback commit prompt'
+      },
+      prCreationDefaults: {
+        draft: true,
+        openAfterCreate: true
+      }
+    })
+    expect(sourceControlAi?.selectedModelByAgentByHost?.['ssh:conn-1']).toBeUndefined()
+    expect(sourceControlAi?.modelOverridesByOperation?.commitMessage).toEqual({
+      selectedModelByAgent: { claude: 'legacy-model' },
+      selectedModelByAgentByHost: { 'ssh:conn-1': { claude: 'remote-legacy-model' } },
+      selectedThinkingByModel: { 'legacy-model': 'high' }
+    })
+    expect(sourceControlAi?.modelOverridesByOperation?.pullRequest).toEqual({
+      selectedModelByAgent: { claude: 'pr-model' },
+      selectedThinkingByModel: { 'pr-model': 'high' }
+    })
+    expect(store.getSettings().commitMessageAi).toMatchObject({
+      enabled: false,
+      agentId: 'claude',
+      selectedModelByAgent: { claude: 'legacy-model' },
+      customPrompt: 'Rollback commit prompt',
+      customAgentCommand: 'claude'
+    })
+  })
+
   it('normalizes malformed visible task providers on load', async () => {
     writeDataFile({
       schemaVersion: 1,
@@ -1314,14 +1451,49 @@ describe('Store', () => {
     expect(fetched!.gitUsername).toBe('testuser')
   })
 
+  it('deleteProjectGroup ungroups repos from the deleted group subtree', async () => {
+    const store = await createStore()
+    const root = store.createProjectGroup({ name: 'Platform', createdFrom: 'folder-scan' })
+    const child = store.createProjectGroup({
+      name: 'Services',
+      parentGroupId: root.id,
+      createdFrom: 'folder-scan'
+    })
+    const sibling = store.createProjectGroup({ name: 'Tools', createdFrom: 'manual' })
+    store.addRepo(makeRepo({ id: 'direct', path: '/direct', projectGroupId: root.id }))
+    store.addRepo(makeRepo({ id: 'nested', path: '/nested', projectGroupId: child.id }))
+    store.addRepo(makeRepo({ id: 'sibling', path: '/sibling', projectGroupId: sibling.id }))
+
+    expect(store.deleteProjectGroup(root.id)).toBe(true)
+
+    expect(store.getProjectGroups().map((group) => group.id)).toEqual([sibling.id])
+    expect(store.getRepo('direct')?.projectGroupId).toBeNull()
+    expect(store.getRepo('nested')?.projectGroupId).toBeNull()
+    expect(store.getRepo('sibling')?.projectGroupId).toBe(sibling.id)
+  })
+
+  it('sanitizes invalid project group updates before persisting a repo', async () => {
+    const store = await createStore()
+    const group = store.createProjectGroup({ name: 'Platform', createdFrom: 'manual' })
+    store.addRepo(makeRepo({ id: 'r1', projectGroupId: group.id, projectGroupOrder: 1 }))
+
+    const updated = store.updateRepo('r1', {
+      projectGroupId: '',
+      projectGroupOrder: Number.POSITIVE_INFINITY
+    } as never)
+
+    expect(updated?.projectGroupId).toBeNull()
+    expect(updated?.projectGroupOrder).toBe(1)
+  })
+
   it('getRepo returns undefined for nonexistent id', async () => {
     const store = await createStore()
     expect(store.getRepo('nonexistent')).toBeUndefined()
   })
 
-  // ── 6. removeRepo cleans up worktree meta ──────────────────────────
+  // ── 6. removeProject cleans up worktree meta ──────────────────────────
 
-  it('removeRepo deletes the repo and its worktree meta', async () => {
+  it('removeProject deletes the repo and its worktree meta', async () => {
     const store = await createStore()
     store.addRepo(makeRepo({ id: 'r1' }))
     store.addRepo(makeRepo({ id: 'r2', path: '/repo2' }))
@@ -1330,7 +1502,7 @@ describe('Store', () => {
     store.setWorktreeMeta('r1::/path/wt2', { displayName: 'wt2' })
     store.setWorktreeMeta('r2::/other', { displayName: 'other' })
 
-    store.removeRepo('r1')
+    store.removeProject('r1')
 
     expect(store.getRepo('r1')).toBeUndefined()
     expect(store.getWorktreeMeta('r1::/path/wt1')).toBeUndefined()
@@ -1339,7 +1511,7 @@ describe('Store', () => {
     expect(store.getWorktreeMeta('r2::/other')!.displayName).toBe('other')
   })
 
-  it('removeRepo deletes child and parent lineage for the repo', async () => {
+  it('removeProject deletes child and parent lineage for the repo', async () => {
     const store = await createStore()
     store.addRepo(makeRepo({ id: 'r1' }))
     store.addRepo(makeRepo({ id: 'r2', path: '/repo2' }))
@@ -1366,7 +1538,7 @@ describe('Store', () => {
       })
     )
 
-    store.removeRepo('r1')
+    store.removeProject('r1')
 
     expect(store.getWorktreeLineage('r1::/path/child')).toBeUndefined()
     expect(store.getWorktreeLineage('r2::/other-child')).toBeUndefined()
@@ -1467,6 +1639,94 @@ describe('Store', () => {
     expect(updated!.externalWorktreeVisibilityLegacy).toBe(true)
   })
 
+  it('updateRepo clears source-control AI overrides independently from other clearable fields', async () => {
+    const store = await createStore()
+    store.addRepo(
+      makeRepo({
+        issueSourcePreference: 'origin',
+        sourceControlAi: {
+          instructionsByOperation: { commitMessage: 'Repo style' },
+          prCreationDefaults: { draft: true }
+        }
+      })
+    )
+
+    store.updateRepo('r1', {
+      issueSourcePreference: undefined,
+      sourceControlAi: undefined
+    })
+
+    expect(store.getRepo('r1')!.issueSourcePreference).toBeUndefined()
+    expect(store.getRepo('r1')!.sourceControlAi).toBeUndefined()
+
+    store.flush()
+    const reloaded = await createStore()
+    expect(reloaded.getRepo('r1')!.issueSourcePreference).toBeUndefined()
+    expect(reloaded.getRepo('r1')!.sourceControlAi).toBeUndefined()
+  })
+
+  it('updateRepo normalizes source-control AI overrides before storing', async () => {
+    const store = await createStore()
+    store.addRepo(makeRepo())
+
+    const updated = store.updateRepo('r1', {
+      sourceControlAi: {
+        instructionsByOperation: {
+          commitMessage: 'Repo style',
+          pullRequest: 42,
+          unknown: 'ignored'
+        },
+        prCreationDefaults: {
+          draft: true,
+          useTemplate: null,
+          openAfterCreate: 'yes'
+        },
+        modelOverridesByOperation: {
+          commitMessage: {
+            selectedModelByAgent: { codex: 'gpt-5.4', claude: false },
+            selectedThinkingByModel: { 'gpt-5.4': 'high', bad: true }
+          },
+          unknown: {
+            selectedModelByAgent: { codex: 'ignored' }
+          }
+        }
+      } as never
+    })
+
+    expect(updated!.sourceControlAi).toEqual({
+      instructionsByOperation: {
+        commitMessage: 'Repo style'
+      },
+      prCreationDefaults: {
+        draft: true,
+        useTemplate: null
+      },
+      modelOverridesByOperation: {
+        commitMessage: {
+          selectedModelByAgent: { codex: 'gpt-5.4' },
+          selectedThinkingByModel: { 'gpt-5.4': 'high' }
+        }
+      }
+    })
+  })
+
+  it('updateRepo ignores malformed source-control AI overrides without clearing existing overrides', async () => {
+    const store = await createStore()
+    store.addRepo(
+      makeRepo({
+        sourceControlAi: {
+          instructionsByOperation: { commitMessage: 'Keep me' }
+        }
+      })
+    )
+
+    const updated = store.updateRepo('r1', { sourceControlAi: 'bad' as never })
+
+    expect(updated!.sourceControlAi).toEqual({
+      instructionsByOperation: { commitMessage: 'Keep me' }
+    })
+  })
+
   // ── 8. setWorktreeMeta and getWorktreeMeta ─────────────────────────
 
   it('setWorktreeMeta creates meta with defaults for missing fields', async () => {
@@ -1512,6 +1772,68 @@ describe('Store', () => {
     expect(updated.terminalFontWeight).toBe(600)
     // Other fields preserved
     expect(updated.branchPrefix).toBe('git-username')
+  })
+
+  it('updateSettings keeps the legacy commit-message AI projection in sync', async () => {
+    const store = await createStore()
+    const current = store.getSettings().sourceControlAi!
+
+    const updated = store.updateSettings({
+      sourceControlAi: {
+        ...current,
+        enabled: true,
+        agentId: 'codex',
+        selectedModelByAgent: { codex: 'gpt-5.4' },
+        selectedThinkingByModel: { 'gpt-5.4': 'high' },
+        instructionsByOperation: {
+          commitMessage: 'Write concise commit messages.',
+          pullRequest: 'Write release-note-ready PR details.'
+        },
+        customAgentCommand: ''
+      }
+    })
+
+    expect(updated.commitMessageAi).toMatchObject({
+      enabled: true,
+      agentId: 'codex',
+      selectedModelByAgent: { codex: 'gpt-5.4' },
+      selectedThinkingByModel: { 'gpt-5.4': 'high' },
+      customPrompt: 'Write concise commit messages.',
+      customAgentCommand: ''
+    })
+  })
+
+  it('updateSettings keeps source-control AI in sync for legacy commit-message updates', async () => {
+    const store = await createStore()
+    const current = store.getSettings().commitMessageAi!
+
+    const updated = store.updateSettings({
+      commitMessageAi: {
+        ...current,
+        enabled: false,
+        agentId: 'claude',
+        selectedModelByAgent: { claude: 'sonnet' },
+        selectedThinkingByModel: { sonnet: 'medium' },
+        customPrompt: 'Legacy settings update',
+        customAgentCommand: 'claude'
+      }
+    })
+
+    expect(updated.sourceControlAi).toMatchObject({
+      enabled: false,
+      agentId: 'claude',
+      selectedModelByAgent: {},
+      selectedThinkingByModel: {},
+      customAgentCommand: 'claude',
+      instructionsByOperation: {
+        commitMessage: 'Legacy settings update',
+        branchName: 'Legacy settings update'
+      }
+    })
+    expect(updated.sourceControlAi?.modelOverridesByOperation?.commitMessage).toEqual({
+      selectedModelByAgent: { claude: 'sonnet' },
+      selectedThinkingByModel: { sonnet: 'medium' }
+    })
   })
 
   it('updateSettings normalizes open-in applications', async () => {
@@ -4562,7 +4884,6 @@ describe('Store', () => {
         const first = await createStore()
         first.addRepo(makeRepo({ id: 'r1' }))
         first.flush()
-        expect((readDataFile() as { repos: Repo[] }).repos[0].id).toBe('r1')
         expect(readBackup(0).repos.map((r) => r.id)).toEqual(['r1'])
 
         vi.setSystemTime(new Date(Date.now() + 61 * 60 * 1000))

@@ -146,6 +146,8 @@ import {
   type EditorSaveDirtyFilesDetail
 } from '../shared/editor-save-events'
 import {
+  ORCA_APP_RESTART_ABORTED_EVENT,
+  ORCA_APP_RESTART_STARTED_EVENT,
   ORCA_UPDATER_QUIT_AND_INSTALL_ABORTED_EVENT,
   ORCA_UPDATER_QUIT_AND_INSTALL_STARTED_EVENT
 } from '../shared/updater-renderer-events'
@@ -174,6 +176,62 @@ type NativeFileDropCallback = (data: NativeFileDropPayload) => void
 
 const nativeFileDropCallbacks: NativeFileDropCallback[] = []
 let nativeFileDropListenerRegistered = false
+
+type AppRestartPrepOptions = {
+  startedEventName: string
+  abortedEventName: string
+  continueOnSaveFailure: boolean
+  saveFailureLogPrefix: string
+}
+
+function requestDirtyEditorFileSave(): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    let claimed = false
+    window.dispatchEvent(
+      new CustomEvent<EditorSaveDirtyFilesDetail>(ORCA_EDITOR_SAVE_DIRTY_FILES_EVENT, {
+        detail: {
+          claim: () => {
+            claimed = true
+          },
+          resolve,
+          reject: (message) => {
+            reject(new Error(message))
+          }
+        }
+      })
+    )
+
+    // Why: restart paths can run when no editor surface is mounted. When
+    // nothing claims the request there are no in-memory editor buffers to
+    // flush, so proceed with the normal shutdown path immediately.
+    if (!claimed) {
+      resolve()
+    }
+  })
+}
+
+async function prepareRendererForAppRestart({
+  startedEventName,
+  abortedEventName,
+  continueOnSaveFailure,
+  saveFailureLogPrefix
+}: AppRestartPrepOptions): Promise<void> {
+  window.dispatchEvent(new Event(startedEventName))
+
+  try {
+    await requestDirtyEditorFileSave()
+  } catch (error) {
+    if (!continueOnSaveFailure) {
+      window.dispatchEvent(new Event(abortedEventName))
+      throw error
+    }
+    console.warn(saveFailureLogPrefix, error)
+  }
+
+  // Dispatch beforeunload now so terminal buffers are captured while panes are
+  // still mounted; update installs later bypass the ordinary close sequence.
+  window.dispatchEvent(new Event('beforeunload'))
+}
 
 const onNativeFileDrop = (_event: Electron.IpcRendererEvent, data: NativeFileDropPayload): void => {
   for (const callback of Array.from(nativeFileDropCallbacks)) {
@@ -364,6 +422,20 @@ const api = {
     getFeatureWallAssetBaseUrl: (): Promise<string> =>
       ipcRenderer.invoke('app:getFeatureWallAssetBaseUrl'),
     relaunch: (): Promise<void> => ipcRenderer.invoke('app:relaunch'),
+    restart: async (): Promise<void> => {
+      await prepareRendererForAppRestart({
+        startedEventName: ORCA_APP_RESTART_STARTED_EVENT,
+        abortedEventName: ORCA_APP_RESTART_ABORTED_EVENT,
+        continueOnSaveFailure: false,
+        saveFailureLogPrefix: '[app-restart] Saving dirty files before restart failed:'
+      })
+      try {
+        return await ipcRenderer.invoke('app:restart')
+      } catch (error) {
+        window.dispatchEvent(new Event(ORCA_APP_RESTART_ABORTED_EVENT))
+        throw error
+      }
+    },
     reload: (): Promise<void> => ipcRenderer.invoke('app:reload'),
     // Why: on macOS this returns AppleCurrentKeyboardLayoutInputSourceID so
     // the renderer's keyboard-layout probe can distinguish Polish Pro / US
@@ -459,6 +531,37 @@ const api = {
       ipcRenderer.on('repos:changed', listener)
       return () => ipcRenderer.removeListener('repos:changed', listener)
     }
+  },
+
+  projectGroups: {
+    list: (): Promise<unknown[]> => ipcRenderer.invoke('projectGroups:list'),
+    create: (args: {
+      name: string
+      parentPath?: string | null
+      parentGroupId?: string | null
+      createdFrom?: 'manual' | 'folder-scan' | 'migration'
+    }): Promise<unknown> => ipcRenderer.invoke('projectGroups:create', args),
+    update: (args: { groupId: string; updates: Record<string, unknown> }): Promise<unknown> =>
+      ipcRenderer.invoke('projectGroups:update', args),
+    delete: (args: { groupId: string }): Promise<boolean> =>
+      ipcRenderer.invoke('projectGroups:delete', args),
+    moveProject: (args: {
+      projectId: string
+      groupId: string | null
+      order?: number
+    }): Promise<unknown> => ipcRenderer.invoke('projectGroups:moveProject', args),
+    scanNested: (args: {
+      path: string
+      connectionId?: string
+      options?: Record<string, unknown>
+    }): Promise<unknown> => ipcRenderer.invoke('projectGroups:scanNested', args),
+    importNested: (args: {
+      parentPath: string
+      groupName: string
+      projectPaths: string[]
+      connectionId?: string
+      mode: 'group' | 'separate'
+    }): Promise<unknown> => ipcRenderer.invoke('projectGroups:importNested', args)
   },
 
   sparsePresets: {
@@ -1167,6 +1270,10 @@ const api = {
       workspaceId?: string
       parentIssueId?: string
       projectId?: string | null
+      stateId?: string
+      priority?: number
+      assigneeId?: string | null
+      labelIds?: string[]
     }): Promise<
       | { ok: true; id: string; identifier: string; title: string; url: string }
       | { ok: false; error: string }
@@ -1957,53 +2064,16 @@ const api = {
     download: (): Promise<void> => ipcRenderer.invoke('updater:download'),
     dismissNudge: (): Promise<void> => ipcRenderer.invoke('updater:dismissNudge'),
     quitAndInstall: async (): Promise<void> => {
-      // Why: quitAndInstall closes the BrowserWindow directly from the main
-      // process. Renderer beforeunload guards treat that like a normal window
-      // close unless we mark the updater path explicitly, and #300 introduced
-      // longer-lived editor dirty/autosave state that can otherwise veto the
-      // restart even after the update payload has been downloaded.
-      window.dispatchEvent(new Event(ORCA_UPDATER_QUIT_AND_INSTALL_STARTED_EVENT))
-
-      // Why: we wrap the save attempt in try/catch so that a save failure
-      // (e.g., unsupported dirty files or a write error) never silently
-      // prevents the update from installing. The user already clicked
-      // "install update" — proceeding with the restart is better than
-      // leaving them stuck with no feedback.
-      try {
-        await new Promise<void>((resolve, reject) => {
-          let claimed = false
-          window.dispatchEvent(
-            new CustomEvent<EditorSaveDirtyFilesDetail>(ORCA_EDITOR_SAVE_DIRTY_FILES_EVENT, {
-              detail: {
-                claim: () => {
-                  claimed = true
-                },
-                resolve,
-                reject: (message) => {
-                  reject(new Error(message))
-                }
-              }
-            })
-          )
-
-          // Why: updater installs can run when no editor surface is mounted.
-          // When nothing claims the request there are no in-memory editor buffers
-          // to flush, so proceed with the normal shutdown path immediately.
-          if (!claimed) {
-            resolve()
-          }
-        })
-      } catch (error) {
-        console.warn(
-          '[updater] Saving dirty files before quit failed; proceeding with install anyway:',
-          error
-        )
-      }
-
-      // Dispatch beforeunload to trigger terminal buffer capture before the
-      // update process bypasses the normal window close sequence (quitAndInstall
-      // removes close listeners, preventing beforeunload from firing naturally).
-      window.dispatchEvent(new Event('beforeunload'))
+      // Why: update installs must proceed even when a dirty-file auto-save
+      // fails; otherwise a downloaded update can get stuck behind hidden editor
+      // state. Manual app restart uses the same prep but aborts on save failure.
+      await prepareRendererForAppRestart({
+        startedEventName: ORCA_UPDATER_QUIT_AND_INSTALL_STARTED_EVENT,
+        abortedEventName: ORCA_UPDATER_QUIT_AND_INSTALL_ABORTED_EVENT,
+        continueOnSaveFailure: true,
+        saveFailureLogPrefix:
+          '[updater] Saving dirty files before quit failed; proceeding with install anyway:'
+      })
       try {
         return await ipcRenderer.invoke('updater:quitAndInstall')
       } catch (error) {
@@ -2185,6 +2255,8 @@ const api = {
     ): Promise<GitHistoryResult> => ipcRenderer.invoke('git:history', args),
     conflictOperation: (args: { worktreePath: string; connectionId?: string }): Promise<unknown> =>
       ipcRenderer.invoke('git:conflictOperation', args),
+    abortMerge: (args: { worktreePath: string; connectionId?: string }): Promise<void> =>
+      ipcRenderer.invoke('git:abortMerge', args),
     diff: (args: {
       worktreePath: string
       filePath: string

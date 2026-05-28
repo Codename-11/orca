@@ -191,9 +191,10 @@ async function postDiscordIfCritical() {
   const repo = envString('GITHUB_REPOSITORY', 'Codename-11/orca')
   const runId = getRunId()
   const failedStep = envString('AXIOM_FAILED_STEP', 'Axiom release build/publish')
-  const action = conflicts.length > 0
-    ? `Resolve merge conflicts (${conflicts.slice(0, 5).join(', ')}), preserve Axiom fork identity/update settings, then rerun the workflow.`
-    : `Triage the failed ${failedStep} job logs, patch deterministic failures, then rerun the workflow. This is not informational until assets/latest.yml are verified.`
+  const action =
+    conflicts.length > 0
+      ? `Resolve merge conflicts (${conflicts.slice(0, 5).join(', ')}), preserve Axiom fork identity/update settings, then rerun the workflow.`
+      : `Triage the failed ${failedStep} job logs, patch deterministic failures, then rerun the workflow. This is not informational until assets/latest.yml are verified.`
   const handoff = [
     '```text',
     `Repo: ${repo}`,
@@ -209,7 +210,9 @@ async function postDiscordIfCritical() {
     runId
       ? `gh run view ${runId} --repo ${repo} --json status,conclusion,jobs,url`
       : `gh run list --repo ${repo} --workflow axiom-upstream-sync-release.yml --limit 5`,
-    runId ? `gh run view ${runId} --repo ${repo} --log-failed` : `gh run view <run-id> --repo ${repo} --log-failed`,
+    runId
+      ? `gh run view ${runId} --repo ${repo} --log-failed`
+      : `gh run view <run-id> --repo ${repo} --log-failed`,
     'Classify: informational / auto-retry likely / actionable.',
     'If release workflow: verify tag, draft/prerelease flags, assets, and latest.yml before closing.',
     '```'
