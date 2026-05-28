@@ -240,7 +240,7 @@ function ownedEditorFileId(
 
 // ─── Tests ────────────────────────────────────────────────────────────
 
-describe('removeRepo cascade', () => {
+describe('removeProject cascade', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockApi.repos.remove.mockResolvedValue(undefined)
@@ -279,7 +279,7 @@ describe('removeRepo cascade', () => {
       activeTabId: 'tab1'
     })
 
-    await store.getState().removeRepo('repo1')
+    await store.getState().removeProject('repo1')
     const s = store.getState()
 
     expect(s.repos).toEqual([])

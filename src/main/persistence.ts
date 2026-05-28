@@ -42,6 +42,7 @@ import {
 import type {
   PersistedState,
   Repo,
+  ProjectGroup,
   SparsePreset,
   WorktreeMeta,
   WorktreeLineage,
@@ -103,6 +104,21 @@ import {
 } from '../shared/workspace-statuses'
 import { isLegacyRepoForExternalWorktreeVisibility } from '../shared/worktree-ownership'
 import { sanitizeRepoIcon } from '../shared/repo-icon'
+import {
+  clearMissingProjectGroupMemberships,
+  createProjectGroup,
+  getNextProjectGroupOrder,
+  getProjectGroupSubtreeIds,
+  normalizeProjectGroupName,
+  normalizeProjectGroups
+} from '../shared/project-groups'
+import {
+  mergeLegacyCommitMessageAiIntoSourceControlAi,
+  normalizeRepoSourceControlAiOverrides,
+  normalizeSourceControlAiSettings,
+  projectSourceControlAiToLegacyCommitMessageAi,
+  sourceControlAiSettingsFromLegacy
+} from '../shared/source-control-ai'
 
 function encrypt(plaintext: string): string {
   if (!plaintext || !safeStorage.isEncryptionAvailable()) {
@@ -1414,6 +1430,19 @@ export class Store {
         // Merge with defaults in case new fields were added
         const homeDir = homedir()
         const defaults = getDefaultPersistedState(homeDir)
+        const rawSourceControlAiMissing = parsed.settings?.sourceControlAi === undefined
+        if (rawSourceControlAiMissing) {
+          this.loadNeedsSave = true
+        }
+        const legacyCommitMessageAi = parsed.settings?.commitMessageAi
+        const migratedSourceControlAi = rawSourceControlAiMissing
+          ? sourceControlAiSettingsFromLegacy(
+              legacyCommitMessageAi ?? defaults.settings.commitMessageAi
+            )
+          : mergeLegacyCommitMessageAiIntoSourceControlAi(
+              parsed.settings?.sourceControlAi,
+              legacyCommitMessageAi
+            )
         // Why: before the layout-aware 'auto' mode shipped (issue #903),
         // terminalMacOptionAsAlt defaulted to 'true' globally. That silently
         // broke Option-layer characters (@ on Turkish via Option+Q, @ on
@@ -1518,6 +1547,7 @@ export class Store {
         result = {
           ...defaults,
           ...parsed,
+          projectGroups: normalizeProjectGroups(parsed.projectGroups),
           worktreeLineageById: parsed.worktreeLineageById ?? {},
           settings: {
             ...defaults.settings,
@@ -1557,6 +1587,14 @@ export class Store {
             ),
             openInApplications: normalizeOpenInApplications(parsed.settings?.openInApplications),
             notifications: normalizeNotificationSettings(parsed.settings?.notifications),
+            sourceControlAi: migratedSourceControlAi,
+            // Why: new builds read sourceControlAi, but rollback builds still
+            // write commitMessageAi; after merging those writes, refresh the
+            // legacy projection for continued rollback compatibility.
+            commitMessageAi: projectSourceControlAiToLegacyCommitMessageAi(
+              migratedSourceControlAi,
+              parsed.settings?.commitMessageAi ?? defaults.settings.commitMessageAi
+            ),
             voice: {
               ...getDefaultVoiceSettings(),
               ...parsed.settings?.voice
@@ -1804,6 +1842,7 @@ export class Store {
 
     result = {
       ...result,
+      repos: clearMissingProjectGroupMemberships(result.repos, result.projectGroups ?? []),
       workspaceSession: pruneWorkspaceSessionBrowserHistory(
         pruneLocalTerminalScrollbackBuffers(result.workspaceSession, result.repos)
       )
@@ -2034,6 +2073,95 @@ export class Store {
     return repo ? this.hydrateRepo(repo) : undefined
   }
 
+  getProjectGroups(): ProjectGroup[] {
+    return [...(this.state.projectGroups ?? [])].sort(
+      (left, right) => left.tabOrder - right.tabOrder || left.name.localeCompare(right.name)
+    )
+  }
+
+  createProjectGroup(input: {
+    name: string
+    parentPath?: string | null
+    parentGroupId?: string | null
+    createdFrom: ProjectGroup['createdFrom']
+  }): ProjectGroup {
+    const maxOrder = Math.max(
+      -1,
+      ...(this.state.projectGroups ?? []).map((group) => group.tabOrder)
+    )
+    const group = createProjectGroup({
+      ...input,
+      tabOrder: maxOrder + 1
+    })
+    this.state.projectGroups = [...(this.state.projectGroups ?? []), group]
+    this.scheduleSave()
+    return group
+  }
+
+  updateProjectGroup(
+    groupId: string,
+    updates: Partial<Pick<ProjectGroup, 'name' | 'isCollapsed' | 'tabOrder' | 'color'>>
+  ): ProjectGroup | null {
+    const group = (this.state.projectGroups ?? []).find((entry) => entry.id === groupId)
+    if (!group) {
+      return null
+    }
+    if (updates.name !== undefined) {
+      group.name = normalizeProjectGroupName(updates.name, group.name)
+    }
+    if (updates.isCollapsed !== undefined) {
+      group.isCollapsed = updates.isCollapsed
+    }
+    if (updates.tabOrder !== undefined && Number.isFinite(updates.tabOrder)) {
+      group.tabOrder = updates.tabOrder
+    }
+    if (updates.color !== undefined) {
+      group.color = typeof updates.color === 'string' ? updates.color : null
+    }
+    group.updatedAt = Date.now()
+    this.scheduleSave()
+    return group
+  }
+
+  deleteProjectGroup(groupId: string): boolean {
+    const before = this.state.projectGroups?.length ?? 0
+    const deletedGroupIds = getProjectGroupSubtreeIds(this.state.projectGroups ?? [], groupId)
+    this.state.projectGroups = (this.state.projectGroups ?? []).filter(
+      (group) => !deletedGroupIds.has(group.id)
+    )
+    if ((this.state.projectGroups?.length ?? 0) === before) {
+      return false
+    }
+    // Why: groups are sidebar organization only. Deleting one must not delete
+    // repos or worktrees, so contained repos from the full subtree are ungrouped.
+    this.state.repos = this.state.repos.map((repo) =>
+      repo.projectGroupId && deletedGroupIds.has(repo.projectGroupId)
+        ? { ...repo, projectGroupId: null }
+        : repo
+    )
+    this.scheduleSave()
+    return true
+  }
+
+  moveProjectToGroup(repoId: string, groupId: string | null, order?: number): Repo | null {
+    const repo = this.state.repos.find((entry) => entry.id === repoId)
+    if (!repo) {
+      return null
+    }
+    const normalizedGroupId =
+      groupId && (this.state.projectGroups ?? []).some((group) => group.id === groupId)
+        ? groupId
+        : null
+    const siblingRepos = this.state.repos.filter((entry) => entry.id !== repoId)
+    repo.projectGroupId = normalizedGroupId
+    repo.projectGroupOrder =
+      typeof order === 'number' && Number.isFinite(order)
+        ? order
+        : getNextProjectGroupOrder(siblingRepos, normalizedGroupId)
+    this.scheduleSave()
+    return this.hydrateRepo(repo)
+  }
+
   addRepo(repo: Repo): void {
     this.state.repos.push(repo)
     this.scheduleSave()
@@ -2071,7 +2199,7 @@ export class Store {
     return true
   }
 
-  removeRepo(id: string): void {
+  removeProject(id: string): void {
     this.state.repos = this.state.repos.filter((r) => r.id !== id)
     // Why: presets are repo-scoped, so removing the repo means the presets
     // can never be referenced again — drop them with the parent.
@@ -2102,9 +2230,13 @@ export class Store {
         | 'hookSettings'
         | 'worktreeBaseRef'
         | 'kind'
+        | 'symlinkPaths'
         | 'issueSourcePreference'
         | 'externalWorktreeVisibility'
         | 'externalWorktreeVisibilityPromptDismissedAt'
+        | 'projectGroupId'
+        | 'projectGroupOrder'
+        | 'sourceControlAi'
       >
     >
   ): Repo | null {
@@ -2113,25 +2245,36 @@ export class Store {
       return null
     }
     const sanitizedUpdates = sanitizeRepoUpdatesForPersistence(updates)
+    if ('projectGroupId' in sanitizedUpdates) {
+      const nextGroupId = sanitizedUpdates.projectGroupId
+      if (
+        typeof nextGroupId !== 'string' ||
+        nextGroupId.trim().length === 0 ||
+        !this.state.projectGroups.some((group) => group.id === nextGroupId)
+      ) {
+        sanitizedUpdates.projectGroupId = null
+      }
+    }
+    if (
+      'projectGroupOrder' in sanitizedUpdates &&
+      (typeof sanitizedUpdates.projectGroupOrder !== 'number' ||
+        !Number.isFinite(sanitizedUpdates.projectGroupOrder))
+    ) {
+      delete sanitizedUpdates.projectGroupOrder
+    }
     const externalWorktreeVisibilityLegacy =
       'externalWorktreeVisibility' in sanitizedUpdates &&
       repo.externalWorktreeVisibilityLegacy === undefined
         ? isLegacyRepoForExternalWorktreeVisibility(repo)
         : undefined
-    // Why: `issueSourcePreference === undefined` in the patch means "reset to
-    // auto" (and the persisted record should drop the key, not preserve a
-    // stale explicit value via Object.assign's skip-on-undefined behavior).
-    // Without this delete branch, toggling explicit → auto would silently
-    // leave the old preference in place on disk.
+    // Why: selected repo fields use `undefined` as an explicit clear signal,
+    // so delete them before assigning the rest of the patch.
     if (
       'issueSourcePreference' in sanitizedUpdates &&
       sanitizedUpdates.issueSourcePreference === undefined
     ) {
       delete repo.issueSourcePreference
-      const { issueSourcePreference: _drop, ...rest } = sanitizedUpdates
-      Object.assign(repo, rest)
-    } else {
-      Object.assign(repo, sanitizedUpdates)
+      delete sanitizedUpdates.issueSourcePreference
     }
     if (
       'externalWorktreeVisibility' in sanitizedUpdates &&
@@ -2141,6 +2284,20 @@ export class Store {
       // time visibility changes so later hide/show choices keep legacy safety.
       repo.externalWorktreeVisibilityLegacy = externalWorktreeVisibilityLegacy
     }
+    if ('sourceControlAi' in sanitizedUpdates && sanitizedUpdates.sourceControlAi === undefined) {
+      delete repo.sourceControlAi
+      delete sanitizedUpdates.sourceControlAi
+    } else if ('sourceControlAi' in sanitizedUpdates) {
+      const normalizedSourceControlAi = normalizeRepoSourceControlAiOverrides(
+        sanitizedUpdates.sourceControlAi
+      )
+      if (normalizedSourceControlAi === undefined) {
+        delete sanitizedUpdates.sourceControlAi
+      } else {
+        sanitizedUpdates.sourceControlAi = normalizedSourceControlAi
+      }
+    }
+    Object.assign(repo, sanitizedUpdates)
     this.scheduleSave()
     return this.hydrateRepo(repo)
   }
@@ -2586,6 +2743,22 @@ export class Store {
       sanitizedUpdates.telemetry !== undefined
         ? { ...this.state.settings.telemetry, ...sanitizedUpdates.telemetry }
         : this.state.settings.telemetry
+    if ('sourceControlAi' in sanitizedUpdates) {
+      const normalizedSourceControlAi = normalizeSourceControlAiSettings(
+        sanitizedUpdates.sourceControlAi,
+        this.state.settings.commitMessageAi
+      )
+      sanitizedUpdates.sourceControlAi = normalizedSourceControlAi
+      sanitizedUpdates.commitMessageAi = projectSourceControlAiToLegacyCommitMessageAi(
+        normalizedSourceControlAi,
+        this.state.settings.commitMessageAi
+      )
+    } else if ('commitMessageAi' in sanitizedUpdates) {
+      sanitizedUpdates.sourceControlAi = mergeLegacyCommitMessageAiIntoSourceControlAi(
+        this.state.settings.sourceControlAi,
+        sanitizedUpdates.commitMessageAi
+      )
+    }
     this.state.settings = {
       ...this.state.settings,
       ...sanitizedUpdates,
@@ -2702,6 +2875,12 @@ export class Store {
 
   getWorkspaceSession(): PersistedState['workspaceSession'] {
     return this.state.workspaceSession ?? getDefaultWorkspaceSession()
+  }
+
+  /** Resolve the worktree a terminal tab belongs to, from the session's
+   *  tab→worktree map. More reliable than agent-echoed hook fields. */
+  getWorktreeIdForTab(tabId: string): string | undefined {
+    return findWorktreeIdForTab(this.getWorkspaceSession(), tabId)
   }
 
   setWorkspaceSession(session: PersistedState['workspaceSession']): void {
