@@ -150,6 +150,7 @@ export type { WorkspaceSource }
 export const launchSourceSchema = z.enum([
   'command_palette',
   'sidebar',
+  'quick_command',
   'tab_bar_quick_launch',
   'task_page',
   'new_workspace_composer',
@@ -239,6 +240,7 @@ export const SETTINGS_CHANGED_WHITELIST = [
   'experimentalActivity',
   'experimentalTerminalAttention',
   'experimentalWorktreeSymlinks',
+  'experimentalUnifiedNewTabLauncher',
   'geminiCliOAuthEnabled'
 ] as const satisfies readonly BooleanGlobalSettingsKey[]
 export const settingsChangedKeySchema = z.enum(SETTINGS_CHANGED_WHITELIST)
@@ -274,6 +276,14 @@ const workspaceCreatedSchema = z
   .strict()
 
 const agentStartedSchema = z
+  .object({
+    agent_kind: agentKindSchema,
+    launch_source: launchSourceSchema,
+    request_kind: requestKindSchema,
+    nth_repo_added: nthRepoAddedSchema
+  })
+  .strict()
+const agentPromptSentSchema = z
   .object({
     agent_kind: agentKindSchema,
     launch_source: launchSourceSchema,
@@ -1017,6 +1027,7 @@ export const eventSchemas = {
   setup_script_prompt_action: setupScriptPromptActionSchema,
 
   agent_started: agentStartedSchema,
+  agent_prompt_sent: agentPromptSentSchema,
   agent_error: agentErrorSchema,
   agent_hook_install_failed: agentHookInstallFailedSchema,
   agent_hook_unattributed: agentHookUnattributedSchema,
@@ -1107,6 +1118,7 @@ type _CohortExtendedRoster =
   | 'setup_script_prompt_shown'
   | 'setup_script_prompt_action'
   | 'agent_started'
+  | 'agent_prompt_sent'
   | 'agent_error'
 // Why: `z.object({}).strict()` infers a string index signature, which would
 // make every key appear present. Ignore index-signature-only keys here so

@@ -1638,13 +1638,27 @@ export type TerminalQuickCommandScope =
       repoId: string
     }
 
-export type TerminalQuickCommand = {
+export type TerminalQuickCommandAction = 'terminal-command' | 'agent-prompt'
+
+export type TerminalQuickCommandBase = {
   id: string
   label: string
-  command: string
-  appendEnter: boolean
   scope?: TerminalQuickCommandScope
 }
+
+export type TerminalCommandQuickCommand = TerminalQuickCommandBase & {
+  action?: 'terminal-command'
+  command: string
+  appendEnter: boolean
+}
+
+export type TerminalAgentQuickCommand = TerminalQuickCommandBase & {
+  action: 'agent-prompt'
+  agent: TuiAgent
+  prompt: string
+}
+
+export type TerminalQuickCommand = TerminalCommandQuickCommand | TerminalAgentQuickCommand
 
 export type OpenInApplication = {
   id: string
@@ -1957,6 +1971,9 @@ export type GlobalSettings = {
    *  configuration surface and edge cases (conflicts with existing paths,
    *  cleanup on worktree delete) are still being worked out. */
   experimentalWorktreeSymlinks: boolean
+  /** Experimental: replaces the New Tab menu's static preview row with a
+   *  command-style launcher for terminals, detected agents, URLs, and files. */
+  experimentalUnifiedNewTabLauncher: boolean
   /** Active non-local runtime environment for client-routed RPC. `null`
    *  preserves the current local desktop behavior. */
   activeRuntimeEnvironmentId?: string | null
