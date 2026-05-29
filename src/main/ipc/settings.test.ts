@@ -1,15 +1,21 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
-const { handleMock, previewGhosttyImportMock, showSaveDialogMock, showOpenDialogMock } = vi.hoisted(
-  () => ({
-    handleMock: vi.fn(),
-    previewGhosttyImportMock: vi.fn(),
-    showSaveDialogMock: vi.fn(),
-    showOpenDialogMock: vi.fn()
-  })
-)
+const {
+  browserWindowGetAllWindowsMock,
+  handleMock,
+  previewGhosttyImportMock,
+  showSaveDialogMock,
+  showOpenDialogMock
+} = vi.hoisted(() => ({
+  browserWindowGetAllWindowsMock: vi.fn(),
+  handleMock: vi.fn(),
+  previewGhosttyImportMock: vi.fn(),
+  showSaveDialogMock: vi.fn(),
+  showOpenDialogMock: vi.fn()
+}))
 
 vi.mock('electron', () => ({
+  BrowserWindow: { getAllWindows: browserWindowGetAllWindowsMock },
   app: { name: 'Axiom Orca', getVersion: () => '1.4.18-rc.0.axiom.1' },
   dialog: { showSaveDialog: showSaveDialogMock, showOpenDialog: showOpenDialogMock },
   ipcMain: { handle: handleMock },
@@ -22,6 +28,13 @@ vi.mock('../ghostty/index', () => ({
 
 import { registerSettingsHandlers } from './settings'
 
+const settingsInvokeEvent = { sender: { id: 1 } }
+type SettingsChangedListener = (
+  updates: unknown,
+  settings: unknown,
+  originWebContentsId?: number
+) => void
+
 const store = {
   getSettings: vi.fn(),
   updateSettings: vi.fn(),
@@ -30,7 +43,8 @@ const store = {
   exportProfileToFile: vi.fn(),
   createProfileExportEnvelope: vi.fn(),
   previewProfileImportFile: vi.fn(),
-  importProfileFromFile: vi.fn()
+  importProfileFromFile: vi.fn(),
+  onSettingsChanged: vi.fn(() => () => {})
 }
 
 describe('registerSettingsHandlers', () => {
@@ -39,8 +53,10 @@ describe('registerSettingsHandlers', () => {
     previewGhosttyImportMock.mockClear()
     showSaveDialogMock.mockReset()
     showOpenDialogMock.mockReset()
+    browserWindowGetAllWindowsMock.mockReset()
     store.getSettings.mockReset()
     store.updateSettings.mockReset()
+    store.onSettingsChanged.mockClear()
   })
 
   it('registers settings:previewGhosttyImport handler', () => {
@@ -66,6 +82,48 @@ describe('registerSettingsHandlers', () => {
     expect(previewGhosttyImportMock).toHaveBeenCalledWith(store)
   })
 
+  it('broadcasts store-level settings changes to open windows', () => {
+    const send = vi.fn()
+    browserWindowGetAllWindowsMock.mockReturnValue([
+      { isDestroyed: () => false, webContents: { send } },
+      { isDestroyed: () => true, webContents: { send: vi.fn() } }
+    ])
+    registerSettingsHandlers(store as never)
+
+    const onSettingsChanged = store.onSettingsChanged as unknown as {
+      mock: { calls: [SettingsChangedListener][] }
+    }
+    const listener = onSettingsChanged.mock.calls[0]?.[0]
+    if (!listener) {
+      throw new Error('settings change listener was not registered')
+    }
+    listener({ defaultTuiAgent: 'codex' }, { defaultTuiAgent: 'codex' })
+
+    expect(send).toHaveBeenCalledWith('settings:changed', { defaultTuiAgent: 'codex' })
+  })
+
+  it('does not rebroadcast renderer settings writes to the origin window', () => {
+    const originSend = vi.fn()
+    const otherSend = vi.fn()
+    browserWindowGetAllWindowsMock.mockReturnValue([
+      { isDestroyed: () => false, webContents: { id: 1, send: originSend } },
+      { isDestroyed: () => false, webContents: { id: 2, send: otherSend } }
+    ])
+    registerSettingsHandlers(store as never)
+
+    const onSettingsChanged = store.onSettingsChanged as unknown as {
+      mock: { calls: [SettingsChangedListener][] }
+    }
+    const listener = onSettingsChanged.mock.calls[0]?.[0]
+    if (!listener) {
+      throw new Error('settings change listener was not registered')
+    }
+    listener({ defaultTuiAgent: 'codex' }, { defaultTuiAgent: 'codex' }, 1)
+
+    expect(originSend).not.toHaveBeenCalled()
+    expect(otherSend).toHaveBeenCalledWith('settings:changed', { defaultTuiAgent: 'codex' })
+  })
+
   it('updates the agent awake service when the keep-awake setting changes', () => {
     const agentAwakeService = { setEnabled: vi.fn() }
     store.getSettings.mockReturnValue({ keepComputerAwakeWhileAgentsRun: false })
@@ -77,7 +135,7 @@ describe('registerSettingsHandlers', () => {
       args: unknown
     ) => unknown
 
-    handler(null, { keepComputerAwakeWhileAgentsRun: true })
+    handler(settingsInvokeEvent, { keepComputerAwakeWhileAgentsRun: true })
 
     expect(agentAwakeService.setEnabled).toHaveBeenCalledWith(true)
   })
@@ -93,7 +151,7 @@ describe('registerSettingsHandlers', () => {
       args: unknown
     ) => unknown
 
-    handler(null, { defaultTuiAgent: 'codex' })
+    handler(settingsInvokeEvent, { defaultTuiAgent: 'codex' })
 
     expect(agentAwakeService.setEnabled).not.toHaveBeenCalled()
   })
@@ -108,8 +166,11 @@ describe('registerSettingsHandlers', () => {
       args: unknown
     ) => Promise<unknown>
 
-    await handler(null, { floatingTerminalTrustedCwds: ['/tmp/notes'] })
+    await handler(settingsInvokeEvent, { floatingTerminalTrustedCwds: ['/tmp/notes'] })
 
-    expect(store.updateSettings).toHaveBeenCalledWith({})
+    expect(store.updateSettings).toHaveBeenCalledWith(
+      {},
+      { notifyListeners: true, originWebContentsId: 1 }
+    )
   })
 })

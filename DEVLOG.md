@@ -6,6 +6,24 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-28 — Remediated upstream v1.4.35-rc.1 bot PR
+
+Resolved the agent-remediation merge for upstream `v1.4.35-rc.1` on `bot/upstream-sync-axiom-v1.4.35-rc.1.axiom.1` targeting `axiom/deploy`; no direct deploy-branch push was made. The conflict resolution keeps the fork semver at `1.4.35-rc.1.axiom.1`, preserves Axiom side-by-side app/updater identity, profile portability, and Forge provider/task-source support, while accepting upstream settings-change broadcast and disabled TUI-agent RPC updates. Protected deletion review found no protected Axiom files removed by the merge.
+
+Verification:
+
+- `pnpm install --frozen-lockfile` → passed. Node engine warning only (`wanted node 24`, local `v25.6.0`).
+- `pnpm run typecheck` → passed. Node engine warning only (`wanted node 24`, local `v25.6.0`).
+- `pnpm exec vitest run --config config/vitest.config.ts src/shared/task-providers.test.ts src/main/axiom-release-hardening.test.ts src/main/updater-endpoints.test.ts src/main/app-build-identity.test.ts config/scripts/axiom-upstream-sync-release.test.mjs` → 50 tests passed.
+- `pnpm exec vitest run --config config/vitest.config.ts src/main/ipc/settings.test.ts src/main/runtime/rpc/methods/client-ui.test.ts` → 18 tests passed.
+- `pnpm exec oxlint config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml` → 0 warnings / 0 errors.
+- `pnpm exec oxfmt --check config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml config/axiom-merge-remediation-policy.json` → passed.
+- `pnpm exec oxfmt --check package.json src/main/ipc/settings.test.ts src/main/ipc/settings.ts src/main/runtime/rpc/methods/client-ui.ts` → passed.
+- `pnpm exec oxlint src/main/ipc/settings.test.ts src/main/ipc/settings.ts src/main/runtime/rpc/methods/client-ui.ts` → 0 warnings / 0 errors.
+- `git diff --check` → passed.
+
+---
+
 ## 2026-05-26 — Fixed mobile Android release bundling for shared task helpers
 
 The Axiom release workflow for `axiom-v1.4.29-axiom.2` failed in the Android APK job because Metro could not resolve runtime imports from `mobile/app/h/[hostId]/tasks.tsx` to desktop-root shared modules outside the mobile package (`../../../../src/shared/workspace-name`). Added mobile-local mirrors for the workspace-name and Forge sort helpers, moved mobile runtime imports to those local modules, and added a regression test that blocks non-type mobile imports of desktop shared runtime modules.
