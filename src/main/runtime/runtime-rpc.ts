@@ -152,6 +152,7 @@ const MOBILE_RPC_METHOD_ALLOWLIST = new Set([
   'forge.searchIssues',
   'forge.status',
   'git.abortMerge',
+  'git.abortRebase',
   'git.bulkStage',
   'git.bulkUnstage',
   'git.commit',

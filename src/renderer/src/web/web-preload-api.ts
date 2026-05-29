@@ -26,6 +26,7 @@ import {
 import { legacyBaseRefSearchResult } from '../../../shared/base-ref-search-result'
 import { createE2EConfig } from '../../../shared/e2e-config'
 import { relativePathInsideRoot } from '../../../shared/cross-platform-path'
+import { normalizeDisabledTuiAgents } from '../../../shared/tui-agent-selection'
 import type { RateLimitState } from '../../../shared/rate-limit-types'
 import type { RuntimeStatus, RuntimeSyncWindowGraph } from '../../../shared/runtime-types'
 import {
@@ -1072,6 +1073,10 @@ function createGitApi(): NonNullable<Partial<PreloadApi>['git']> {
     abortMerge: async ({ worktreePath }) => {
       const worktree = await resolveRuntimeWorktreeByPath(worktreePath)
       await callRuntimeResult('git.abortMerge', { worktree: worktree.id })
+    },
+    abortRebase: async ({ worktreePath }) => {
+      const worktree = await resolveRuntimeWorktreeByPath(worktreePath)
+      await callRuntimeResult('git.abortRebase', { worktree: worktree.id })
     },
     diff: async ({ worktreePath, filePath, staged, compareAgainstHead }) => {
       const file = await resolveRuntimeFilePath(filePath, worktreePath)
@@ -2148,6 +2153,9 @@ function mergeSettings(base: GlobalSettings, updates: Partial<GlobalSettings>): 
       ...(base.githubProjects ?? defaults.githubProjects),
       ...updates.githubProjects
     } as GlobalSettings['githubProjects'],
+    disabledTuiAgents: normalizeDisabledTuiAgents(
+      updates.disabledTuiAgents ?? base.disabledTuiAgents
+    ),
     voice: {
       ...(base.voice ?? defaults.voice),
       ...updates.voice
