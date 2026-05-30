@@ -31,7 +31,12 @@ export function getRequiredReleaseAssetNames(
   const selectedPlatforms = new Set(platforms)
 
   if (selectedPlatforms.has('linux')) {
-    names.push('latest-linux.yml', 'orca-linux.AppImage', `orca-ide_${version}_amd64.deb`)
+    names.push(
+      'latest-linux.yml',
+      'orca-linux.AppImage',
+      `orca-ide_${version}_amd64.deb`,
+      `orca-ide-${version}.x86_64.rpm`
+    )
   }
 
   if (selectedPlatforms.has('mac')) {

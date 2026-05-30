@@ -107,6 +107,7 @@ type WebGitHubRouteKey =
   | 'setPRFileViewed'
   | 'updatePRTitle'
   | 'mergePR'
+  | 'setPRAutoMerge'
   | 'updatePRState'
   | 'requestPRReviewers'
   | 'removePRReviewers'
@@ -153,6 +154,7 @@ type WebGitHubRuntimeMethod =
   | 'github.setPRFileViewed'
   | 'github.updatePRTitle'
   | 'github.mergePR'
+  | 'github.setPRAutoMerge'
   | 'github.updatePRState'
   | 'github.requestPRReviewers'
   | 'github.removePRReviewers'
@@ -234,6 +236,7 @@ export const GITHUB_WEB_RPC_METHODS = {
   setPRFileViewed: 'github.setPRFileViewed',
   updatePRTitle: 'github.updatePRTitle',
   mergePR: 'github.mergePR',
+  setPRAutoMerge: 'github.setPRAutoMerge',
   updatePRState: 'github.updatePRState',
   requestPRReviewers: 'github.requestPRReviewers',
   removePRReviewers: 'github.removePRReviewers',
@@ -1294,6 +1297,8 @@ function createGitHubApi(): WebGitHubApi {
     updatePRTitle: (args) =>
       route<WebGitHubResult<'updatePRTitle'>>(GITHUB_WEB_RPC_METHODS.updatePRTitle, args),
     mergePR: (args) => route<WebGitHubResult<'mergePR'>>(GITHUB_WEB_RPC_METHODS.mergePR, args),
+    setPRAutoMerge: (args) =>
+      route<WebGitHubResult<'setPRAutoMerge'>>(GITHUB_WEB_RPC_METHODS.setPRAutoMerge, args),
     updatePRState: (args) =>
       route<WebGitHubResult<'updatePRState'>>(GITHUB_WEB_RPC_METHODS.updatePRState, args),
     requestPRReviewers: (args) =>
@@ -1675,7 +1680,7 @@ function createPreflightApi(): NonNullable<Partial<PreloadApi>['preflight']> {
 function createCliApi(): NonNullable<Partial<PreloadApi>['cli']> {
   const status = {
     platform: getBrowserPlatform(),
-    commandName: 'orca',
+    commandName: getBrowserPlatform() === 'linux' ? 'orca-ide' : 'orca',
     commandPath: null,
     pathDirectory: null,
     pathConfigured: false,
