@@ -47,6 +47,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { ButtonGroup } from '@/components/ui/button-group'
 import { Input } from '@/components/ui/input'
+import { useMountedRef } from '@/hooks/useMountedRef'
 import { useConfirmationDialog } from '@/components/confirmation-dialog'
 import {
   Accordion,
@@ -68,8 +69,8 @@ import CommentMarkdown from '@/components/sidebar/CommentMarkdown'
 import { detectLanguage } from '@/lib/language-detect'
 import { cn } from '@/lib/utils'
 import { setWithLRU } from '@/lib/scroll-cache'
+import { isScreenSubmitShortcut } from '@/lib/screen-submit-shortcut'
 import { DiffSectionItem } from '@/components/editor/DiffSectionItem'
-import { useMountedRef } from '@/hooks/useMountedRef'
 import type { DecoratedDiffComment } from '@/components/diff-comments/useDiffCommentDecorator'
 import {
   CombinedDiffFileTree,
@@ -118,7 +119,7 @@ import { focusTerminalTabSurface } from '@/lib/focus-terminal-tab-surface'
 import {
   findGithubPrWorkspaceAttachment,
   getGithubPrWorkspaceAttachmentLabel
-} from '@/lib/github-pr-workspace-attachment'
+} from '@/lib/github-work-item-workspace-attachment'
 import { launchAgentInNewTab } from '@/lib/launch-agent-in-new-tab'
 import { launchWorkItemDirect } from '@/lib/launch-work-item-direct'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
@@ -688,6 +689,9 @@ function PRReviewersPanel({
               prNumber: item.number,
               reviewers: logins
             })
+      if (!reviewerPanelMountedRef.current) {
+        return
+      }
       if (!result.ok) {
         toast.error(result.error ?? 'Failed to request reviewer')
         return
@@ -703,9 +707,13 @@ function PRReviewersPanel({
       setReviewerInput('')
       toast.success(logins.length === 1 ? 'Reviewer requested' : 'Reviewers requested')
     } catch {
-      toast.error('Failed to request reviewer')
+      if (reviewerPanelMountedRef.current) {
+        toast.error('Failed to request reviewer')
+      }
     } finally {
-      setSubmitting(false)
+      if (reviewerPanelMountedRef.current) {
+        setSubmitting(false)
+      }
     }
   }
 
@@ -741,6 +749,9 @@ function PRReviewersPanel({
               prNumber: item.number,
               reviewers: logins
             })
+      if (!reviewerPanelMountedRef.current) {
+        return
+      }
       if (!result.ok) {
         toast.error(result.error ?? 'Failed to remove reviewer')
         return
@@ -755,9 +766,13 @@ function PRReviewersPanel({
       setReviewerInput('')
       toast.success(logins.length === 1 ? 'Reviewer removed' : 'Reviewers removed')
     } catch {
-      toast.error('Failed to remove reviewer')
+      if (reviewerPanelMountedRef.current) {
+        toast.error('Failed to remove reviewer')
+      }
     } finally {
-      setSubmitting(false)
+      if (reviewerPanelMountedRef.current) {
+        setSubmitting(false)
+      }
     }
   }
 
@@ -1517,7 +1532,9 @@ function mapPRFileStatus(status: GitHubPRFile['status']): GitBranchChangeEntry['
       return 'renamed'
     case 'copied':
       return 'copied'
-    default:
+    case 'changed':
+    case 'modified':
+    case 'unchanged':
       return 'modified'
   }
 }
@@ -2864,7 +2881,7 @@ function ConversationTab({
                     setBodyEditing(false)
                     return
                   }
-                  if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                  if (isScreenSubmitShortcut(event)) {
                     event.preventDefault()
                     void handleSaveBody()
                   }
@@ -3242,14 +3259,7 @@ function CommentReplyForm({
   const [body, setBody] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const mountedRef = useRef(true)
-
-  useEffect(() => {
-    mountedRef.current = true
-    return () => {
-      mountedRef.current = false
-    }
-  }, [])
+  const mountedRef = useMountedRef()
 
   useEffect(() => {
     textareaRef.current?.focus()
@@ -3274,7 +3284,7 @@ function CommentReplyForm({
         setSubmitting(false)
       }
     }
-  }, [body, onSubmit, submitting])
+  }, [body, mountedRef, onSubmit, submitting])
 
   return (
     <div className={cn('rounded-md border border-border/50 bg-background/60 p-2', className)}>
@@ -3288,7 +3298,7 @@ function CommentReplyForm({
             onCancel()
             return
           }
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+          if (isScreenSubmitShortcut(e)) {
             e.preventDefault()
             void submit()
           }
@@ -4924,14 +4934,7 @@ function GHCommentComposer({
   const [body, setBody] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const mountedRef = useRef(true)
-
-  useEffect(() => {
-    mountedRef.current = true
-    return () => {
-      mountedRef.current = false
-    }
-  }, [])
+  const mountedRef = useMountedRef()
 
   const autoGrow = useCallback(() => {
     const el = textareaRef.current
@@ -4977,11 +4980,11 @@ function GHCommentComposer({
         setSubmitting(false)
       }
     }
-  }, [autoGrow, body, repoPath, repoId, issueNumber, itemType, onCommentAdded])
+  }, [autoGrow, body, mountedRef, repoPath, repoId, issueNumber, itemType, onCommentAdded])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      if (isScreenSubmitShortcut(e)) {
         e.preventDefault()
         handleSubmit()
       }
@@ -5569,12 +5572,14 @@ export default function PullRequestPage({
                   type="button"
                   size="sm"
                   onClick={handleOpenOrUsePR}
-                  className="gap-1.5 whitespace-nowrap"
+                  className="gap-1.5 whitespace-nowrap font-semibold"
                   aria-label={
-                    attachedWorkspace ? 'Open workspace attached to PR' : 'Start workspace from PR'
+                    attachedWorkspace
+                      ? 'Resume workspace attached to PR'
+                      : 'Start workspace from PR'
                   }
                 >
-                  {attachedWorkspace ? 'Open workspace' : 'Start workspace from PR'}
+                  {attachedWorkspace ? 'Resume workspace' : 'Start workspace from PR'}
                   <ArrowRight className="size-3.5" />
                 </Button>
                 <DropdownMenuTrigger asChild>

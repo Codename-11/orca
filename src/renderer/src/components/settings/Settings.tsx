@@ -2,7 +2,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import { toast } from 'sonner'
 import { Info } from 'lucide-react'
-import type { OrcaHooks } from '../../../../shared/types'
+import type { GlobalSettings, OrcaHooks } from '../../../../shared/types'
+import type {
+  SourceControlAiSettings,
+  SourceControlAiSettingsPatch
+} from '../../../../shared/source-control-ai-types'
+import { normalizeSourceControlAiSettings } from '../../../../shared/source-control-ai'
 import { isFolderRepo } from '../../../../shared/repo-kind'
 import { useAppStore } from '../../store'
 import { useSystemPrefersDark } from '@/components/terminal-pane/use-system-prefers-dark'
@@ -47,7 +52,10 @@ import { matchesSettingsSearch } from './settings-search'
 import { cn } from '@/lib/utils'
 import { isIntentionalAppRestartInProgress } from '@/lib/updater-beforeunload'
 import { checkRuntimeHooks } from '@/runtime/runtime-hooks-client'
-import { useWindowsTerminalCapabilities } from '@/lib/windows-terminal-capabilities'
+import {
+  getWindowsTerminalCapabilityOwnerKey,
+  useWindowsTerminalCapabilities
+} from '@/lib/windows-terminal-capabilities'
 import { getShortcutPlatform } from '@/lib/shortcut-platform'
 import { keybindingMatchesAction } from '../../../../shared/keybindings'
 import {
@@ -130,6 +138,10 @@ function scrollSubsectionIntoView(targetId: string, container?: HTMLElement | nu
   container.scrollTo({ top: Math.min(Math.max(0, targetTop - 16), maxScrollTop) })
 }
 
+function readSourceControlAiSettings(settings: GlobalSettings): SourceControlAiSettings {
+  return normalizeSourceControlAiSettings(settings.sourceControlAi, settings.commitMessageAi)
+}
+
 function cancelPendingSettingsSubsectionScrollFrame(
   frameRef: MutableRefObject<number | null>
 ): void {
@@ -196,7 +208,8 @@ function Settings(): React.JSX.Element {
   const [pendingNavRequestTick, setPendingNavRequestTick] = useState(0)
   const [quickCommandAddIntentSignal, setQuickCommandAddIntentSignal] = useState(0)
   const [hasUnsavedCommitPromptChanges, setHasUnsavedCommitPromptChanges] = useState(false)
-  const [commitPromptDiscardSignal, setCommitPromptDiscardSignal] = useState(0)
+  const [hasUnsavedBranchPromptChanges, setHasUnsavedBranchPromptChanges] = useState(false)
+  const [sourceControlAiPromptDiscardSignal, setSourceControlAiPromptDiscardSignal] = useState(0)
   const confirm = useConfirmationDialog()
   // Why: the hidden-experimental group is an unlock — Shift-clicking the
   // Experimental sidebar entry reveals it for the remainder of the session.
@@ -212,9 +225,44 @@ function Settings(): React.JSX.Element {
   const repoHooksRequestSeqRef = useRef(0)
   const repoHooksRuntimeIdentityRef = useRef<string>('local')
   const shortcutsEscapeConfirmUntilRef = useRef(0)
+  const sourceControlAiWriteQueueRef = useRef<Promise<void>>(Promise.resolve())
 
-  const confirmDiscardCommitPromptChanges = useCallback(async (): Promise<boolean> => {
-    if (!hasUnsavedCommitPromptChanges) {
+  const hasUnsavedSourceControlAiPromptChanges =
+    hasUnsavedCommitPromptChanges || hasUnsavedBranchPromptChanges
+
+  const writeSourceControlAiSettings = useCallback(
+    (patch: SourceControlAiSettingsPatch): Promise<void> => {
+      const next = sourceControlAiWriteQueueRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          const latestSettings = useAppStore.getState().settings ?? settings
+          if (!latestSettings) {
+            return
+          }
+          const latestConfig = readSourceControlAiSettings(latestSettings)
+          const resolvedPatch = typeof patch === 'function' ? patch(latestConfig) : patch
+          await updateSettings({ sourceControlAi: { ...latestConfig, ...resolvedPatch } })
+        })
+      sourceControlAiWriteQueueRef.current = next
+      return next
+    },
+    [settings, updateSettings]
+  )
+
+  const setSettingsRootNode = useCallback(
+    (node: HTMLDivElement | null): void => {
+      if (node) {
+        return
+      }
+      // Why: the settings search is a transient in-page filter. Leaving it behind makes the next
+      // visit look partially broken because whole sections stay hidden before the user types again.
+      setSettingsSearchQuery('')
+    },
+    [setSettingsSearchQuery]
+  )
+
+  const confirmDiscardSourceControlAiPromptChanges = useCallback(async (): Promise<boolean> => {
+    if (!hasUnsavedSourceControlAiPromptChanges) {
       return true
     }
     const shouldDiscard = await confirm({
@@ -224,18 +272,19 @@ function Settings(): React.JSX.Element {
       confirmVariant: 'destructive'
     })
     if (shouldDiscard) {
-      setCommitPromptDiscardSignal((signal) => signal + 1)
+      setSourceControlAiPromptDiscardSignal((signal) => signal + 1)
       setHasUnsavedCommitPromptChanges(false)
+      setHasUnsavedBranchPromptChanges(false)
     }
     return shouldDiscard
-  }, [confirm, hasUnsavedCommitPromptChanges])
+  }, [confirm, hasUnsavedSourceControlAiPromptChanges])
 
   const closeSettingsPageWithPromptGuard = useCallback(async (): Promise<void> => {
-    if (!(await confirmDiscardCommitPromptChanges())) {
+    if (!(await confirmDiscardSourceControlAiPromptChanges())) {
       return
     }
     closeSettingsPage()
-  }, [closeSettingsPage, confirmDiscardCommitPromptChanges])
+  }, [closeSettingsPage, confirmDiscardSourceControlAiPromptChanges])
 
   useEffect(() => {
     fetchSettings()
@@ -309,14 +358,14 @@ function Settings(): React.JSX.Element {
       if (isIntentionalAppRestartInProgress()) {
         return
       }
-      if (!hasUnsavedCommitPromptChanges) {
+      if (!hasUnsavedSourceControlAiPromptChanges) {
         return
       }
       event.preventDefault()
     }
     window.addEventListener('beforeunload', handleBeforeUnload)
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
-  }, [hasUnsavedCommitPromptChanges])
+  }, [hasUnsavedSourceControlAiPromptChanges])
 
   useEffect(() => {
     const handleFindShortcut = (event: KeyboardEvent): void => {
@@ -338,15 +387,6 @@ function Settings(): React.JSX.Element {
     document.addEventListener('keydown', handleFindShortcut)
     return () => document.removeEventListener('keydown', handleFindShortcut)
   }, [keybindings])
-
-  useEffect(
-    () => () => {
-      // Why: the settings search is a transient in-page filter. Leaving it behind makes the next
-      // visit look partially broken because whole sections stay hidden before the user types again.
-      setSettingsSearchQuery('')
-    },
-    [setSettingsSearchQuery]
-  )
 
   useEffect(() => {
     if (!settings || !settingsNavigationTarget) {
@@ -404,14 +444,14 @@ function Settings(): React.JSX.Element {
   const visibleNavSections = useMemo(
     () =>
       navSections.filter((section) =>
-        section.id === 'git' && hasUnsavedCommitPromptChanges
+        section.id === 'git' && hasUnsavedSourceControlAiPromptChanges
           ? true
           : matchesSettingsSearch(settingsSearchQuery, [
               { title: section.title, description: section.description },
               ...section.searchEntries
             ])
       ),
-    [hasUnsavedCommitPromptChanges, navSections, settingsSearchQuery]
+    [hasUnsavedSourceControlAiPromptChanges, navSections, settingsSearchQuery]
   )
   const visibleSectionIds = useMemo(
     () => new Set(visibleNavSections.map((section) => section.id)),
@@ -429,12 +469,16 @@ function Settings(): React.JSX.Element {
       }),
     [activeSectionId, mountedSectionIds, navSections, settingsSearchQuery, visibleSectionIds]
   )
+  const windowsTerminalCapabilityOwnerKey = getWindowsTerminalCapabilityOwnerKey(
+    settings?.activeRuntimeEnvironmentId
+  )
   const windowsTerminalCapabilities = useWindowsTerminalCapabilities(
     isWindows &&
       (neededSectionIds.has('terminal') ||
         neededSectionIds.has('accounts') ||
         neededSectionIds.has('agents')),
-    true
+    true,
+    windowsTerminalCapabilityOwnerKey
   )
 
   useEffect(() => {
@@ -646,7 +690,7 @@ function Settings(): React.JSX.Element {
       sectionId: string,
       modifiers?: { metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean }
     ): Promise<void> => {
-      if (sectionId !== activeSectionId && !(await confirmDiscardCommitPromptChanges())) {
+      if (sectionId !== activeSectionId && !(await confirmDiscardSourceControlAiPromptChanges())) {
         return
       }
       // Why: Shift-clicking the Experimental sidebar entry unlocks a hidden
@@ -671,14 +715,14 @@ function Settings(): React.JSX.Element {
     },
     [
       activeSectionId,
-      confirmDiscardCommitPromptChanges,
+      confirmDiscardSourceControlAiPromptChanges,
       setSettingsSearchQuery,
       settingsSearchQuery
     ]
   )
 
   const openComputerUseFromBrowser = useCallback(async () => {
-    if (!(await confirmDiscardCommitPromptChanges())) {
+    if (!(await confirmDiscardSourceControlAiPromptChanges())) {
       return
     }
     pendingNavSectionRef.current = 'computer-use'
@@ -690,12 +734,17 @@ function Settings(): React.JSX.Element {
     // Why: the pending section refs do not schedule a render by themselves.
     // When search is already clear, this reruns the centralized jump effect.
     setPendingNavRequestTick((tick) => tick + 1)
-  }, [confirmDiscardCommitPromptChanges, setSettingsSearchQuery, settingsSearchQuery])
+  }, [confirmDiscardSourceControlAiPromptChanges, setSettingsSearchQuery, settingsSearchQuery])
 
   if (!settings) {
     return (
-      <div className="flex flex-1 items-center justify-center text-muted-foreground">
-        Loading settings...
+      <div
+        ref={setSettingsRootNode}
+        className="settings-view-shell flex min-h-0 flex-1 overflow-hidden bg-background"
+      >
+        <div className="flex flex-1 items-center justify-center text-muted-foreground">
+          Loading settings...
+        </div>
       </div>
     )
   }
@@ -721,7 +770,10 @@ function Settings(): React.JSX.Element {
     activeSectionId === 'shortcuts' && settingsSearchQuery.trim() === ''
 
   return (
-    <div className="settings-view-shell flex min-h-0 flex-1 overflow-hidden bg-background">
+    <div
+      ref={setSettingsRootNode}
+      className="settings-view-shell flex min-h-0 flex-1 overflow-hidden bg-background"
+    >
       <SettingsSidebar
         activeSectionId={activeSectionId}
         generalGroups={generalNavGroups}
@@ -872,20 +924,25 @@ function Settings(): React.JSX.Element {
                   title="Git & Source Control"
                   description="Branch naming, base refs, attribution, and Source Control AI."
                   searchEntries={getSectionSearchEntries('git')}
-                  forceVisible={hasUnsavedCommitPromptChanges}
+                  forceVisible={hasUnsavedSourceControlAiPromptChanges}
                 >
                   {isSectionMounted('git') ? (
                     <>
                       <GitPane
                         settings={settings}
                         updateSettings={updateSettings}
+                        writeSourceControlAiSettings={writeSourceControlAiSettings}
                         displayedGitUsername={displayedGitUsername}
+                        hasUnsavedBranchPromptChanges={hasUnsavedBranchPromptChanges}
+                        onBranchPromptDirtyChange={setHasUnsavedBranchPromptChanges}
+                        branchPromptDiscardSignal={sourceControlAiPromptDiscardSignal}
                       />
                       <CommitMessageAiPane
                         settings={settings}
                         updateSettings={updateSettings}
+                        writeSourceControlAiSettings={writeSourceControlAiSettings}
                         onCustomPromptDirtyChange={setHasUnsavedCommitPromptChanges}
-                        customPromptDiscardSignal={commitPromptDiscardSignal}
+                        customPromptDiscardSignal={sourceControlAiPromptDiscardSignal}
                       />
                     </>
                   ) : null}
@@ -945,6 +1002,7 @@ function Settings(): React.JSX.Element {
                       wslDistros={windowsTerminalCapabilities.wslDistros}
                       wslCapabilitiesLoading={windowsTerminalCapabilities.isLoading}
                       pwshAvailable={windowsTerminalCapabilities.pwshAvailable}
+                      gitBashAvailable={windowsTerminalCapabilities.gitBashAvailable}
                     />
                   ) : null}
                 </SettingsSection>

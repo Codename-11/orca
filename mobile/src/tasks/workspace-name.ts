@@ -1,9 +1,16 @@
+export function resolveMobileWorkspaceCreateName(args: {
+  draft: string | undefined
+  fallback: string
+}): string {
+  return args.draft?.trim() || args.fallback
+}
+
 export function slugifyForWorkspaceName(input: string): string {
   return (
     input
       .trim()
       .toLowerCase()
-      .replace(/[\\/]+/g, '-')
+      .replace(/[\/]+/g, '-')
       .replace(/\s+/g, '-')
       .replace(/[^a-z0-9._-]+/g, '-')
       .replace(/-+/g, '-')
@@ -22,7 +29,7 @@ export function getLinkedWorkItemSuggestedName(item: { title: string }): string 
     .replace(/^(?:issue|pr|pull request)\s*#?\d+\s*[:-]\s*/i, '')
     .replace(/^#\d+\s*[:-]\s*/, '')
     .replace(/\(#\d+\)/gi, '')
-    .replace(/\b#\d+\b/g, '')
+    .replace(/#\d+/g, '')
     .trim()
   const seed = withoutLeadingNumber || item.title.trim()
   return slugifyForWorkspaceName(seed)

@@ -6,11 +6,13 @@ import type { RuntimeRpcResponse } from '../../../shared/runtime-rpc-envelope'
 import type {
   DetectedWorktreeListResult,
   DirEntry,
+  ForceDeleteWorktreeBranchResult,
   GlobalSettings,
   MemorySnapshot,
   OnboardingState,
   PersistedUIState,
   Repo,
+  RemoveWorktreeResult,
   SearchResult,
   StatsSummary,
   Worktree,
@@ -21,7 +23,8 @@ import {
   getDefaultOnboardingState,
   getDefaultSettings,
   getDefaultUIState,
-  getDefaultWorkspaceSession
+  getDefaultWorkspaceSession,
+  normalizeAgentActivityDisplayMode
 } from '../../../shared/constants'
 import { legacyBaseRefSearchResult } from '../../../shared/base-ref-search-result'
 import { createE2EConfig } from '../../../shared/e2e-config'
@@ -400,6 +403,7 @@ function createWebPreloadApi(): Partial<PreloadApi> {
       getLatestPending: () => Promise.resolve(null),
       getLatestReport: () => Promise.resolve(null),
       dismiss: () => Promise.resolve(null),
+      recordRendererError: () => Promise.resolve({ ok: true, report: null, deduped: true }),
       submit: () =>
         Promise.resolve({
           ok: false,
@@ -510,6 +514,9 @@ function createWebPreloadApi(): Partial<PreloadApi> {
     },
     pwsh: {
       isAvailable: () => callRuntimeResult<boolean>('host.pwsh.isAvailable').catch(() => false)
+    },
+    gitBash: {
+      isAvailable: () => callRuntimeResult<boolean>('host.gitBash.isAvailable').catch(() => false)
     },
     agentStatus: {
       onSet: () => noopUnsubscribe,
@@ -978,8 +985,14 @@ function createWorktreesApi(): NonNullable<Partial<PreloadApi>['worktrees']> {
       }),
     remove: async ({ worktreeId, force }) => {
       invalidateRuntimeWorktreeCaches()
-      await callRuntimeResult('worktree.rm', { worktree: worktreeId, force })
+      return callRuntimeResult<RemoveWorktreeResult>('worktree.rm', { worktree: worktreeId, force })
     },
+    forceDeletePreservedBranch: ({ worktreeId, branchName, expectedHead }) =>
+      callRuntimeResult<ForceDeleteWorktreeBranchResult>('worktree.forceDeleteBranch', {
+        worktree: worktreeId,
+        branchName,
+        expectedHead
+      }),
     updateMeta: async ({ worktreeId, updates }) =>
       (
         await callRuntimeResult<{ worktree: Worktree }>('worktree.set', {
@@ -1643,7 +1656,9 @@ function createWebUiApi(): NonNullable<Partial<PreloadApi>['ui']> {
     onOpenQuickOpen: () => noopUnsubscribe,
     onOpenTasks: () => noopUnsubscribe,
     onOpenNewWorkspace: () => noopUnsubscribe,
+    onDeleteCurrentWorkspace: () => noopUnsubscribe,
     onJumpToWorktreeIndex: () => noopUnsubscribe,
+    onJumpToTabIndex: () => noopUnsubscribe,
     onWorktreeHistoryNavigate: () => noopUnsubscribe,
     onNewBrowserTab: () => noopUnsubscribe,
     onRequestTabCreate: () => noopUnsubscribe,
@@ -1936,7 +1951,7 @@ function createShellApi(): NonNullable<Partial<PreloadApi>['shell']> {
     openInFileManager: () => Promise.resolve(openResult),
     openInExternalEditor: () => Promise.resolve(openResult),
     openUrl: (url) => Promise.resolve(window.open(url, '_blank', 'noopener,noreferrer') as never),
-    openFilePath: () => Promise.resolve(),
+    openFilePath: () => Promise.resolve(false),
     openFileUri: (uri) =>
       Promise.resolve(window.open(uri, '_blank', 'noopener,noreferrer') as never),
     pathExists: async (path) => {
@@ -1966,6 +1981,7 @@ function createPtyApi(): NonNullable<Partial<PreloadApi>['pty']> {
     signal: () => {},
     kill: () => Promise.resolve(),
     ackColdRestore: () => {},
+    pauseOutput: () => {},
     hasChildProcesses: () => Promise.resolve(false),
     getForegroundProcess: () => Promise.resolve(null),
     getCwd: () => Promise.resolve('~'),
@@ -2270,7 +2286,10 @@ function mergeWebUIState(
 ): PersistedUIState {
   return {
     ...base,
-    ...updates
+    ...updates,
+    agentActivityDisplayMode: normalizeAgentActivityDisplayMode(
+      updates.agentActivityDisplayMode ?? base.agentActivityDisplayMode
+    )
   }
 }
 

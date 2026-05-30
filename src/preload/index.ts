@@ -12,7 +12,6 @@ import type {
   BaseRefSearchResult,
   BaseRefDefaultResult,
   BrowserViewportOverride,
-  CreateWorktreeArgs,
   CustomPet,
   FsChangedPayload,
   GetRateLimitResult,
@@ -36,6 +35,7 @@ import type {
   FloatingTerminalCwdRequest,
   MarkdownDocument,
   SearchResult,
+  UpdateStatus,
   WorktreeBaseStatusEvent,
   WorktreeRemoteBranchConflictEvent
 } from '../shared/types'
@@ -57,22 +57,14 @@ import type {
 } from '../shared/runtime-types'
 import type { RuntimeRpcResponse } from '../shared/runtime-rpc-envelope'
 import type { PublicKnownRuntimeEnvironment } from '../shared/runtime-environments'
+import type { RemoteWorkspaceChangedEvent } from '../shared/remote-workspace-types'
 import type {
   RuntimeMobileMarkdownRequest,
   RuntimeMobileMarkdownResponse
 } from '../shared/mobile-markdown-document'
 import type { RateLimitRuntimeTarget, RateLimitState } from '../shared/rate-limit-types'
-import type {
-  WorkspaceSpaceAnalyzeResult,
-  WorkspaceSpaceScanProgress
-} from '../shared/workspace-space-types'
-import type {
-  WorkspacePortAdvertisedUrlChangedEvent,
-  WorkspacePortKillRequest,
-  WorkspacePortKillResult,
-  WorkspacePortScanRequest,
-  WorkspacePortScanResult
-} from '../shared/workspace-ports'
+import type { WorkspaceSpaceScanProgress } from '../shared/workspace-space-types'
+import type { WorkspacePortAdvertisedUrlChangedEvent } from '../shared/workspace-ports'
 import type { GhAuthDiagnostic } from '../shared/github-auth-types'
 import type {
   AddIssueCommentBySlugArgs,
@@ -164,7 +156,13 @@ import {
 import { subscribeRuntimeEnvironmentFromPreload } from './runtime-environment-subscriptions'
 import type { RuntimeEnvironmentSubscriptionHandle } from './runtime-environment-subscriptions'
 import type { HostedReviewForBranchArgs } from '../shared/hosted-review'
-import type { CrashReportSubmitArgs, CrashReportSubmitResult } from '../shared/crash-reporting'
+import type {
+  CrashReportSubmitArgs,
+  CrashReportSubmitResult,
+  ReactErrorBoundaryReportArgs,
+  ReactErrorBoundaryReportResult
+} from '../shared/crash-reporting'
+import type { PreloadApi } from './api-types'
 
 type NativeFileDropCallback = (data: NativeFileDropPayload) => void
 
@@ -443,41 +441,32 @@ const api = {
     isAvailable: (): Promise<boolean> => ipcRenderer.invoke('pwsh:isAvailable')
   },
 
+  gitBash: {
+    isAvailable: (): Promise<boolean> => ipcRenderer.invoke('gitBash:isAvailable')
+  },
+
   repos: {
-    list: (): Promise<unknown[]> => ipcRenderer.invoke('repos:list'),
+    list: () => ipcRenderer.invoke('repos:list'),
 
-    add: (args: { path: string; kind?: 'git' | 'folder' }): Promise<unknown> =>
-      ipcRenderer.invoke('repos:add', args),
+    add: (args) => ipcRenderer.invoke('repos:add', args),
 
-    addRemote: (args: {
-      connectionId: string
-      remotePath: string
-      displayName?: string
-      kind?: 'git' | 'folder'
-    }): Promise<unknown> => ipcRenderer.invoke('repos:addRemote', args),
+    addRemote: (args) => ipcRenderer.invoke('repos:addRemote', args),
 
-    create: (args: {
-      parentPath: string
-      name: string
-      kind: 'git' | 'folder'
-    }): Promise<unknown> => ipcRenderer.invoke('repos:create', args),
+    create: (args) => ipcRenderer.invoke('repos:create', args),
 
-    remove: (args: { repoId: string }): Promise<void> => ipcRenderer.invoke('repos:remove', args),
+    remove: (args) => ipcRenderer.invoke('repos:remove', args),
 
-    reorder: (args: { orderedIds: string[] }): Promise<{ status: 'applied' | 'rejected' }> =>
-      ipcRenderer.invoke('repos:reorder', args),
+    reorder: (args) => ipcRenderer.invoke('repos:reorder', args),
 
-    update: (args: { repoId: string; updates: Record<string, unknown> }): Promise<unknown> =>
-      ipcRenderer.invoke('repos:update', args),
+    update: (args) => ipcRenderer.invoke('repos:update', args),
 
-    pickFolder: (): Promise<string | null> => ipcRenderer.invoke('repos:pickFolder'),
+    pickFolder: () => ipcRenderer.invoke('repos:pickFolder'),
 
-    pickDirectory: (): Promise<string | null> => ipcRenderer.invoke('repos:pickDirectory'),
+    pickDirectory: () => ipcRenderer.invoke('repos:pickDirectory'),
 
-    clone: (args: { url: string; destination: string }): Promise<unknown> =>
-      ipcRenderer.invoke('repos:clone', args),
+    clone: (args) => ipcRenderer.invoke('repos:clone', args),
 
-    cloneAbort: (): Promise<void> => ipcRenderer.invoke('repos:cloneAbort'),
+    cloneAbort: () => ipcRenderer.invoke('repos:cloneAbort'),
 
     onCloneProgress: (
       callback: (data: { phase: string; percent: number }) => void
@@ -510,52 +499,24 @@ const api = {
       ipcRenderer.on('repos:changed', listener)
       return () => ipcRenderer.removeListener('repos:changed', listener)
     }
-  },
+  } satisfies PreloadApi['repos'],
 
   projectGroups: {
-    list: (): Promise<unknown[]> => ipcRenderer.invoke('projectGroups:list'),
-    create: (args: {
-      name: string
-      parentPath?: string | null
-      parentGroupId?: string | null
-      createdFrom?: 'manual' | 'folder-scan' | 'migration'
-    }): Promise<unknown> => ipcRenderer.invoke('projectGroups:create', args),
-    update: (args: { groupId: string; updates: Record<string, unknown> }): Promise<unknown> =>
-      ipcRenderer.invoke('projectGroups:update', args),
-    delete: (args: { groupId: string }): Promise<boolean> =>
-      ipcRenderer.invoke('projectGroups:delete', args),
-    moveProject: (args: {
-      projectId: string
-      groupId: string | null
-      order?: number
-    }): Promise<unknown> => ipcRenderer.invoke('projectGroups:moveProject', args),
-    scanNested: (args: {
-      path: string
-      connectionId?: string
-      options?: Record<string, unknown>
-    }): Promise<unknown> => ipcRenderer.invoke('projectGroups:scanNested', args),
-    importNested: (args: {
-      parentPath: string
-      groupName: string
-      projectPaths: string[]
-      connectionId?: string
-      mode: 'group' | 'separate'
-    }): Promise<unknown> => ipcRenderer.invoke('projectGroups:importNested', args)
-  },
+    list: () => ipcRenderer.invoke('projectGroups:list'),
+    create: (args) => ipcRenderer.invoke('projectGroups:create', args),
+    update: (args) => ipcRenderer.invoke('projectGroups:update', args),
+    delete: (args) => ipcRenderer.invoke('projectGroups:delete', args),
+    moveProject: (args) => ipcRenderer.invoke('projectGroups:moveProject', args),
+    scanNested: (args) => ipcRenderer.invoke('projectGroups:scanNested', args),
+    importNested: (args) => ipcRenderer.invoke('projectGroups:importNested', args)
+  } satisfies PreloadApi['projectGroups'],
 
   sparsePresets: {
-    list: (args: { repoId: string }): Promise<unknown[]> =>
-      ipcRenderer.invoke('sparsePresets:list', args),
+    list: (args) => ipcRenderer.invoke('sparsePresets:list', args),
 
-    save: (args: {
-      repoId: string
-      id?: string
-      name: string
-      directories: string[]
-    }): Promise<unknown> => ipcRenderer.invoke('sparsePresets:save', args),
+    save: (args) => ipcRenderer.invoke('sparsePresets:save', args),
 
-    remove: (args: { repoId: string; presetId: string }): Promise<void> =>
-      ipcRenderer.invoke('sparsePresets:remove', args),
+    remove: (args) => ipcRenderer.invoke('sparsePresets:remove', args),
 
     onChanged: (callback: (data: { repoId: string }) => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent, data: { repoId: string }) =>
@@ -563,55 +524,33 @@ const api = {
       ipcRenderer.on('sparsePresets:changed', listener)
       return () => ipcRenderer.removeListener('sparsePresets:changed', listener)
     }
-  },
+  } satisfies PreloadApi['sparsePresets'],
 
   worktrees: {
-    list: (args: { repoId: string }): Promise<unknown[]> =>
-      ipcRenderer.invoke('worktrees:list', args),
+    list: (args) => ipcRenderer.invoke('worktrees:list', args),
 
-    listDetected: (args: { repoId: string }): Promise<unknown> =>
-      ipcRenderer.invoke('worktrees:listDetected', args),
+    listDetected: (args) => ipcRenderer.invoke('worktrees:listDetected', args),
 
-    listAll: (): Promise<unknown[]> => ipcRenderer.invoke('worktrees:listAll'),
+    listAll: () => ipcRenderer.invoke('worktrees:listAll'),
 
-    create: (args: CreateWorktreeArgs): Promise<unknown> =>
-      ipcRenderer.invoke('worktrees:create', args),
+    create: (args) => ipcRenderer.invoke('worktrees:create', args),
 
-    resolvePrBase: (args: {
-      repoId: string
-      prNumber: number
-      headRefName?: string
-      isCrossRepository?: boolean
-    }): Promise<{ baseBranch: string; pushTarget?: unknown } | { error: string }> =>
-      ipcRenderer.invoke('worktrees:resolvePrBase', args),
+    resolvePrBase: (args) => ipcRenderer.invoke('worktrees:resolvePrBase', args),
 
-    resolveMrBase: (args: {
-      repoId: string
-      mrIid: number
-      sourceBranch?: string
-      isCrossRepository?: boolean
-    }): Promise<{ baseBranch: string; pushTarget?: unknown } | { error: string }> =>
-      ipcRenderer.invoke('worktrees:resolveMrBase', args),
+    resolveMrBase: (args) => ipcRenderer.invoke('worktrees:resolveMrBase', args),
 
-    remove: (args: { worktreeId: string; force?: boolean; skipArchive?: boolean }): Promise<void> =>
-      ipcRenderer.invoke('worktrees:remove', args),
+    remove: (args) => ipcRenderer.invoke('worktrees:remove', args),
 
-    updateMeta: (args: {
-      worktreeId: string
-      updates: Record<string, unknown>
-    }): Promise<unknown> => ipcRenderer.invoke('worktrees:updateMeta', args),
+    forceDeletePreservedBranch: (args) =>
+      ipcRenderer.invoke('worktrees:forceDeletePreservedBranch', args),
 
-    listLineage: (): Promise<Record<string, unknown>> =>
-      ipcRenderer.invoke('worktrees:listLineage'),
+    updateMeta: (args) => ipcRenderer.invoke('worktrees:updateMeta', args),
 
-    updateLineage: (args: {
-      worktreeId: string
-      parentWorktreeId?: string
-      noParent?: boolean
-    }): Promise<unknown> => ipcRenderer.invoke('worktrees:updateLineage', args),
+    listLineage: () => ipcRenderer.invoke('worktrees:listLineage'),
 
-    persistSortOrder: (args: { orderedIds: string[] }): Promise<void> =>
-      ipcRenderer.invoke('worktrees:persistSortOrder', args),
+    updateLineage: (args) => ipcRenderer.invoke('worktrees:updateLineage', args),
+
+    persistSortOrder: (args) => ipcRenderer.invoke('worktrees:persistSortOrder', args),
 
     onChanged: (callback: (data: { repoId: string }) => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent, data: { repoId: string }) =>
@@ -637,26 +576,20 @@ const api = {
       ipcRenderer.on('worktree:remoteBranchConflict', listener)
       return () => ipcRenderer.removeListener('worktree:remoteBranchConflict', listener)
     }
-  },
+  } satisfies PreloadApi['worktrees'],
 
   workspaceCleanup: {
-    scan: (args?: { worktreeId?: string; skipGitWorktreeIds?: string[] }): Promise<unknown> =>
-      ipcRenderer.invoke('workspaceCleanup:scan', args),
-    dismiss: (args: { dismissals: unknown[] }): Promise<void> =>
-      ipcRenderer.invoke('workspaceCleanup:dismiss', args),
-    clearDismissals: (): Promise<void> => ipcRenderer.invoke('workspaceCleanup:clearDismissals'),
-    hasKillableLocalProcesses: (args: {
-      worktreeId: string
-      connectionId?: string | null
-      worktreePath?: string
-    }): Promise<unknown> => ipcRenderer.invoke('workspaceCleanup:hasKillableLocalProcesses', args)
-  },
+    scan: (args) => ipcRenderer.invoke('workspaceCleanup:scan', args),
+    dismiss: (args) => ipcRenderer.invoke('workspaceCleanup:dismiss', args),
+    clearDismissals: () => ipcRenderer.invoke('workspaceCleanup:clearDismissals'),
+    hasKillableLocalProcesses: (args) =>
+      ipcRenderer.invoke('workspaceCleanup:hasKillableLocalProcesses', args)
+  } satisfies PreloadApi['workspaceCleanup'],
 
   workspaceSpace: {
-    analyze: (): Promise<WorkspaceSpaceAnalyzeResult> =>
-      ipcRenderer.invoke('workspaceSpace:analyze'),
-    cancel: (): Promise<boolean> => ipcRenderer.invoke('workspaceSpace:cancel'),
-    onProgress: (callback: (progress: WorkspaceSpaceScanProgress) => void): (() => void) => {
+    analyze: () => ipcRenderer.invoke('workspaceSpace:analyze'),
+    cancel: () => ipcRenderer.invoke('workspaceSpace:cancel'),
+    onProgress: (callback) => {
       const listener = (
         _event: Electron.IpcRendererEvent,
         progress: WorkspaceSpaceScanProgress
@@ -664,16 +597,12 @@ const api = {
       ipcRenderer.on('workspaceSpace:progress', listener)
       return () => ipcRenderer.removeListener('workspaceSpace:progress', listener)
     }
-  },
+  } satisfies PreloadApi['workspaceSpace'],
 
   workspacePorts: {
-    scan: (args: WorkspacePortScanRequest): Promise<WorkspacePortScanResult> =>
-      ipcRenderer.invoke('workspacePorts:scan', args),
-    kill: (args: WorkspacePortKillRequest): Promise<WorkspacePortKillResult> =>
-      ipcRenderer.invoke('workspacePorts:kill', args),
-    onAdvertisedUrlChanged: (
-      callback: (event: WorkspacePortAdvertisedUrlChangedEvent) => void
-    ): (() => void) => {
+    scan: (args) => ipcRenderer.invoke('workspacePorts:scan', args),
+    kill: (args) => ipcRenderer.invoke('workspacePorts:kill', args),
+    onAdvertisedUrlChanged: (callback) => {
       const listener = (
         _event: Electron.IpcRendererEvent,
         event: WorkspacePortAdvertisedUrlChangedEvent
@@ -681,7 +610,7 @@ const api = {
       ipcRenderer.on('workspacePorts:advertised-url-changed', listener)
       return () => ipcRenderer.removeListener('workspacePorts:advertised-url-changed', listener)
     }
-  },
+  } satisfies PreloadApi['workspacePorts'],
 
   pty: {
     spawn: (opts: {
@@ -743,6 +672,10 @@ const api = {
 
     ackColdRestore: (id: string): void => {
       ipcRenderer.send('pty:ackColdRestore', { id })
+    },
+
+    pauseOutput: (id: string, paused: boolean): void => {
+      ipcRenderer.send('pty:pauseOutput', { id, paused })
     },
 
     kill: (id: string, opts?: { keepHistory?: boolean }): Promise<void> =>
@@ -864,6 +797,10 @@ const api = {
     getLatestPending: () => ipcRenderer.invoke('crashReports:getLatestPending'),
     getLatestReport: () => ipcRenderer.invoke('crashReports:getLatestReport'),
     dismiss: (args: { reportId: string }) => ipcRenderer.invoke('crashReports:dismiss', args),
+    recordRendererError: (
+      args: ReactErrorBoundaryReportArgs
+    ): Promise<ReactErrorBoundaryReportResult> =>
+      ipcRenderer.invoke('crashReports:recordRendererError', args),
     submit: (args: CrashReportSubmitArgs): Promise<CrashReportSubmitResult> =>
       ipcRenderer.invoke('crashReports:submit', args),
     copyLatestDiagnostics: (args?: { reportId?: string; notes?: string }) =>
@@ -1672,7 +1609,8 @@ const api = {
 
     openUrl: (url: string): Promise<void> => ipcRenderer.invoke('shell:openUrl', url),
 
-    openFilePath: (path: string): Promise<void> => ipcRenderer.invoke('shell:openFilePath', path),
+    openFilePath: (path: string): Promise<boolean> =>
+      ipcRenderer.invoke('shell:openFilePath', path),
 
     openFileUri: (uri: string): Promise<void> => ipcRenderer.invoke('shell:openFileUri', uri),
 
@@ -2007,8 +1945,12 @@ const api = {
   hooks: {
     check: (args: {
       repoId: string
-    }): Promise<{ hasHooks: boolean; hooks: unknown; mayNeedUpdate: boolean }> =>
-      ipcRenderer.invoke('hooks:check', args),
+    }): Promise<{
+      status?: 'ok' | 'error'
+      hasHooks: boolean
+      hooks: unknown
+      mayNeedUpdate: boolean
+    }> => ipcRenderer.invoke('hooks:check', args),
 
     inspectSetupScriptImports: (args: { repoId: string }): Promise<unknown[]> =>
       ipcRenderer.invoke('hooks:inspectSetupScriptImports', args),
@@ -2023,6 +1965,7 @@ const api = {
     readIssueCommand: (args: {
       repoId: string
     }): Promise<{
+      status?: 'ok' | 'error'
       localContent: string | null
       sharedContent: string | null
       effectiveContent: string | null
@@ -2036,39 +1979,37 @@ const api = {
 
   cache: {
     getGitHub: () => ipcRenderer.invoke('cache:getGitHub'),
-    setGitHub: (args: { cache: unknown }) => ipcRenderer.invoke('cache:setGitHub', args)
-  },
+    setGitHub: (args) => ipcRenderer.invoke('cache:setGitHub', args)
+  } satisfies PreloadApi['cache'],
 
   session: {
-    get: (): Promise<unknown> => ipcRenderer.invoke('session:get'),
-    set: (args: unknown): Promise<void> => ipcRenderer.invoke('session:set', args),
+    get: () => ipcRenderer.invoke('session:get'),
+    set: (args) => ipcRenderer.invoke('session:set', args),
     /** Synchronous session save for beforeunload — blocks until flushed to disk. */
-    setSync: (args: unknown): void => {
+    setSync: (args) => {
       ipcRenderer.sendSync('session:set-sync', args)
     }
-  },
+  } satisfies PreloadApi['session'],
 
   remoteWorkspace: {
-    get: (args: { targetId: string }): Promise<unknown> =>
-      ipcRenderer.invoke('remoteWorkspace:get', args),
-    setForConnectedTargets: (args: {
-      session: unknown
-      hydratedTargetIds?: string[]
-    }): Promise<unknown> => ipcRenderer.invoke('remoteWorkspace:setForConnectedTargets', args),
-    listEnabledConnectedTargets: (): Promise<string[]> =>
+    get: (args) => ipcRenderer.invoke('remoteWorkspace:get', args),
+    setForConnectedTargets: (args) =>
+      ipcRenderer.invoke('remoteWorkspace:setForConnectedTargets', args),
+    listEnabledConnectedTargets: () =>
       ipcRenderer.invoke('remoteWorkspace:listEnabledConnectedTargets'),
-    listConnectedClients: (args?: { targetIds?: string[] }): Promise<unknown> =>
+    listConnectedClients: (args) =>
       ipcRenderer.invoke('remoteWorkspace:listConnectedClients', args),
-    clientId: (): Promise<string> => ipcRenderer.invoke('remoteWorkspace:clientId'),
-    onChanged: (callback: (event: unknown) => void): (() => void) => {
-      const listener = (_event: Electron.IpcRendererEvent, data: unknown) => callback(data)
+    clientId: () => ipcRenderer.invoke('remoteWorkspace:clientId'),
+    onChanged: (callback) => {
+      const listener = (_event: Electron.IpcRendererEvent, data: RemoteWorkspaceChangedEvent) =>
+        callback(data)
       ipcRenderer.on('remoteWorkspace:changed', listener)
       return () => ipcRenderer.removeListener('remoteWorkspace:changed', listener)
     }
-  },
+  } satisfies PreloadApi['remoteWorkspace'],
 
   updater: {
-    getStatus: (): Promise<unknown> => ipcRenderer.invoke('updater:getStatus'),
+    getStatus: (): Promise<UpdateStatus> => ipcRenderer.invoke('updater:getStatus'),
     getVersion: (): Promise<string> => ipcRenderer.invoke('updater:getVersion'),
     getBuildInfo: (): Promise<{ name: string; version: string; appUserModelId: string }> =>
       ipcRenderer.invoke('updater:getBuildInfo'),
@@ -2094,17 +2035,17 @@ const api = {
         throw error
       }
     },
-    onStatus: (callback: (status: unknown) => void): (() => void) => {
-      const listener = (_event: Electron.IpcRendererEvent, status: unknown) => callback(status)
+    onStatus: (callback) => {
+      const listener = (_event: Electron.IpcRendererEvent, status: UpdateStatus) => callback(status)
       ipcRenderer.on('updater:status', listener)
       return () => ipcRenderer.removeListener('updater:status', listener)
     },
-    onClearDismissal: (callback: () => void): (() => void) => {
+    onClearDismissal: (callback) => {
       const listener = (_event: Electron.IpcRendererEvent) => callback()
       ipcRenderer.on('updater:clearDismissal', listener)
       return () => ipcRenderer.removeListener('updater:clearDismissal', listener)
     }
-  },
+  } satisfies PreloadApi['updater'],
 
   notebook: {
     runPythonCell: (args: {
@@ -2405,10 +2346,9 @@ const api = {
   },
 
   ui: {
-    get: (): Promise<unknown> => ipcRenderer.invoke('ui:get'),
-    set: (args: Record<string, unknown>): Promise<void> => ipcRenderer.invoke('ui:set', args),
-    recordFeatureInteraction: (id: string): Promise<unknown> =>
-      ipcRenderer.invoke('ui:recordFeatureInteraction', id),
+    get: () => ipcRenderer.invoke('ui:get'),
+    set: (args) => ipcRenderer.invoke('ui:set', args),
+    recordFeatureInteraction: (id) => ipcRenderer.invoke('ui:recordFeatureInteraction', id),
     onOpenSettings: (callback: () => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent) => callback()
       ipcRenderer.on('ui:openSettings', listener)
@@ -2464,6 +2404,11 @@ const api = {
       ipcRenderer.on('ui:openNewWorkspace', listener)
       return () => ipcRenderer.removeListener('ui:openNewWorkspace', listener)
     },
+    onDeleteCurrentWorkspace: (callback: () => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent) => callback()
+      ipcRenderer.on('ui:deleteCurrentWorkspace', listener)
+      return () => ipcRenderer.removeListener('ui:deleteCurrentWorkspace', listener)
+    },
     onOpenTasks: (callback: () => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent) => callback()
       ipcRenderer.on('ui:openTasks', listener)
@@ -2473,6 +2418,11 @@ const api = {
       const listener = (_event: Electron.IpcRendererEvent, index: number) => callback(index)
       ipcRenderer.on('ui:jumpToWorktreeIndex', listener)
       return () => ipcRenderer.removeListener('ui:jumpToWorktreeIndex', listener)
+    },
+    onJumpToTabIndex: (callback: (index: number) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, index: number) => callback(index)
+      ipcRenderer.on('ui:jumpToTabIndex', listener)
+      return () => ipcRenderer.removeListener('ui:jumpToTabIndex', listener)
     },
     onWorktreeHistoryNavigate: (
       callback: (direction: 'back' | 'forward') => void
@@ -2937,7 +2887,7 @@ const api = {
     confirmWindowClose: (): void => {
       ipcRenderer.send('window:confirm-close')
     }
-  },
+  } satisfies PreloadApi['ui'],
 
   stats: {
     getSummary: (): Promise<{
