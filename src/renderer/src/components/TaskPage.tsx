@@ -3323,6 +3323,14 @@ export default function TaskPage(): React.JSX.Element {
     'idle'
   )
   const [linearConnectError, setLinearConnectError] = useState<string | null>(null)
+  const linearConnectMountedRef = useRef(true)
+
+  useEffect(() => {
+    linearConnectMountedRef.current = true
+    return () => {
+      linearConnectMountedRef.current = false
+    }
+  }, [])
 
   const activeGithubTaskKind = getGitHubTaskKind(activeTaskPreset, appliedTaskSearch)
   const selectedGitHubRepoExternalLink = useMemo(() => {
@@ -4855,6 +4863,9 @@ export default function TaskPage(): React.JSX.Element {
     setLinearConnectError(null)
     try {
       const result = await connectLinear(key)
+      if (!linearConnectMountedRef.current) {
+        return
+      }
       if (result.ok) {
         setLinearApiKeyDraft('')
         setLinearConnectState('idle')
@@ -4864,8 +4875,10 @@ export default function TaskPage(): React.JSX.Element {
         setLinearConnectError(result.error)
       }
     } catch (error) {
-      setLinearConnectState('error')
-      setLinearConnectError(error instanceof Error ? error.message : 'Connection failed')
+      if (linearConnectMountedRef.current) {
+        setLinearConnectState('error')
+        setLinearConnectError(error instanceof Error ? error.message : 'Connection failed')
+      }
     }
   }, [connectLinear, linearApiKeyDraft])
 
