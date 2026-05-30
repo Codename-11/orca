@@ -175,7 +175,15 @@ export function GeneralPane({ settings, updateSettings }: GeneralPaneProps): Rea
   >('loading')
 
   useEffect(() => {
-    window.api.updater.getBuildInfo().then(setAppBuildInfo)
+    let cancelled = false
+    void window.api.updater.getBuildInfo().then((buildInfo) => {
+      if (!cancelled) {
+        setAppBuildInfo(buildInfo)
+      }
+    })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   useEffect(() => {
