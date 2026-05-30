@@ -243,7 +243,7 @@ describe('WslCliInstaller', () => {
     expect(Buffer.from(encoded as string, 'base64').toString('utf8')).toBe(command)
   })
 
-  it('settles when wsl.exe never reports completion', async () => {
+  it('settles as unsupported when wsl.exe never reports completion', async () => {
     vi.useFakeTimers()
     const killMock = vi.fn()
     execFileMock.mockImplementation(() => ({ kill: killMock }))
@@ -255,17 +255,19 @@ describe('WslCliInstaller', () => {
 
     const promise = installer.getStatus()
     let settled = false
-    void promise
-      .catch(() => undefined)
-      .finally(() => {
-        settled = true
-      })
+    void promise.finally(() => {
+      settled = true
+    })
 
     await vi.advanceTimersByTimeAsync(10_000)
     await Promise.resolve()
 
     expect(settled).toBe(true)
-    await expect(promise).rejects.toThrow('WSL command timed out')
+    await expect(promise).resolves.toMatchObject({
+      state: 'unsupported',
+      supported: false,
+      detail: expect.stringContaining('Unable to inspect WSL CLI registration in Ubuntu')
+    })
     expect(killMock).toHaveBeenCalled()
   })
 
