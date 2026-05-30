@@ -3,6 +3,7 @@ const { execFileSync } = require('node:child_process')
 const { join, resolve } = require('node:path')
 
 const isMacRelease = process.env.ORCA_MAC_RELEASE === '1'
+const skipElectronBuilderRebuild = process.env.ORCA_SKIP_ELECTRON_BUILDER_REBUILD === '1'
 
 function envString(name, fallback) {
   const value = process.env[name]
@@ -297,12 +298,13 @@ module.exports = {
     artifactName: 'orca-ide-${version}.${arch}.${ext}',
     depends: ['python3', 'python3-gobject', 'at-spi2-core', 'xdotool', 'xclip']
   },
-  // Why: must be true so that electron-builder rebuilds native modules
-  // (node-pty) for each target architecture when producing dual-arch macOS
-  // builds (x64 + arm64). With npmRebuild disabled, CI on an arm64 runner
-  // packages arm64 binaries into the x64 DMG, causing "posix_spawnp failed"
-  // on Intel Macs.
-  npmRebuild: true,
+  // Why: must be true by default so that electron-builder rebuilds native
+  // modules (node-pty) for each target architecture when producing dual-arch
+  // macOS builds (x64 + arm64). Windows release CI performs the targeted
+  // postinstall rebuild via config/scripts/rebuild-native-deps.mjs instead,
+  // which intentionally skips optional cpu-features because it is incompatible
+  // with Electron 42's V8 external-pointer API.
+  npmRebuild: !skipElectronBuilderRebuild,
   publish: {
     provider: 'github',
     owner: publishRepository.owner,
