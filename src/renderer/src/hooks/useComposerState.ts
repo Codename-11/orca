@@ -50,6 +50,11 @@ import {
   type SetupConfig
 } from '@/lib/new-workspace'
 import {
+  getLinkedWorkItemPromptContext,
+  resolveQuickCreateLinkedWorkItemPrompt
+} from '@/lib/linked-work-item-context'
+import { buildLinearIssueLinkedWorkItem } from '@/lib/linear-linked-work-item'
+import {
   getFullComposerCreateDisabled,
   getQuickComposerCreateDisabled
 } from '@/lib/new-workspace-create-gates'
@@ -212,6 +217,7 @@ export type UseComposerStateResult = {
   /** Ref the consumer should attach to the composer wrapper so the global
    *  Enter-to-submit handler can scope its behavior to the visible composer. */
   composerRef: React.RefObject<HTMLDivElement | null>
+  onComposerNodeChange: (node: HTMLDivElement | null) => void
   promptTextareaRef: React.RefObject<HTMLTextAreaElement | null>
   nameInputRef: React.RefObject<HTMLInputElement | null>
   submit: () => Promise<void>
@@ -514,7 +520,16 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     promptCaretFrameRef.current = null
   }, [])
 
-  useEffect(() => cancelPromptCaretFrame, [cancelPromptCaretFrame])
+  const handleComposerNodeChange = useCallback(
+    (node: HTMLDivElement | null): void => {
+      // Why: the queued caret restoration targets composer descendants and
+      // must be canceled as soon as the composer root leaves the DOM.
+      if (!node) {
+        cancelPromptCaretFrame()
+      }
+    },
+    [cancelPromptCaretFrame]
+  )
 
   const hookCheckRef = useRef<{
     key: string
@@ -1664,14 +1679,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     (issue: LinearIssue): void => {
       setLinkedIssue('')
       setLinkedPR(null)
-      setLinkedWorkItem({
-        type: 'issue',
-        // Why: Linear identifiers are strings (e.g. ENG-123); keep GitHub
-        // numeric metadata empty and carry the real source through the URL.
-        number: 0,
-        title: issue.title,
-        url: issue.url
-      })
+      setLinkedWorkItem(buildLinearIssueLinkedWorkItem(issue))
       const suggestedName = issue.title
       if (!name.trim() || name === lastAutoNameRef.current) {
         setName(suggestedName)
@@ -1679,11 +1687,9 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       }
       setBranchNameOverride(undefined)
       branchAutoNameRef.current = ''
-      // Why: match the GitHub issue/PR flow — paste only the URL as a draft
-      // into the agent's input (no auto-submit). The launch path already
-      // drafts `linkedWorkItem.url` when the note is empty; auto-filling the
-      // note here would flip Linear into the `isLinearTypedOnly` branch and
-      // auto-submit the full details block.
+      // Why: match the GitHub issue/PR flow by drafting linked context for
+      // review instead of auto-submitting. Auto-filling the note here would
+      // turn a source selection into user-authored instructions.
     },
     [name]
   )
@@ -1797,12 +1803,19 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
               }
             )
           : ''
+      const linkedPromptContext = getLinkedWorkItemPromptContext(submitLinkedWorkItem)
       const submitStartupPrompt = submitShouldApplyLinkedOnlyTemplate
-        ? buildAgentPromptWithContext(submitLinkedOnlyTemplatePrompt, attachmentPaths, [])
+        ? buildAgentPromptWithContext(
+            submitLinkedOnlyTemplatePrompt,
+            attachmentPaths,
+            [],
+            linkedPromptContext.linkedContextBlocks
+          )
         : buildAgentPromptWithContext(
             agentPrompt,
             attachmentPaths,
-            submitLinkedWorkItem?.url ? [submitLinkedWorkItem.url] : []
+            linkedPromptContext.linkedUrls,
+            linkedPromptContext.linkedContextBlocks
           )
       const submitShouldRunIssueAutomation =
         enableIssueAutomation &&
@@ -2078,16 +2091,11 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
         const trimmedNote = note.trim()
         await applyWorktreeMeta(worktree.id, trimmedNote ? { comment: trimmedNote } : {})
 
-        // Why: when a linked work item is selected in the quick flow, launch
-        // the agent with a blank prompt and type the URL into its input as a
-        // draft (no trailing Enter). This lets the user review/edit before
-        // sending instead of auto-executing a "Complete <url>" template.
-        // Falls back to the trimmed note when the linked item carries no
-        // number/URL (Linear typed-only entries).
-        const isLinearTypedOnly = submitLinkedWorkItem?.number === 0 && Boolean(trimmedNote)
-        const quickPrompt = isLinearTypedOnly && trimmedNote ? trimmedNote : ''
-        const quickDraftPrompt =
-          submitLinkedWorkItem && !isLinearTypedOnly ? submitLinkedWorkItem.url : null
+        // Why: quick create should draft linked source data for review instead
+        // of auto-executing it. Rich linked context wins over URL fallback;
+        // typed-only Linear entries still use the note as the startup prompt.
+        const { prompt: quickPrompt, draftPrompt: quickDraftPrompt } =
+          resolveQuickCreateLinkedWorkItemPrompt(submitLinkedWorkItem, trimmedNote)
 
         // Why: agents that gate first-launch behind a "Do you trust this
         // folder?" menu (cursor-agent, copilot) consume the bracketed paste
@@ -2329,6 +2337,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
   return {
     cardProps,
     composerRef,
+    onComposerNodeChange: handleComposerNodeChange,
     promptTextareaRef,
     nameInputRef,
     submit,

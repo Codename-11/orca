@@ -61,6 +61,8 @@ type WorktreeCardProps = {
   isCurrentWorktree?: boolean
   isActiveSurface?: boolean
   isMultiSelected?: boolean
+  revealHighlight?: boolean
+  revealHighlightTone?: 'default' | 'ai'
   selectedWorktrees?: readonly Worktree[]
   hideRepoBadge?: boolean
   lineageChildCount?: number
@@ -96,6 +98,8 @@ const WorktreeCard = React.memo(function WorktreeCard({
   isActive,
   isActiveSurface = isActive,
   isMultiSelected = false,
+  revealHighlight = false,
+  revealHighlightTone = 'default',
   selectedWorktrees,
   onActivate,
   onSelectionGesture,
@@ -634,7 +638,7 @@ const WorktreeCard = React.memo(function WorktreeCard({
   const cardBody = (
     <div
       className={cn(
-        'group relative flex items-start gap-1.5 px-1.5 py-1.5 cursor-pointer transition-all duration-200 outline-none select-none ml-1',
+        'group relative flex items-start gap-1.5 px-1.5 py-1.5 cursor-pointer transition-[background-color,border-color,opacity,box-shadow] duration-200 outline-none select-none ml-1',
         isMultiSelected ? 'rounded-sm' : 'rounded-lg',
         isActiveSurface
           ? 'bg-black/[0.08] shadow-[0_1px_2px_rgba(0,0,0,0.04)] border border-black/[0.015] dark:bg-white/[0.10] dark:border-border/40 dark:shadow-[0_1px_2px_rgba(0,0,0,0.03)]'
@@ -642,6 +646,10 @@ const WorktreeCard = React.memo(function WorktreeCard({
             ? 'border border-sidebar-ring/35 bg-sidebar-accent/70 ring-1 ring-sidebar-ring/30'
             : 'border border-transparent worktree-sidebar-card-hover',
         isActiveSurface && isMultiSelected && 'ring-1 ring-sidebar-ring/35',
+        revealHighlight && [
+          'scroll-to-current-workspace-reveal-highlight',
+          revealHighlightTone === 'ai' && 'scroll-to-current-workspace-reveal-highlight--ai'
+        ],
         titleRenaming && '!border-transparent !bg-transparent !shadow-none !ring-0',
         isDeleting && 'opacity-50 grayscale cursor-not-allowed',
         isSshDisconnected && !isDeleting && 'opacity-60'

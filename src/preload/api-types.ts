@@ -26,6 +26,7 @@ import type {
   CustomPet,
   DetectedWorktreeListResult,
   DirEntry,
+  ForceDeleteWorktreeBranchResult,
   FsChangedPayload,
   GhosttyImportPreview,
   GlobalSettings,
@@ -124,6 +125,7 @@ import type {
   WorktreeLineage,
   WorktreeMeta,
   WorktreeRemoteBranchConflictEvent,
+  RemoveWorktreeResult,
   WorktreeSetupLaunch,
   WorktreeStartupLaunch,
   WorkspaceSessionState
@@ -214,7 +216,9 @@ import type { SkillDiscoveryResult } from '../shared/skills'
 import type {
   CrashReportRecord,
   CrashReportSubmitArgs,
-  CrashReportSubmitResult
+  CrashReportSubmitResult,
+  ReactErrorBoundaryReportArgs,
+  ReactErrorBoundaryReportResult
 } from '../shared/crash-reporting'
 
 export type { ShellOpenLocalPathResult } from '../shared/shell-open-types'
@@ -765,7 +769,16 @@ export type PreloadApi = {
       sourceBranch?: string
       isCrossRepository?: boolean
     }) => Promise<{ baseBranch: string; pushTarget?: GitPushTarget } | { error: string }>
-    remove: (args: { worktreeId: string; force?: boolean; skipArchive?: boolean }) => Promise<void>
+    remove: (args: {
+      worktreeId: string
+      force?: boolean
+      skipArchive?: boolean
+    }) => Promise<RemoveWorktreeResult>
+    forceDeletePreservedBranch: (args: {
+      worktreeId: string
+      branchName: string
+      expectedHead: string
+    }) => Promise<ForceDeleteWorktreeBranchResult>
     updateMeta: (args: { worktreeId: string; updates: Partial<WorktreeMeta> }) => Promise<Worktree>
     listLineage: () => Promise<Record<string, WorktreeLineage>>
     updateLineage: (args: {
@@ -842,6 +855,7 @@ export type PreloadApi = {
     signal: (id: string, signal: string) => void
     kill: (id: string, opts?: { keepHistory?: boolean }) => Promise<void>
     ackColdRestore: (id: string) => void
+    pauseOutput: (id: string, paused: boolean) => void
     hasChildProcesses: (id: string) => Promise<boolean>
     getForegroundProcess: (id: string) => Promise<string | null>
     getCwd: (id: string) => Promise<string>
@@ -884,6 +898,9 @@ export type PreloadApi = {
     getLatestPending: () => Promise<CrashReportRecord | null>
     getLatestReport: () => Promise<CrashReportRecord | null>
     dismiss: (args: { reportId: string }) => Promise<CrashReportRecord | null>
+    recordRendererError: (
+      args: ReactErrorBoundaryReportArgs
+    ) => Promise<ReactErrorBoundaryReportResult>
     submit: (args: CrashReportSubmitArgs) => Promise<CrashReportSubmitResult>
     copyLatestDiagnostics: (args?: {
       reportId?: string
@@ -1497,7 +1514,7 @@ export type PreloadApi = {
     openInFileManager: (path: string) => Promise<ShellOpenLocalPathResult>
     openInExternalEditor: (path: string, command?: string) => Promise<ShellOpenLocalPathResult>
     openUrl: (url: string) => Promise<void>
-    openFilePath: (path: string) => Promise<void>
+    openFilePath: (path: string) => Promise<boolean>
     openFileUri: (uri: string) => Promise<void>
     pathExists: (path: string) => Promise<boolean>
     pickAttachment: () => Promise<string | null>
@@ -1518,9 +1535,12 @@ export type PreloadApi = {
   }
   browser: BrowserApi
   hooks: {
-    check: (args: {
-      repoId: string
-    }) => Promise<{ hasHooks: boolean; hooks: OrcaHooks | null; mayNeedUpdate: boolean }>
+    check: (args: { repoId: string }) => Promise<{
+      status?: 'ok' | 'error'
+      hasHooks: boolean
+      hooks: OrcaHooks | null
+      mayNeedUpdate: boolean
+    }>
     inspectSetupScriptImports: (args: { repoId: string }) => Promise<SetupScriptImportCandidate[]>
     createIssueCommandRunner: (args: {
       repoId: string
@@ -1528,6 +1548,7 @@ export type PreloadApi = {
       command: string
     }) => Promise<WorktreeSetupLaunch>
     readIssueCommand: (args: { repoId: string }) => Promise<{
+      status?: 'ok' | 'error'
       localContent: string | null
       sharedContent: string | null
       effectiveContent: string | null
@@ -1883,8 +1904,10 @@ export type PreloadApi = {
     ) => () => void
     onOpenQuickOpen: (callback: () => void) => () => void
     onOpenNewWorkspace: (callback: () => void) => () => void
+    onDeleteCurrentWorkspace: (callback: () => void) => () => void
     onOpenTasks: (callback: () => void) => () => void
     onJumpToWorktreeIndex: (callback: (index: number) => void) => () => void
+    onJumpToTabIndex: (callback: (index: number) => void) => () => void
     onWorktreeHistoryNavigate: (callback: (direction: 'back' | 'forward') => void) => () => void
     onNewBrowserTab: (callback: () => void) => () => void
     onRequestTabCreate: (
@@ -2198,6 +2221,9 @@ export type PreloadApi = {
     listDistros: () => Promise<string[]>
   }
   pwsh: {
+    isAvailable: () => Promise<boolean>
+  }
+  gitBash: {
     isAvailable: () => Promise<boolean>
   }
   agentStatus: {

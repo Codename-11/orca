@@ -33,12 +33,14 @@ import type {
   CreateWorktreeResult,
   DetectedWorktree,
   DetectedWorktreeListResult,
+  ForceDeleteWorktreeBranchResult,
   GitPushTarget,
   GitWorktreeInfo,
   GitHubOwnerRepo,
   GlobalSettings,
   PersistedUIState,
   Repo,
+  RemoveWorktreeResult,
   StatsSummary,
   Worktree,
   WorktreeLineage,
@@ -54,7 +56,8 @@ import type {
   ProjectGroupImportMode,
   ProjectGroupImportResult,
   TabGroupLayoutNode,
-  TuiAgent
+  TuiAgent,
+  WorkspaceCreateTelemetrySource
 } from '../../shared/types'
 import type { FeatureInteractionId } from '../../shared/feature-interactions'
 import { FOLDER_WORKSPACE_INSTANCE_SEPARATOR, splitWorktreeId } from '../../shared/worktree-id'
@@ -316,6 +319,7 @@ import {
   addWorktree,
   addSparseWorktree,
   assertWorktreeCleanForRemoval,
+  forceDeleteLocalBranch,
   removeWorktree
 } from '../git/worktree'
 import type { AddWorktreeResult } from '../git/worktree'
@@ -740,6 +744,7 @@ type MessageWaiter = {
   typeFilter: string[] | undefined
   resolve: (result: void) => void
   timeout: NodeJS.Timeout | null
+  abortCleanup: (() => void) | null
 }
 
 function omitUndefinedProperties<T extends Record<string, unknown>>(value: T): Partial<T> {
@@ -769,7 +774,13 @@ type RuntimeWorktreeRemovalTarget = {
 
 type RuntimeWorktreeRemovalInFlight = {
   optionsKey: string
-  promise: Promise<{ warning?: string }>
+  promise: Promise<RemoveWorktreeResult & { warning?: string }>
+}
+
+type PreservedBranchCleanupTarget = {
+  branchName: string
+  head: string
+  pushTarget?: GitPushTarget
 }
 
 function getRuntimeWorktreeRemovalOptionsKey(force: boolean, runHooks: boolean): string {
@@ -1309,6 +1320,7 @@ export class OrcaRuntimeService {
   private canonicalFetchKeyCache = new Map<string, string>()
   private optimisticReconcileTokens = new Map<string, string>()
   private removeManagedWorktreeInFlight = new Map<string, RuntimeWorktreeRemovalInFlight>()
+  private preservedBranchCleanupByWorktreeId = new Map<string, PreservedBranchCleanupTarget>()
   private readonly getLocalProviderFn: (() => IPtyProvider) | null
   private accountServices: RuntimeAccountServices | null = null
   private commitMessageAgentEnv: CommitMessageAgentEnvironmentResolvers | null = null
@@ -2245,7 +2257,7 @@ export class OrcaRuntimeService {
     this.ptyOutputSequenceById.set(ptyId, outputSequence)
     this.recentPtyOutputById.set(
       ptyId,
-      `${this.recentPtyOutputById.get(ptyId) ?? ''}${data}`.slice(-RECENT_PTY_OUTPUT_LIMIT)
+      appendRecentPtyOutput(this.recentPtyOutputById.get(ptyId), data)
     )
     // Agent detection runs on raw data before leaf processing, since the
     // tail buffer logic normalizes away the OSC sequences we need.
@@ -7405,6 +7417,7 @@ export class OrcaRuntimeService {
     linkedGitLabIssue?: number | null
     comment?: string
     displayName?: string
+    telemetrySource?: WorkspaceCreateTelemetrySource
     workspaceStatus?: string
     manualOrder?: number
     sparseCheckout?: { directories: string[]; presetId?: string }
@@ -8869,11 +8882,108 @@ export class OrcaRuntimeService {
     deleteWorktreeHistoryDir(worktreeId)
   }
 
+  private rememberPreservedBranchCleanupTarget(
+    worktreeId: string,
+    result: RemoveWorktreeResult | undefined,
+    fallbackHead: string | undefined,
+    pushTarget: GitPushTarget | undefined
+  ): void {
+    if (result?.preservedBranch) {
+      const head = result.preservedBranch.head ?? fallbackHead
+      if (!head) {
+        throw new Error(
+          `Cannot safely offer force-delete for preserved branch "${result.preservedBranch.branchName}" without its saved commit.`
+        )
+      }
+      this.preservedBranchCleanupByWorktreeId.set(worktreeId, {
+        branchName: result.preservedBranch.branchName,
+        head,
+        ...(pushTarget ? { pushTarget } : {})
+      })
+      return
+    }
+    this.preservedBranchCleanupByWorktreeId.delete(worktreeId)
+  }
+
+  private preserveBranchHeadFallback(
+    result: RemoveWorktreeResult | undefined,
+    fallbackHead: string | undefined
+  ): RemoveWorktreeResult {
+    if (!result?.preservedBranch || result.preservedBranch.head || !fallbackHead) {
+      return result ?? {}
+    }
+    return {
+      ...result,
+      preservedBranch: {
+        ...result.preservedBranch,
+        head: fallbackHead
+      }
+    }
+  }
+
+  async forceDeletePreservedBranch(
+    worktreeSelector: string,
+    branchName: string,
+    expectedHead: string
+  ): Promise<ForceDeleteWorktreeBranchResult> {
+    if (!this.store) {
+      throw new Error('runtime_unavailable')
+    }
+    const removalTarget = parseExactWorktreeIdSelector(worktreeSelector)
+    const cleanupTarget = removalTarget
+      ? this.preservedBranchCleanupByWorktreeId.get(removalTarget.id)
+      : undefined
+    if (
+      !removalTarget ||
+      !cleanupTarget ||
+      cleanupTarget.branchName !== branchName ||
+      cleanupTarget.head !== expectedHead
+    ) {
+      throw new Error(`No preserved branch cleanup is pending for "${branchName}".`)
+    }
+
+    const repo = this.store.getRepo(removalTarget.repoId)
+    if (!repo) {
+      throw new Error('repo_not_found')
+    }
+    if (isFolderRepo(repo)) {
+      throw new Error('Folder workspaces do not have local Git branches.')
+    }
+
+    if (repo.connectionId) {
+      const provider = requireSshGitProvider(repo.connectionId)
+      await forceDeleteLocalBranch(
+        repo.path,
+        cleanupTarget.branchName,
+        cleanupTarget.head,
+        (argv, cwd) => provider.exec(argv, cwd)
+      )
+      await cleanupUnusedWorktreePushTargetRemoteSsh(
+        provider,
+        repo.path,
+        removalTarget.id,
+        cleanupTarget.pushTarget,
+        this.store
+      )
+    } else {
+      await forceDeleteLocalBranch(repo.path, cleanupTarget.branchName, cleanupTarget.head)
+      await cleanupUnusedWorktreePushTargetRemote(
+        repo.path,
+        removalTarget.id,
+        cleanupTarget.pushTarget,
+        this.store
+      )
+    }
+
+    this.preservedBranchCleanupByWorktreeId.delete(removalTarget.id)
+    return { deleted: true }
+  }
+
   async removeManagedWorktree(
     worktreeSelector: string,
     force = false,
     runHooks = false
-  ): Promise<{ warning?: string }> {
+  ): Promise<RemoveWorktreeResult & { warning?: string }> {
     if (!this.store) {
       throw new Error('runtime_unavailable')
     }
@@ -8890,7 +9000,7 @@ export class OrcaRuntimeService {
 
     // Why: runtime callers can race the same workspace through CLI/mobile
     // retries. Share one destructive Git/filesystem operation per worktree ID.
-    const removal = (async (): Promise<{ warning?: string }> => {
+    const removal = (async (): Promise<RemoveWorktreeResult & { warning?: string }> => {
       const repo = store.getRepo(removalTarget.repoId)
       if (!repo) {
         throw new Error('repo_not_found')
@@ -8913,6 +9023,7 @@ export class OrcaRuntimeService {
           })
         }
         this.removeWorktreeMetadataAndHistory(store, removalTarget.id)
+        this.preservedBranchCleanupByWorktreeId.delete(removalTarget.id)
         this.invalidateResolvedWorktreeCache()
         this.notifier?.worktreesChanged(repo.id)
         return {}
@@ -8987,6 +9098,7 @@ export class OrcaRuntimeService {
           }
           this.clearOptimisticReconcileToken(removalTarget.id)
           this.removeWorktreeMetadataAndHistory(store, removalTarget.id)
+          this.preservedBranchCleanupByWorktreeId.delete(removalTarget.id)
           this.invalidateResolvedWorktreeCache()
           invalidateAuthorizedRootsCache()
           this.notifier?.worktreesChanged(repo.id)
@@ -9012,6 +9124,7 @@ export class OrcaRuntimeService {
               ))
           this.clearOptimisticReconcileToken(removalTarget.id)
           this.removeWorktreeMetadataAndHistory(store, removalTarget.id)
+          this.preservedBranchCleanupByWorktreeId.delete(removalTarget.id)
           this.invalidateResolvedWorktreeCache()
           invalidateAuthorizedRootsCache()
           this.notifier?.worktreesChanged(repo.id)
@@ -9022,9 +9135,13 @@ export class OrcaRuntimeService {
       const canonicalWorktreePath = registeredWorktree.path
       const deleteBranch = removedMeta?.preserveBranchOnDelete !== true
       if (repo.connectionId) {
-        await (deleteBranch
+        const rawRemovalResult = await (deleteBranch
           ? provider!.removeWorktree(canonicalWorktreePath, force)
           : provider!.removeWorktree(canonicalWorktreePath, force, { deleteBranch }))
+        const removalResult = this.preserveBranchHeadFallback(
+          rawRemovalResult,
+          registeredWorktree.head
+        )
         await cleanupUnusedWorktreePushTargetRemoteSsh(
           provider!,
           repo.path,
@@ -9032,12 +9149,18 @@ export class OrcaRuntimeService {
           removedPushTarget,
           store
         )
+        this.rememberPreservedBranchCleanupTarget(
+          removalTarget.id,
+          removalResult,
+          registeredWorktree.head,
+          removedPushTarget
+        )
         this.clearOptimisticReconcileToken(removalTarget.id)
         this.removeWorktreeMetadataAndHistory(store, removalTarget.id)
         this.invalidateResolvedWorktreeCache()
         invalidateAuthorizedRootsCache()
         this.notifier?.worktreesChanged(repo.id)
-        return {}
+        return removalResult ?? {}
       }
 
       const hooks = getEffectiveHooks(repo)
@@ -9092,10 +9215,14 @@ export class OrcaRuntimeService {
           })
       }
 
+      let removalResult: RemoveWorktreeResult | undefined
       try {
-        await (deleteBranch
-          ? removeWorktree(repo.path, canonicalWorktreePath, force)
-          : removeWorktree(repo.path, canonicalWorktreePath, force, { deleteBranch }))
+        removalResult = this.preserveBranchHeadFallback(
+          await (deleteBranch
+            ? removeWorktree(repo.path, canonicalWorktreePath, force)
+            : removeWorktree(repo.path, canonicalWorktreePath, force, { deleteBranch })),
+          registeredWorktree.head
+        )
       } catch (error) {
         if (isOrphanedWorktreeError(error)) {
           if (await canSafelyRemoveOrphanedWorktreeDirectory(canonicalWorktreePath, repo.path)) {
@@ -9118,6 +9245,7 @@ export class OrcaRuntimeService {
           )
           this.clearOptimisticReconcileToken(removalTarget.id)
           this.removeWorktreeMetadataAndHistory(store, removalTarget.id)
+          this.preservedBranchCleanupByWorktreeId.delete(removalTarget.id)
           this.invalidateResolvedWorktreeCache()
           invalidateAuthorizedRootsCache()
           this.notifier?.worktreesChanged(repo.id)
@@ -9134,12 +9262,19 @@ export class OrcaRuntimeService {
         removedPushTarget,
         store
       )
+      this.rememberPreservedBranchCleanupTarget(
+        removalTarget.id,
+        removalResult,
+        registeredWorktree.head,
+        removedPushTarget
+      )
       this.clearOptimisticReconcileToken(removalTarget.id)
       this.removeWorktreeMetadataAndHistory(store, removalTarget.id)
       this.invalidateResolvedWorktreeCache()
       invalidateAuthorizedRootsCache()
       this.notifier?.worktreesChanged(repo.id)
       return {
+        ...removalResult,
         ...(warning ? { warning } : {})
       }
     })()
@@ -9583,7 +9718,7 @@ export class OrcaRuntimeService {
   // Why: mobile clients may subscribe before the PTY spawns (the left pane
   // of a new workspace). Instead of bailing with a bare scrollback+end,
   // wait for the PTY to appear so the subscribe can proceed with phone-fit.
-  waitForLeafPtyId(handle: string, timeoutMs = 10_000): Promise<string> {
+  waitForLeafPtyId(handle: string, timeoutMs = 10_000, signal?: AbortSignal): Promise<string> {
     const leaf = this.resolveLeafForHandle(handle)
     if (leaf?.ptyId) {
       return Promise.resolve(leaf.ptyId)
@@ -9597,15 +9732,40 @@ export class OrcaRuntimeService {
     const savedLeafId = record?.leafId ?? null
 
     return new Promise<string>((resolve, reject) => {
-      const timer = setTimeout(() => {
+      let timer: ReturnType<typeof setTimeout> | null = null
+      let check: () => void = () => {}
+      const cleanup = (): void => {
+        if (timer) {
+          clearTimeout(timer)
+          timer = null
+        }
         const idx = this.graphSyncCallbacks.indexOf(check)
         if (idx !== -1) {
           this.graphSyncCallbacks.splice(idx, 1)
         }
-        reject(new Error('Timed out waiting for PTY to spawn'))
+        signal?.removeEventListener('abort', onAbort)
+      }
+      const finish = (ptyId: string): void => {
+        cleanup()
+        resolve(ptyId)
+      }
+      const fail = (error: Error): void => {
+        cleanup()
+        reject(error)
+      }
+      const onAbort = (): void => {
+        fail(new Error('request_aborted'))
+      }
+      if (signal?.aborted) {
+        reject(new Error('request_aborted'))
+        return
+      }
+      signal?.addEventListener('abort', onAbort, { once: true })
+      timer = setTimeout(() => {
+        fail(new Error('Timed out waiting for PTY to spawn'))
       }, timeoutMs)
 
-      const check = (): void => {
+      check = (): void => {
         // Try the handle first (works if handle wasn't invalidated yet)
         let ptyId = this.resolveLeafForHandle(handle)?.ptyId
         // Why: when ptyId transitions null→real, issueHandle invalidates the
@@ -9615,12 +9775,7 @@ export class OrcaRuntimeService {
           ptyId = directLeaf?.ptyId ?? null
         }
         if (ptyId) {
-          clearTimeout(timer)
-          const idx = this.graphSyncCallbacks.indexOf(check)
-          if (idx !== -1) {
-            this.graphSyncCallbacks.splice(idx, 1)
-          }
-          resolve(ptyId)
+          finish(ptyId)
         }
       }
       this.graphSyncCallbacks.push(check)
@@ -11262,7 +11417,8 @@ export class OrcaRuntimeService {
         handle,
         typeFilter: options?.typeFilter,
         resolve,
-        timeout: null
+        timeout: null,
+        abortCleanup: null
       }
 
       // Why: if the caller aborts (socket closed on the RPC side — see design
@@ -11279,13 +11435,11 @@ export class OrcaRuntimeService {
           resolve()
           return
         }
+        waiter.abortCleanup = () => signal.removeEventListener('abort', onAbort)
         signal.addEventListener('abort', onAbort, { once: true })
       }
 
       waiter.timeout = setTimeout(() => {
-        if (signal) {
-          signal.removeEventListener('abort', onAbort)
-        }
         this.removeMessageWaiter(waiter)
         resolve()
       }, timeoutMs)
@@ -11308,6 +11462,10 @@ export class OrcaRuntimeService {
     if (waiter.timeout) {
       clearTimeout(waiter.timeout)
       waiter.timeout = null
+    }
+    if (waiter.abortCleanup) {
+      waiter.abortCleanup()
+      waiter.abortCleanup = null
     }
     const waiters = this.messageWaitersByHandle.get(waiter.handle)
     if (waiters) {
@@ -12507,11 +12665,34 @@ function withTimeoutResult<T>(
   })
 }
 
-function buildPreview(lines: string[], partialLine: string): string {
-  const previewLines = buildTailLines(lines, partialLine)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .slice(-MAX_PREVIEW_LINES)
+export function appendRecentPtyOutput(previous: string | undefined, data: string): string {
+  if (data.length >= RECENT_PTY_OUTPUT_LIMIT) {
+    return data.slice(-RECENT_PTY_OUTPUT_LIMIT)
+  }
+  return `${previous ?? ''}${data}`.slice(-RECENT_PTY_OUTPUT_LIMIT)
+}
+
+export function buildPreview(lines: string[], partialLine: string): string {
+  const previewLines: string[] = []
+  const collectVisibleLine = (line: string): void => {
+    const trimmed = line.trim()
+    if (trimmed.length > 0) {
+      previewLines.push(trimmed)
+    }
+  }
+
+  if (partialLine.length > 0) {
+    collectVisibleLine(partialLine)
+  }
+  for (
+    let index = lines.length - 1;
+    index >= 0 && previewLines.length < MAX_PREVIEW_LINES;
+    index--
+  ) {
+    collectVisibleLine(lines[index])
+  }
+  previewLines.reverse()
+
   const preview = previewLines.join('\n')
   return preview.length > MAX_PREVIEW_CHARS
     ? preview.slice(preview.length - MAX_PREVIEW_CHARS)
@@ -12528,7 +12709,7 @@ function buildTerminalWaitText(lines: string[], partialLine: string, preview: st
   return waitText.length > 0 ? waitText : preview
 }
 
-function appendNormalizedToTailBuffer(
+export function appendNormalizedToTailBuffer(
   previousLines: string[],
   previousPartialLine: string,
   normalizedChunk: string
@@ -12561,8 +12742,8 @@ function appendNormalizedToTailBuffer(
       : previousLines
   let truncated = previousPartialWasCapped || nextPartialLine.length > MAX_TAIL_PARTIAL_CHARS
 
-  while (nextLines.length > MAX_TAIL_LINES) {
-    nextLines.shift()
+  if (nextLines.length > MAX_TAIL_LINES) {
+    nextLines = nextLines.slice(nextLines.length - MAX_TAIL_LINES)
     truncated = true
   }
 
@@ -12572,8 +12753,13 @@ function appendNormalizedToTailBuffer(
     }
     let totalChars =
       nextLines.reduce((sum, line) => sum + line.length, 0) + retainedPartialLine.length
-    while (nextLines.length > 0 && totalChars > MAX_TAIL_CHARS) {
-      totalChars -= nextLines.shift()!.length
+    let trimStartIndex = 0
+    while (trimStartIndex < nextLines.length && totalChars > MAX_TAIL_CHARS) {
+      totalChars -= nextLines[trimStartIndex].length
+      trimStartIndex += 1
+    }
+    if (trimStartIndex > 0) {
+      nextLines = nextLines.slice(trimStartIndex)
       truncated = true
     }
   }
@@ -12637,12 +12823,15 @@ function trimTerminalPreviewToCharacterBudget(
     return { tail: lines, limited: false, omittedLineCount: 0, slicedFirstLine: false }
   }
 
-  const tail = [...lines]
   let omittedLineCount = 0
-  while (tail.length > 0 && totalCharacters - tail[0].length >= characterBudget) {
-    totalCharacters -= tail.shift()!.length
+  while (
+    omittedLineCount < lines.length &&
+    totalCharacters - lines[omittedLineCount].length >= characterBudget
+  ) {
+    totalCharacters -= lines[omittedLineCount].length
     omittedLineCount += 1
   }
+  const tail = omittedLineCount > 0 ? lines.slice(omittedLineCount) : [...lines]
 
   let slicedFirstLine = false
   if (tail.length > 0 && totalCharacters > characterBudget) {
