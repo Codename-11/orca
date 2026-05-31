@@ -20,6 +20,11 @@ import { isPtyLocked } from '@/lib/pane-manager/mobile-driver-state'
 import { isPaneReplaying, replayIntoTerminal } from './replay-guard'
 import { terminalOutputPrefersDomRenderer } from '@/lib/pane-manager/terminal-complex-script'
 import {
+  PANE_PTY_RESIZE_HOLD_FLUSH_EVENT,
+  queuePanePtyResizeIfHeld,
+  type PanePtyResizeHoldFlushDetail
+} from '@/lib/pane-manager/pane-pty-resize-hold'
+import {
   POST_REPLAY_LIVE_SNAPSHOT_RESET,
   POST_REPLAY_MODE_RESET,
   POST_REPLAY_REATTACH_RESET,
@@ -75,7 +80,7 @@ const SSH_SESSION_EXPIRED_ERROR = 'SSH_SESSION_EXPIRED'
 const REMOTE_PTY_ID_PREFIX = 'remote:'
 const PTY_CONNECT_DIAG_LIMIT = 200
 const AGENT_TASK_COMPLETE_NOTIFICATION_GRACE_MS = 250
-const AGENT_TASK_COMPLETE_NOTIFICATION_MAX_WAIT_MS = 1000
+const AGENT_TASK_COMPLETE_NOTIFICATION_MAX_WAIT_MS = 1500
 const AGENT_TASK_COMPLETE_NOTIFICATION_DETAIL_MAX_AGE_MS = 10_000
 const COMMAND_CODE_OUTPUT_DONE_SETTLE_MS = 1500
 const HIDDEN_OUTPUT_RESTORE_SCROLLBACK_ROWS = 5000
@@ -125,8 +130,7 @@ let codexRestartNoticePresenceSource: Record<
 > | null = null
 let codexRestartNoticePresence = false
 
-export type PanePtyBinding = IDisposable & {
-  syncRendererOutputVisibility: () => void
+type PanePtyBinding = IDisposable & {
   syncProcessTracking: () => void
 }
 
@@ -179,6 +183,19 @@ function hasAgentNotificationDetail(entry: AgentStatusEntry | undefined): boolea
     entry &&
     Date.now() - entry.updatedAt <= AGENT_TASK_COMPLETE_NOTIFICATION_DETAIL_MAX_AGE_MS &&
     (entry.lastAssistantMessage || entry.toolName || entry.toolInput)
+  )
+}
+
+function canDispatchAgentNotificationAfterGrace(
+  entry: AgentStatusEntry | undefined,
+  options: { allowDoneDetailAfterGrace?: boolean } = {}
+): boolean {
+  // Why: hook-backed goal/mission loops can report `done` between milestones.
+  // User-input states may notify as soon as detail arrives, but `done` waits
+  // for the max quiet window so resumed work can cancel the pending banner.
+  return (
+    hasAgentNotificationDetail(entry) &&
+    (entry?.state !== 'done' || options.allowDoneDetailAfterGrace === true)
   )
 }
 
@@ -637,12 +654,26 @@ export function connectPanePty(
     terminalKeyTarget.addEventListener('keydown', onTerminalKeyDown, { capture: true })
   }
 
+  const setPanePtyFitBinding = (ptyId: string): void => {
+    bindPanePtyId(pane.id, ptyId, deps.tabId)
+    pane.container.dataset.ptyId = ptyId
+  }
+  const clearPanePtyFitBinding = (): void => {
+    // Why: fit bindings live in a module-level map, so pane teardown must
+    // clear them explicitly instead of relying on DOM removal.
+    bindPanePtyId(pane.id, null, deps.tabId)
+    delete pane.container.dataset.ptyId
+  }
+
   const agentCompletionCoordinator = createAgentCompletionCoordinator({
     paneKey: cacheKey,
     getPtyId: () => transport.getPtyId(),
     getSettings: () => useAppStore.getState().settings,
     inspectProcess: inspectRuntimeTerminalProcess,
-    dispatchCompletion: (title) => scheduleAgentTaskCompleteNotification(title),
+    dispatchCompletion: (title, meta) =>
+      scheduleAgentTaskCompleteNotification(title, {
+        allowDoneDetailAfterGrace: meta?.quietedHookDone
+      }),
     shouldPollProcessCadence: () =>
       isAgentTaskCompleteNotificationEnabled() && deps.isVisibleRef.current,
     isLive: () => {
@@ -658,6 +689,7 @@ export function connectPanePty(
 
   const onExit = (ptyId: string): void => {
     agentCompletionCoordinator.dispose()
+    clearPanePtyFitBinding()
     deps.syncPanePtyLayoutBinding(pane.id, null)
     deps.clearRuntimePaneTitle(deps.tabId, pane.id)
     deps.clearTabPtyId(deps.tabId, ptyId)
@@ -818,8 +850,7 @@ export function connectPanePty(
   const observeTerminalGitHubPRLink = createTerminalGitHubPRLinkDetector()
 
   const onPtySpawn = (ptyId: string): void => {
-    bindPanePtyId(pane.id, ptyId, deps.tabId)
-    pane.container.dataset.ptyId = ptyId
+    setPanePtyFitBinding(ptyId)
     deps.syncPanePtyLayoutBinding(pane.id, ptyId)
     deps.updateTabPtyId(deps.tabId, ptyId)
     // Why: Command Code has no prompt-start hook. Seed the visible working row
@@ -890,7 +921,8 @@ export function connectPanePty(
 
   const hasPendingAgentTaskCompleteNotification = (): boolean =>
     isAgentTaskCompleteNotificationEnabled() &&
-    (agentTaskCompleteNotificationGraceTimer !== null ||
+    (agentCompletionCoordinator.hasPendingHookDoneCompletion() ||
+      agentTaskCompleteNotificationGraceTimer !== null ||
       agentTaskCompleteNotificationMaxTimer !== null ||
       agentTaskCompleteStatusUnsubscribe !== null)
 
@@ -930,7 +962,10 @@ export function connectPanePty(
     return enabled
   }
 
-  const scheduleAgentTaskCompleteNotification = (title: string): void => {
+  const scheduleAgentTaskCompleteNotification = (
+    title: string,
+    options: { allowDoneDetailAfterGrace?: boolean } = {}
+  ): void => {
     if (!syncAgentTaskCompleteNotificationEnabled()) {
       return
     }
@@ -963,7 +998,7 @@ export function connectPanePty(
         return
       }
       const entry = useAppStore.getState().agentStatusByPaneKey[cacheKey]
-      if (hasAgentNotificationDetail(entry)) {
+      if (canDispatchAgentNotificationAfterGrace(entry, options)) {
         dispatch()
       }
     }
@@ -1120,6 +1155,9 @@ export function connectPanePty(
       if (syncAgentTaskCompleteNotificationEnabled()) {
         agentCompletionCoordinator.observeHookStatus(payload)
       }
+      if (payload.state === 'working' && pendingTerminalBellNotification) {
+        scheduleTerminalBellNotification()
+      }
     }
   }
   const transport = runtimeEnvironmentId
@@ -1220,7 +1258,14 @@ export function connectPanePty(
     }
   })
 
-  const onResizeDisposable = pane.terminal.onResize(({ cols, rows }) => {
+  const shouldSuppressDesktopPtyResize = (): boolean => {
+    const currentPtyId = transport.getPtyId()
+    return Boolean(
+      currentPtyId && (getFitOverrideForPty(currentPtyId) || isPtyLocked(currentPtyId))
+    )
+  }
+
+  const forwardPtyResize = (cols: number, rows: number): void => {
     // Why: when a mobile-fit override is active OR mobile is currently the
     // driver of this PTY, the PTY is already at phone dims and any desktop
     // resize is wrong. Suppress resize forwarding to avoid spurious SIGWINCH
@@ -1230,8 +1275,26 @@ export function connectPanePty(
     //   transitions where override may not be set (e.g. legacy code paths).
     // The pty:resize IPC has a defense-in-depth twin. See
     // docs/mobile-presence-lock.md.
-    const currentPtyId = transport.getPtyId()
-    if (currentPtyId && (getFitOverrideForPty(currentPtyId) || isPtyLocked(currentPtyId))) {
+    if (shouldSuppressDesktopPtyResize()) {
+      return
+    }
+    transport.resize(cols, rows)
+  }
+
+  const onHeldPtyResizeFlush = (event: Event): void => {
+    const detail = (event as CustomEvent<PanePtyResizeHoldFlushDetail>).detail
+    if (!detail) {
+      return
+    }
+    forwardPtyResize(detail.cols, detail.rows)
+  }
+  pane.container.addEventListener(PANE_PTY_RESIZE_HOLD_FLUSH_EVENT, onHeldPtyResizeFlush)
+
+  const onResizeDisposable = pane.terminal.onResize(({ cols, rows }) => {
+    if (shouldSuppressDesktopPtyResize()) {
+      return
+    }
+    if (queuePanePtyResizeIfHeld(pane.container, cols, rows)) {
       return
     }
     transport.resize(cols, rows)
@@ -1289,10 +1352,6 @@ export function connectPanePty(
   if (geometryReportObserver && pane.container instanceof Element) {
     geometryReportObserver.observe(pane.container)
   }
-  let rendererOutputPausedPtyId: string | null = null
-  let syncRendererOutputVisibility = (): void => {}
-  let clearHiddenStartupRendererQueryTimer = (): void => {}
-
   // Defer PTY spawn/attach to next frame so FitAddon has time to calculate
   // the correct terminal dimensions from the laid-out container.
   connectFrame = requestAnimationFrame(() => {
@@ -1410,7 +1469,6 @@ export function connectPanePty(
           if (typeof gen === 'number' && resolvedPtyId) {
             if (!isRemoteRuntimePtyId(resolvedPtyId)) {
               registerPaneSerializerFor(resolvedPtyId)
-              syncRendererOutputVisibility()
               void window.api.pty.settlePaneSerializer(cacheKey, gen).catch(() => {})
             }
           } else if (typeof gen === 'number') {
@@ -1488,7 +1546,6 @@ export function connectPanePty(
     let hiddenOutputRestorePtyId: string | null = null
     let hiddenOutputRestoreGeneration = 0
     let hiddenMode2031ScanTail = ''
-    let hiddenStartupRendererQueryTimer: ReturnType<typeof setTimeout> | null = null
     const hiddenStartupRendererQueryUntil = shouldKeepHiddenStartupRendererQueriesLive(paneStartup)
       ? Date.now() + HIDDEN_STARTUP_RENDERER_QUERY_WINDOW_MS
       : 0
@@ -1497,39 +1554,12 @@ export function connectPanePty(
       return Boolean(ptyId) && !isRemoteRuntimePtyId(ptyId)
     }
 
-    function canPauseRendererOutput(ptyId: string | null): ptyId is string {
-      return canUseMainBufferSnapshot(ptyId) && typeof window.api.pty.pauseOutput === 'function'
-    }
-
-    function setRendererOutputPaused(ptyId: string, paused: boolean): void {
-      window.api.pty.pauseOutput(ptyId, paused)
-      rendererOutputPausedPtyId = paused ? ptyId : null
-    }
-
-    clearHiddenStartupRendererQueryTimer = (): void => {
-      if (hiddenStartupRendererQueryTimer !== null) {
-        clearTimeout(hiddenStartupRendererQueryTimer)
-        hiddenStartupRendererQueryTimer = null
-      }
-    }
-
     function isHiddenStartupRendererQueryWindowActive(): boolean {
       return (
         paneStartup !== null &&
         Date.now() < hiddenStartupRendererQueryUntil &&
         !shouldWritePtyOutputForeground(deps.isVisibleRef.current)
       )
-    }
-
-    function scheduleHiddenStartupRendererQueryExpiry(): void {
-      if (hiddenStartupRendererQueryTimer !== null) {
-        return
-      }
-      const delay = Math.max(0, hiddenStartupRendererQueryUntil - Date.now())
-      hiddenStartupRendererQueryTimer = setTimeout(() => {
-        hiddenStartupRendererQueryTimer = null
-        syncRendererOutputVisibility()
-      }, delay)
     }
 
     function respondToSkippedMode2031Subscribe(data: string): void {
@@ -1545,42 +1575,6 @@ export function connectPanePty(
       // theme-dependent styling they would have used in a visible pane.
       transport.sendInput(mode2031SequenceFor(mode))
     }
-
-    syncRendererOutputVisibility = (): void => {
-      const ptyId = transport.getPtyId()
-      if (rendererOutputPausedPtyId !== null && rendererOutputPausedPtyId !== ptyId) {
-        setRendererOutputPaused(rendererOutputPausedPtyId, false)
-      }
-      if (!canPauseRendererOutput(ptyId)) {
-        return
-      }
-      const shouldPause = !shouldWritePtyOutputForeground(deps.isVisibleRef.current)
-      if (shouldPause) {
-        if (isHiddenStartupRendererQueryWindowActive()) {
-          // Why: startup TUIs often query OSC 10/11 and DEC color-scheme state
-          // before their first stable frame. Let xterm parse that short window
-          // so its theme-aware auto-replies reach the PTY.
-          scheduleHiddenStartupRendererQueryExpiry()
-          if (rendererOutputPausedPtyId === ptyId) {
-            setRendererOutputPaused(ptyId, false)
-          }
-          return
-        }
-        clearHiddenStartupRendererQueryTimer()
-        if (rendererOutputPausedPtyId !== ptyId) {
-          // Why: main owns the retained terminal buffer for snapshot-capable
-          // PTYs, so hidden panes can stop receiving live bytes entirely.
-          setRendererOutputPaused(ptyId, true)
-        }
-        return
-      }
-      clearHiddenStartupRendererQueryTimer()
-      if (rendererOutputPausedPtyId === ptyId) {
-        setRendererOutputPaused(ptyId, false)
-        markHiddenOutputRestoreNeeded()
-      }
-    }
-
     function beforeTerminalOutputWrite(chunk: string): void {
       // Why: hidden tab output is coalesced by the scheduler. Run per-byte
       // renderer checks at the xterm write boundary so background PTY bursts
@@ -1987,7 +1981,6 @@ export function connectPanePty(
       typeof document.removeEventListener === 'function'
     ) {
       const onDocumentVisibilityChange = (): void => {
-        syncRendererOutputVisibility()
         if (shouldWritePtyOutputForeground(deps.isVisibleRef.current)) {
           requestHiddenOutputRestoreIfNeeded()
         }
@@ -1998,7 +1991,6 @@ export function connectPanePty(
     }
 
     const dataCallback = (data: string, meta?: PtyDataMeta): void => {
-      syncRendererOutputVisibility()
       resetHiddenOutputRestoreIfPtyChanged()
       observeTerminalBracketedPasteModeOutput(pane.terminal, data)
       for (const link of observeTerminalGitHubPRLink(data)) {
@@ -2098,8 +2090,7 @@ export function connectPanePty(
         startFreshSpawn()
         return
       }
-      bindPanePtyId(pane.id, ptyId, deps.tabId)
-      pane.container.dataset.ptyId = ptyId
+      setPanePtyFitBinding(ptyId)
       deps.syncPanePtyLayoutBinding(pane.id, ptyId)
       deps.updateTabPtyId(deps.tabId, ptyId)
       agentCompletionCoordinator.startProcessTracking()
@@ -2109,7 +2100,6 @@ export function connectPanePty(
       // serializer and the onTitleChange-driven lastTitle source so the
       // main-process hydration path has full status parity.
       registerPaneSerializerFor(ptyId)
-      syncRendererOutputVisibility()
 
       // Strict precedence: snapshot > replay > coldRestore. Paint exactly
       // one source per reattach. Painting snapshot AND replay produced the
@@ -2378,15 +2368,15 @@ export function connectPanePty(
                     : 'undefined'
                 )
                 if (!result && expiredReattachError) {
+                  const gen = await preSignalPromise
+                  if (typeof gen === 'number') {
+                    void window.api.pty.clearPendingPaneSerializer(cacheKey, gen).catch(() => {})
+                  }
                   if (disposed) {
                     return
                   }
                   deps.syncPanePtyLayoutBinding(pane.id, null)
                   deps.clearTabPtyId(deps.tabId, pendingSessionId)
-                  const gen = await preSignalPromise
-                  if (typeof gen === 'number') {
-                    void window.api.pty.clearPendingPaneSerializer(cacheKey, gen).catch(() => {})
-                  }
                   startFreshSpawn()
                   return
                 }
@@ -2504,15 +2494,15 @@ export function connectPanePty(
       void Promise.resolve(reattachPromise)
         .then(async (result) => {
           if (!result && expiredReattachError) {
+            const gen = await preSignalPromise
+            if (typeof gen === 'number') {
+              void window.api.pty.clearPendingPaneSerializer(cacheKey, gen).catch(() => {})
+            }
             if (disposed) {
               return
             }
             deps.syncPanePtyLayoutBinding(pane.id, null)
             deps.clearTabPtyId(deps.tabId, deferredReattachSessionId)
-            const gen = await preSignalPromise
-            if (typeof gen === 'number') {
-              void window.api.pty.clearPendingPaneSerializer(cacheKey, gen).catch(() => {})
-            }
             startFreshSpawn()
             return
           }
@@ -2577,7 +2567,6 @@ export function connectPanePty(
         deps.syncPanePtyLayoutBinding(pane.id, attachPtyId)
         deps.updateTabPtyId(deps.tabId, attachPtyId)
         agentCompletionCoordinator.startProcessTracking()
-        syncRendererOutputVisibility()
       } catch (err) {
         reportError(err instanceof Error ? err.message : String(err))
         deps.clearTabPtyId(deps.tabId, attachPtyId)
@@ -2628,7 +2617,6 @@ export function connectPanePty(
             // Why: attach sets the transport's PTY id; starting process
             // tracking before this point no-ops because getPtyId() is empty.
             agentCompletionCoordinator.startProcessTracking()
-            syncRendererOutputVisibility()
           })
           .catch((err) => {
             reportError(err instanceof Error ? err.message : String(err))
@@ -2642,9 +2630,6 @@ export function connectPanePty(
   })
 
   return {
-    syncRendererOutputVisibility() {
-      syncRendererOutputVisibility()
-    },
     syncProcessTracking() {
       agentCompletionCoordinator.startProcessTracking()
     },
@@ -2677,11 +2662,7 @@ export function connectPanePty(
       unregisterBacklogRecovery = null
       unregisterDocumentVisibilityRecovery?.()
       unregisterDocumentVisibilityRecovery = null
-      clearHiddenStartupRendererQueryTimer()
-      if (rendererOutputPausedPtyId !== null) {
-        window.api.pty.pauseOutput(rendererOutputPausedPtyId, false)
-        rendererOutputPausedPtyId = null
-      }
+      clearPanePtyFitBinding()
       discardTerminalOutput(pane.terminal)
       if (agentTaskCompleteSettingsUnsubscribe !== null) {
         agentTaskCompleteSettingsUnsubscribe()
@@ -2697,6 +2678,7 @@ export function connectPanePty(
       }
       onDataDisposable.dispose()
       onResizeDisposable.dispose()
+      pane.container.removeEventListener(PANE_PTY_RESIZE_HOLD_FLUSH_EVENT, onHeldPtyResizeFlush)
       geometryReportObserver?.disconnect()
       if (pendingGeometryReportRaf !== null) {
         cancelAnimationFrame(pendingGeometryReportRaf)

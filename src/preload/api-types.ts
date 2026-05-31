@@ -139,6 +139,7 @@ import type {
   WorktreeMeta,
   WorktreeRemoteBranchConflictEvent,
   RemoveWorktreeResult,
+  WorktreeDefaultTabsLaunch,
   WorktreeSetupLaunch,
   WorktreeStartupLaunch,
   WorkspaceSessionPatch,
@@ -228,6 +229,7 @@ import type {
 import type { ShellOpenLocalPathResult } from '../shared/shell-open-types'
 import type { SkillDiscoveryResult } from '../shared/skills'
 import type {
+  CrashReportBreadcrumbData,
   CrashReportRecord,
   CrashReportSubmitArgs,
   CrashReportSubmitResult,
@@ -333,6 +335,7 @@ import type {
   ExternalAutomationRunsPage,
   ExternalAutomationUpdateInput,
   AutomationRun,
+  AutomationPrecheckResult,
   AutomationUpdateInput
 } from '../shared/automations-types'
 import type {
@@ -683,6 +686,7 @@ export type PreloadApi = {
           | 'repoIcon'
           | 'hookSettings'
           | 'worktreeBaseRef'
+          | 'worktreeBasePath'
           | 'kind'
           | 'issueSourcePreference'
           | 'externalWorktreeVisibility'
@@ -869,7 +873,6 @@ export type PreloadApi = {
     signal: (id: string, signal: string) => void
     kill: (id: string, opts?: { keepHistory?: boolean }) => Promise<void>
     ackColdRestore: (id: string) => void
-    pauseOutput: (id: string, paused: boolean) => void
     hasChildProcesses: (id: string) => Promise<boolean>
     getForegroundProcess: (id: string) => Promise<string | null>
     getCwd: (id: string) => Promise<string>
@@ -915,6 +918,7 @@ export type PreloadApi = {
     recordRendererError: (
       args: ReactErrorBoundaryReportArgs
     ) => Promise<ReactErrorBoundaryReportResult>
+    recordBreadcrumb: (args: { name: string; data?: CrashReportBreadcrumbData }) => void
     submit: (args: CrashReportSubmitArgs) => Promise<CrashReportSubmitResult>
     copyLatestDiagnostics: (args?: {
       reportId?: string
@@ -2033,6 +2037,7 @@ export type PreloadApi = {
         worktreeId: string
         setup?: WorktreeSetupLaunch
         startup?: WorktreeStartupLaunch
+        defaultTabs?: WorktreeDefaultTabsLaunch
       }) => void
     ) => () => void
     onCreateTerminal: (
@@ -2296,6 +2301,10 @@ export type PreloadApi = {
     update: (args: { id: string; updates: AutomationUpdateInput }) => Promise<Automation>
     delete: (args: { id: string }) => Promise<void>
     runNow: (args: { id: string }) => Promise<AutomationRun>
+    runPrecheck: (args: {
+      automationId: string
+      runId: string
+    }) => Promise<AutomationPrecheckResult | null>
     markDispatchResult: (result: AutomationDispatchResult) => Promise<AutomationRun>
     snapshotWorkspaceName: (args: { workspaceId: string; displayName: string }) => Promise<number>
     rendererReady: () => Promise<void>

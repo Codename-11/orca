@@ -151,6 +151,29 @@ describe('mobile rpc-client connection timeout', () => {
     client.close()
   })
 
+  it('ignores stale socket opens after reconnect swaps in a new socket', () => {
+    const client = connect('ws://desktop.invalid', 'token', 'server-key')
+    const firstSocket = mockSockets[0]!
+    firstSocket.emitCloseOnClose = false
+
+    vi.advanceTimersByTime(12_000)
+    vi.advanceTimersByTime(500)
+
+    const secondSocket = mockSockets[1]!
+    expect(client.getState()).toBe('connecting')
+
+    firstSocket.open()
+
+    expect(client.getState()).toBe('connecting')
+    expect(secondSocket.sent).toEqual([])
+
+    vi.advanceTimersByTime(12_000)
+
+    expect(secondSocket.close).toHaveBeenCalledTimes(1)
+
+    client.close()
+  })
+
   it('clears the open timeout once the socket opens and authenticates', () => {
     const client = connect('ws://desktop.invalid', 'token', 'server-key')
     const socket = mockSockets[0]!
@@ -478,6 +501,46 @@ describe('mobile rpc-client connection timeout', () => {
     await expect(request).rejects.toThrow('Request timed out: speech.dictation.finish')
 
     client.close()
+  })
+
+  it('applies per-request timeout overrides while waiting for reconnect', async () => {
+    const client = connect('ws://desktop.invalid', 'token', 'server-key')
+    const socket = mockSockets[0]!
+
+    socket.open()
+    socket.receive(JSON.stringify({ type: 'e2ee_ready' }))
+    socket.receive('encrypted:{"type":"e2ee_authenticated"}')
+    socket.close()
+
+    const request = client.sendRequest(
+      'speech.dictation.finish',
+      { dictationId: 'd1' },
+      {
+        timeoutMs: 123
+      }
+    )
+    let requestOutcome = 'pending'
+    request.then(
+      () => {
+        requestOutcome = 'resolved'
+      },
+      (error: Error) => {
+        requestOutcome = error.message
+      }
+    )
+
+    try {
+      await vi.advanceTimersByTimeAsync(122)
+      await Promise.resolve()
+      expect(requestOutcome).toBe('pending')
+
+      await vi.advanceTimersByTimeAsync(1)
+      await Promise.resolve()
+      expect(requestOutcome).toBe('Timed out while connecting to the remote Orca runtime.')
+    } finally {
+      client.close()
+      await request.catch(() => undefined)
+    }
   })
 
   it('rejects requests waiting for reconnect after the retry cap', async () => {

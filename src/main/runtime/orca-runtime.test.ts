@@ -220,6 +220,10 @@ vi.mock('../hooks', () => ({
   createSetupRunnerScript: vi.fn(),
   getEffectiveHooks: vi.fn().mockReturnValue(null),
   getEffectiveHooksFromConfig: vi.fn().mockReturnValue(null),
+  getDefaultTabCommandTrustContent: vi.fn(
+    (hooks: { scripts?: { setup?: string } } | null) => hooks?.scripts?.setup?.trim() ?? ''
+  ),
+  getDefaultTabsLaunch: vi.fn().mockReturnValue(undefined),
   getSetupRunnerEnvVars: (_repo: never, worktreePath: string) => ({
     ORCA_ROOT_PATH: '/remote/repo',
     ORCA_WORKTREE_PATH: worktreePath
@@ -1816,7 +1820,7 @@ describe('OrcaRuntimeService', () => {
     expect(provider.addWorktree).toHaveBeenCalledWith(
       '/remote/repo',
       'mobile-feature',
-      '/remote/repo/../mobile-feature',
+      '/remote/mobile-feature',
       { base: 'origin/main' }
     )
     expect(result.worktree).toMatchObject({
@@ -3242,6 +3246,42 @@ describe('OrcaRuntimeService', () => {
     await expect(runtime.readTerminal(handle)).resolves.toMatchObject({
       status: 'exited',
       tail: []
+    })
+  })
+
+  it('bounds disconnected background PTY records and their synthetic handles', async () => {
+    let nextPtyIndex = 0
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn: vi.fn().mockImplementation(async () => ({ id: `pty-bg-${nextPtyIndex++}` })),
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, { tabs: [], leaves: [] })
+
+    const handles: string[] = []
+    for (let index = 0; index < 140; index += 1) {
+      const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`)
+      handles.push(handle)
+      runtime.onPtyExit(`pty-bg-${index}`, 0)
+    }
+
+    const internals = runtime as unknown as {
+      ptysById: Map<string, unknown>
+      handles: Map<string, unknown>
+      handleByPtyId: Map<string, string>
+    }
+    expect(internals.ptysById.size).toBeLessThanOrEqual(128)
+    expect(internals.ptysById.has('pty-bg-0')).toBe(false)
+    expect(internals.ptysById.has('pty-bg-139')).toBe(true)
+    expect(internals.handleByPtyId.has('pty-bg-0')).toBe(false)
+    expect(internals.handles.has(handles[0]!)).toBe(false)
+
+    await expect(runtime.readTerminal(handles[0]!)).rejects.toThrow('terminal_handle_stale')
+    await expect(runtime.readTerminal(handles.at(-1)!)).resolves.toMatchObject({
+      status: 'exited'
     })
   })
 
@@ -8044,7 +8084,13 @@ describe('OrcaRuntimeService', () => {
         }
       }
     })
-    expect(activateWorktree).toHaveBeenCalledWith('repo-1', expect.any(String), result.setup)
+    expect(activateWorktree).toHaveBeenCalledWith(
+      'repo-1',
+      expect.any(String),
+      result.setup,
+      undefined,
+      undefined
+    )
   })
 
   it('passes setup payloads through when explicitly activating CLI-created worktrees', async () => {
@@ -8096,7 +8142,13 @@ describe('OrcaRuntimeService', () => {
       activate: true
     })
 
-    expect(activateWorktree).toHaveBeenCalledWith('repo-1', expect.any(String), result.setup)
+    expect(activateWorktree).toHaveBeenCalledWith(
+      'repo-1',
+      expect.any(String),
+      result.setup,
+      undefined,
+      undefined
+    )
   })
 
   it('follows normal setup policy for CLI-created worktrees without activating them', async () => {
@@ -8731,7 +8783,13 @@ describe('OrcaRuntimeService', () => {
     expect(detectRemoteAgentsMock).not.toHaveBeenCalled()
     expect(spawn).not.toHaveBeenCalled()
     expect(metaById[result.worktree.id]?.createdWithAgent).toBeUndefined()
-    expect(activateWorktree).toHaveBeenCalledWith('repo-1', result.worktree.id, undefined)
+    expect(activateWorktree).toHaveBeenCalledWith(
+      'repo-1',
+      result.worktree.id,
+      undefined,
+      undefined,
+      undefined
+    )
   })
 
   it('detects agents on the SSH host before launching remote startup drafts', async () => {
@@ -9679,7 +9737,13 @@ describe('OrcaRuntimeService', () => {
       activate: true
     })
 
-    expect(activateWorktree).toHaveBeenCalledWith('repo-1', expect.any(String), undefined)
+    expect(activateWorktree).toHaveBeenCalledWith(
+      'repo-1',
+      expect.any(String),
+      undefined,
+      undefined,
+      undefined
+    )
   })
 
   it('stamps createdAt alongside lastActivityAt so CLI-created worktrees get the Recent-sort grace window', async () => {
