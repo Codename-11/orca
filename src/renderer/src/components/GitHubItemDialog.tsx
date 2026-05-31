@@ -114,6 +114,10 @@ import {
   normalizeGitHubReviewerLogins
 } from '@/components/github-pr-reviewer-display'
 import { presentGitHubPRMergeState } from '@/components/github-pr-merge-state'
+import {
+  GITHUB_PR_MERGE_METHOD_LABELS,
+  resolveGitHubPRMergeMethods
+} from '../../../shared/github-pr-merge-methods'
 import { AGENT_CATALOG } from '@/lib/agent-catalog'
 import { filterEnabledTuiAgents } from '../../../shared/tui-agent-selection'
 import { getConnectionId } from '@/lib/connection-context'
@@ -135,6 +139,7 @@ import type {
   GitHubWorkItemDetails,
   GitHubAssignableUser,
   GitHubReaction,
+  GitHubPRMergeMethod,
   GitBranchChangeEntry,
   GitDiffResult,
   PRCheckDetail,
@@ -2771,6 +2776,7 @@ function PRActionsPanel({
   const confirm = useConfirmationDialog()
   const actionItem = { ...item, state: localState }
   const mergePresentation = presentGitHubPRMergeState(actionItem)
+  const mergeMethods = resolveGitHubPRMergeMethods(actionItem.mergeMethodSettings)
   const canMutateState = localState !== 'merged' && (!!repoPath || !!projectOrigin)
   const nextState: 'open' | 'closed' = localState === 'closed' ? 'open' : 'closed'
   const mergeDisabled = !repoPath || mergePending || !mergePresentation.directMergeAvailable
@@ -2832,12 +2838,11 @@ function PRActionsPanel({
     }
   }
 
-  const handleMerge = async (method: 'merge' | 'squash' | 'rebase'): Promise<void> => {
+  const handleMerge = async (method: GitHubPRMergeMethod): Promise<void> => {
     if (!repoPath || mergeDisabled) {
       return
     }
-    const label =
-      method === 'squash' ? 'Squash and merge' : method === 'rebase' ? 'Rebase and merge' : 'Merge'
+    const label = GITHUB_PR_MERGE_METHOD_LABELS[method]
     const confirmed = await confirm({
       title: `${label} PR #${item.number}?`,
       description: 'This will update the pull request on GitHub.',
@@ -2925,7 +2930,9 @@ function PRActionsPanel({
                     <GitMerge className="size-3.5" />
                   )}
                   {mergePresentation.autoMergeAction?.label ??
-                    (mergePresentation.directMergeAvailable ? 'Merge' : mergePresentation.label)}
+                    (mergePresentation.directMergeAvailable
+                      ? mergeMethods.defaultLabel
+                      : mergePresentation.label)}
                   <ChevronDown className="size-3 opacity-60" />
                 </Button>
               </DropdownMenuTrigger>
@@ -2945,18 +2952,16 @@ function PRActionsPanel({
               </DropdownMenuItem>
             )}
             {mergePresentation.autoMergeAction && <DropdownMenuSeparator />}
-            <DropdownMenuItem disabled={mergeDisabled} onSelect={() => void handleMerge('squash')}>
-              <GitMerge className="size-4" />
-              Squash and merge
-            </DropdownMenuItem>
-            <DropdownMenuItem disabled={mergeDisabled} onSelect={() => void handleMerge('merge')}>
-              <GitMerge className="size-4" />
-              Create merge commit
-            </DropdownMenuItem>
-            <DropdownMenuItem disabled={mergeDisabled} onSelect={() => void handleMerge('rebase')}>
-              <GitMerge className="size-4" />
-              Rebase and merge
-            </DropdownMenuItem>
+            {mergeMethods.methods.map(({ method, label }) => (
+              <DropdownMenuItem
+                key={method}
+                disabled={mergeDisabled}
+                onSelect={() => void handleMerge(method)}
+              >
+                <GitMerge className="size-4" />
+                {label}
+              </DropdownMenuItem>
+            ))}
             <DropdownMenuItem onSelect={() => window.api.shell.openUrl(item.url)}>
               <ExternalLink className="size-4" />
               Open GitHub merge box
@@ -5312,21 +5317,24 @@ export default function GitHubItemDialog({
   // Why: clipboard IPC can resolve after the dialog unmounts; skip copied-state
   // feedback instead of starting its reset timer on a stale surface.
   const linkCopyMountedRef = useRef(false)
+  const linkCopiedResetTimerRef = useRef<number | null>(null)
+  const clearLinkCopiedResetTimer = useCallback((): void => {
+    if (linkCopiedResetTimerRef.current === null) {
+      return
+    }
+    window.clearTimeout(linkCopiedResetTimerRef.current)
+    linkCopiedResetTimerRef.current = null
+  }, [])
   const setLinkCopyButtonRef = useCallback((node: HTMLButtonElement | null) => {
     linkCopyMountedRef.current = node !== null
   }, [])
 
   useEffect(() => {
+    clearLinkCopiedResetTimer()
     setLinkCopied(false)
-  }, [workItemId])
+  }, [clearLinkCopiedResetTimer, workItemId])
 
-  useEffect(() => {
-    if (!linkCopied) {
-      return
-    }
-    const handle = window.setTimeout(() => setLinkCopied(false), 1500)
-    return () => window.clearTimeout(handle)
-  }, [linkCopied])
+  useEffect(() => clearLinkCopiedResetTimer, [clearLinkCopiedResetTimer])
 
   const handleCopyWorkItemLink = useCallback(async (): Promise<void> => {
     if (!workItem) {
@@ -5339,12 +5347,17 @@ export default function GitHubItemDialog({
       if (!linkCopyMountedRef.current) {
         return
       }
+      clearLinkCopiedResetTimer()
       setLinkCopied(true)
+      linkCopiedResetTimerRef.current = window.setTimeout(() => {
+        linkCopiedResetTimerRef.current = null
+        setLinkCopied(false)
+      }, 1500)
       toast.success('GitHub link copied')
     } catch {
       toast.error('Failed to copy GitHub link')
     }
-  }, [workItem])
+  }, [clearLinkCopiedResetTimer, workItem])
 
   const appendOptimisticComment = useCallback(
     (comment: PRComment) => {

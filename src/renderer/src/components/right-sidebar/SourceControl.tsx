@@ -186,11 +186,13 @@ import type { SourceControlAiOperation } from '../../../../shared/source-control
 import { getCommitMessageModelDiscoveryHostKeyForScope } from '../../../../shared/commit-message-host-key'
 import { getRuntimeGitScope } from '@/runtime/runtime-git-client'
 import { getRepositorySourceControlAiSectionId } from '@/components/settings/repository-settings-targets'
-import { hasExpandedCommitFailureDetails, summarizeCommitFailure } from './commit-failure-summary'
 import {
-  resolveCommitFailureDialogState,
+  getCommitFailureDialogWorktreeKey,
+  shouldShowCommitFailureDialog,
+  syncCommitFailureDialogState,
   type CommitFailureDialogState
 } from './commit-failure-dialog-state'
+import { hasExpandedCommitFailureDetails, summarizeCommitFailure } from './commit-failure-summary'
 import {
   isSourceControlSplitOpenModifier,
   type SourceControlRowOpenEvent
@@ -1084,7 +1086,7 @@ export function HostedReviewHeaderLink({
 }
 
 function SourceControlInner(): React.JSX.Element {
-  const sourceControlRef = useRef<HTMLDivElement>(null)
+  const sourceControlRef = useRef<HTMLDivElement | null>(null)
   const isMac = useMemo(() => navigator.userAgent.includes('Mac'), [])
   const pendingCommentEditorRevealFrameIdsRef = useRef<number[]>([])
   // Why: React setState is async, so a rapid double-click on the Commit
@@ -1199,12 +1201,13 @@ function SourceControlInner(): React.JSX.Element {
   const [pendingDiffCommentsClear, setPendingDiffCommentsClear] =
     useState<PendingDiffCommentsClear | null>(null)
   const [isClearingDiffComments, setIsClearingDiffComments] = useState(false)
-  const setSourceControlRootRef = useCallback((node: HTMLDivElement | null) => {
+  const setSourceControlRoot = useCallback((node: HTMLDivElement | null) => {
+    // Why: markdown-note reveal frames target the Source Control surface; cancel
+    // them when that surface unmounts instead of from a passive Effect.
+    if (node === null) {
+      cancelSourceControlEditorRevealFrames(pendingCommentEditorRevealFrameIdsRef)
+    }
     sourceControlRef.current = node
-  }, [])
-
-  useEffect(() => {
-    return () => cancelSourceControlEditorRevealFrames(pendingCommentEditorRevealFrameIdsRef)
   }, [])
 
   const handleCopyDiffComments = useCallback(async (): Promise<void> => {
@@ -4154,7 +4157,7 @@ function SourceControlInner(): React.JSX.Element {
 
   return (
     <>
-      <div ref={setSourceControlRootRef} className="relative flex h-full flex-col overflow-hidden">
+      <div ref={setSourceControlRoot} className="relative flex h-full flex-col overflow-hidden">
         <div className="flex items-center px-3 pt-2 border-b border-border">
           {(['all', 'uncommitted'] as const).map((value) => (
             <button
@@ -5623,24 +5626,24 @@ export function CommitArea({
         : false,
     [commitError, commitFailureSummary]
   )
-  const commitFailureIdentity = `${worktreeId ?? 'no-worktree'}:${commitError ?? ''}`
+  // Why: the details dialog is scoped to the worktree, not the exact stderr
+  // text, so a retried commit can refresh an open dialog with newer output.
+  const commitFailureWorktreeKey = getCommitFailureDialogWorktreeKey(worktreeId)
   const [commitFailureDialogState, setCommitFailureDialogState] =
-    useState<CommitFailureDialogState>({ identity: commitFailureIdentity, open: false })
-  const resolvedCommitFailureDialogState = resolveCommitFailureDialogState(
+    useState<CommitFailureDialogState>({
+      worktreeKey: commitFailureWorktreeKey,
+      open: false
+    })
+  const isCommitFailureDialogOpen = shouldShowCommitFailureDialog(
     commitFailureDialogState,
-    commitFailureIdentity
+    commitFailureWorktreeKey,
+    hasCommitFailureDetails
   )
-  if (resolvedCommitFailureDialogState !== commitFailureDialogState) {
-    setCommitFailureDialogState(resolvedCommitFailureDialogState)
-  }
-  const isCommitFailureDialogOpen =
-    resolvedCommitFailureDialogState.open &&
-    resolvedCommitFailureDialogState.identity === commitFailureIdentity
   const setCommitFailureDialogOpen = useCallback(
     (open: boolean) => {
-      setCommitFailureDialogState({ identity: commitFailureIdentity, open })
+      setCommitFailureDialogState({ worktreeKey: commitFailureWorktreeKey, open })
     },
-    [commitFailureIdentity]
+    [commitFailureWorktreeKey]
   )
   const handleFixCommitFailureWithAI = useCallback(
     async (promptOverride?: string): Promise<boolean> => {
@@ -5655,6 +5658,12 @@ export function CommitArea({
   const handleCommitFailureAgentPromptDelivered = useCallback(() => {
     setCommitFailureDialogOpen(false)
   }, [setCommitFailureDialogOpen])
+
+  useEffect(() => {
+    setCommitFailureDialogState((current) =>
+      syncCommitFailureDialogState(current, commitFailureWorktreeKey, hasCommitFailureDetails)
+    )
+  }, [commitFailureWorktreeKey, hasCommitFailureDetails])
 
   // Why: most primary-kind labels are anchored by a directional icon so
   // the affirmative Commit (✓) reads distinctly from the remote-state
@@ -5925,9 +5934,9 @@ export function CommitArea({
           </div>
         </div>
       )}
-      {commitError && commitFailureSummary && (
+      {commitError && commitFailureSummary && hasCommitFailureDetails && (
         <Dialog
-          key={commitFailureIdentity}
+          key={commitFailureWorktreeKey}
           open={isCommitFailureDialogOpen}
           onOpenChange={setCommitFailureDialogOpen}
         >
