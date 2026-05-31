@@ -4,6 +4,7 @@ const { join, resolve } = require('node:path')
 const electronBuilderNativeRebuild = require('./scripts/electron-builder-native-rebuild.cjs')
 const {
   createPackagedRuntimeNodeModuleResources,
+  prunePackagedRuntimeNodeModules,
   verifyPackagedMainRuntimeDeps
 } = require('./packaged-runtime-node-modules.cjs')
 
@@ -169,6 +170,7 @@ module.exports = {
     if (!existsSync(resourcesDir)) {
       return
     }
+    prunePackagedRuntimeNodeModules(resourcesDir, context.electronPlatformName)
     verifyPackagedMainRuntimeDeps(resourcesDir)
     for (const filename of readdirSync(resourcesDir)) {
       if (!filename.startsWith('agent-browser-')) {

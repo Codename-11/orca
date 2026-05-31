@@ -50,7 +50,7 @@ import { MobileAgentIcon } from '../../../src/components/MobileAgentIcon'
 import { PickerModal, type PickerOption } from '../../../src/components/PickerModal'
 import { TaskProviderLogo } from '../../../src/components/TaskProviderLogo'
 import {
-  buildGitHubPrFileDiffLines,
+  buildGitHubPrFileDiffPreview,
   type GitHubPrFileDiffLine
 } from '../../../src/tasks/github-pr-file-diff'
 import { buildGitHubCheckSummary } from '../../../src/tasks/github-check-summary'
@@ -125,6 +125,10 @@ import {
 } from '../../../src/tasks/mobile-task-providers'
 import { MOBILE_TUI_AGENT_AUTO_PICK_ORDER } from '../../../src/tasks/mobile-tui-agents'
 import { resolveComposerBranchSelection } from '../../../src/tasks/mobile-composer-branch-selection'
+import {
+  clearMobileTaskCopyFeedbackTimer,
+  scheduleMobileTaskCopyFeedbackReset
+} from '../../../src/tasks/mobile-task-copy-feedback-timer'
 import type {
   BaseRefSearchResult,
   PersistedTrustedOrcaHooks,
@@ -939,6 +943,10 @@ type ProjectSortOverride = { fieldId: string; direction: GitHubProjectSortDirect
 type ProjectListEntry =
   | { type: 'group'; group: ProjectGroup; collapsed: boolean }
   | { type: 'row'; row: GitHubProjectRow }
+type LinearIssueSection = { key: string; label: string; color: string; issues: LinearIssue[] }
+type LinearListEntry =
+  | { type: 'section'; section: LinearIssueSection }
+  | { type: 'issue'; issue: LinearIssue }
 
 const PROJECT_VIEW_DEFAULT_SORT = '__view_default__'
 const GITHUB_REPO_CONCURRENCY = 3
@@ -1634,7 +1642,7 @@ function groupLinearIssues(
   issues: LinearIssue[],
   groupBy: LinearGroupBy,
   orderBy: LinearOrderBy
-): Array<{ key: string; label: string; color: string; issues: LinearIssue[] }> {
+): LinearIssueSection[] {
   const sorted = [...issues].sort((a, b) => compareLinearIssues(a, b, orderBy))
   if (groupBy === 'none') {
     return [{ key: 'all', label: 'Issues', color: colors.accentBlue, issues: sorted }]
@@ -2003,14 +2011,19 @@ function GitHubPrFileDiff({
   onCommentDraftChange: (key: string, value: string) => void
   onSubmitComment: (line: number) => void
 }): ReactNode {
-  const diffLines = useMemo(
-    () => buildGitHubPrFileDiffLines(contents.original, contents.modified),
+  const diffPreview = useMemo(
+    () =>
+      buildGitHubPrFileDiffPreview(
+        contents.original,
+        contents.modified,
+        MAX_RENDERED_PR_DIFF_LINES
+      ),
     [contents.modified, contents.original]
   )
-  const visibleDiffLines = diffLines.slice(0, MAX_RENDERED_PR_DIFF_LINES)
-  const hiddenDiffLineCount = Math.max(0, diffLines.length - visibleDiffLines.length)
+  const visibleDiffLines = diffPreview.lines
+  const hiddenDiffLineCount = Math.max(0, diffPreview.totalLineCount - visibleDiffLines.length)
 
-  if (diffLines.length === 0) {
+  if (diffPreview.totalLineCount === 0) {
     return <Text style={styles.detailMuted}>No text changes found.</Text>
   }
 
@@ -2018,7 +2031,7 @@ function GitHubPrFileDiff({
     <View style={styles.fileDiff}>
       {hiddenDiffLineCount > 0 ? (
         <Text style={styles.detailMuted}>
-          Showing first {MAX_RENDERED_PR_DIFF_LINES} of {diffLines.length} diff lines.
+          Showing first {MAX_RENDERED_PR_DIFF_LINES} of {diffPreview.totalLineCount} diff lines.
         </Text>
       ) : null}
       {visibleDiffLines.map((line) => {
@@ -2304,6 +2317,7 @@ export default function MobileTasksScreen() {
   const [prFileLoadingPath, setPrFileLoadingPath] = useState<string | null>(null)
   const [prFileCommentDrafts, setPrFileCommentDrafts] = useState<Record<string, string>>({})
   const [copiedLinkKey, setCopiedLinkKey] = useState<string | null>(null)
+  const copiedLinkResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [expandedResolvedCommentGroups, setExpandedResolvedCommentGroups] = useState<Set<string>>(
     () => new Set()
   )
@@ -2425,6 +2439,13 @@ export default function MobileTasksScreen() {
   const [projectMutating, setProjectMutating] = useState(false)
   const [projectRepoNotInOrca, setProjectRepoNotInOrca] =
     useState<ProjectRepoNotInOrcaPrompt | null>(null)
+  // Why: project detail text inputs rerender this screen while comments stay
+  // unchanged; keep grouping out of the typing path.
+  const projectDetailCommentGroups = useMemo(
+    () =>
+      groupDetailComments(projectRowDetail?.provider === 'github' ? projectRowDetail.comments : []),
+    [projectRowDetail]
+  )
   const requestedTaskSource = useMemo(
     () => (isTaskProvider(taskSource) ? taskSource : undefined),
     [taskSource]
@@ -3969,6 +3990,10 @@ export default function MobileTasksScreen() {
     }, 300)
     return () => clearTimeout(timer)
   }, [githubKind, provider, query, taskStateHydrated])
+
+  useEffect(() => {
+    return () => clearMobileTaskCopyFeedbackTimer(copiedLinkResetTimerRef)
+  }, [])
 
   useEffect(() => {
     if (!taskUiReady || provider !== 'github' || githubMode !== 'items') return
@@ -7068,9 +7093,7 @@ export default function MobileTasksScreen() {
     try {
       await Clipboard.setStringAsync(url)
       setCopiedLinkKey(key)
-      setTimeout(() => {
-        setCopiedLinkKey((current) => (current === key ? null : current))
-      }, 1500)
+      scheduleMobileTaskCopyFeedbackReset(copiedLinkResetTimerRef, key, setCopiedLinkKey)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to copy link')
     }
@@ -7080,9 +7103,7 @@ export default function MobileTasksScreen() {
     try {
       await Clipboard.setStringAsync(value)
       setCopiedLinkKey(key)
-      setTimeout(() => {
-        setCopiedLinkKey((current) => (current === key ? null : current))
-      }, 1500)
+      scheduleMobileTaskCopyFeedbackReset(copiedLinkResetTimerRef, key, setCopiedLinkKey)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to copy text')
     }
@@ -8123,28 +8144,31 @@ export default function MobileTasksScreen() {
     )
   }
 
-  const createTargetOptions: PickerOption<string>[] =
-    provider === 'github' || provider === 'gitlab'
-      ? hostedRepos.map((repo) => ({
-          value: repo.id,
-          label: repo.displayName,
-          subtitle: repo.path,
-          renderIcon: () => (
-            <View
-              style={[
-                styles.pickerRepoDot,
-                { backgroundColor: getRepoBadgeColor(repo, repo.displayName) }
-              ]}
-            />
-          )
-        }))
-      : provider === 'linear'
-        ? linearTeams.map((team) => ({
-            value: team.id,
-            label: team.name,
-            subtitle: team.workspaceName
+  const createTargetOptions = useMemo<PickerOption<string>[]>(
+    () =>
+      provider === 'github' || provider === 'gitlab'
+        ? hostedRepos.map((repo) => ({
+            value: repo.id,
+            label: repo.displayName,
+            subtitle: repo.path,
+            renderIcon: () => (
+              <View
+                style={[
+                  styles.pickerRepoDot,
+                  { backgroundColor: getRepoBadgeColor(repo, repo.displayName) }
+                ]}
+              />
+            )
           }))
-        : []
+        : provider === 'linear'
+          ? linearTeams.map((team) => ({
+              value: team.id,
+              label: team.name,
+              subtitle: team.workspaceName
+            }))
+          : [],
+    [hostedRepos, linearTeams, provider]
+  )
   const selectedCreateTarget =
     provider === 'github' || provider === 'gitlab'
       ? (hostedRepos.find((repo) => repo.id === createRepoId) ?? hostedRepos[0] ?? null)
@@ -8211,19 +8235,23 @@ export default function MobileTasksScreen() {
         : `${selectedHostedRepos.length} repos`
   const repoPickerSelectedRepo =
     selectedRepoIds.size > 0 && selectedHostedRepos.length === 1 ? selectedHostedRepos[0]! : null
-  const workspaceRepoOptions: PickerOption<string>[] = workspaceRepos.map((repo) => ({
-    value: repo.id,
-    label: repo.displayName,
-    subtitle: repo.path,
-    renderIcon: () => (
-      <View
-        style={[
-          styles.pickerRepoDot,
-          { backgroundColor: getRepoBadgeColor(repo, repo.displayName) }
-        ]}
-      />
-    )
-  }))
+  const workspaceRepoOptions = useMemo<PickerOption<string>[]>(
+    () =>
+      workspaceRepos.map((repo) => ({
+        value: repo.id,
+        label: repo.displayName,
+        subtitle: repo.path,
+        renderIcon: () => (
+          <View
+            style={[
+              styles.pickerRepoDot,
+              { backgroundColor: getRepoBadgeColor(repo, repo.displayName) }
+            ]}
+          />
+        )
+      })),
+    [workspaceRepos]
+  )
   const sortedItems = useMemo(() => {
     const next = [...items]
     if (taskSort === 'repository') {
@@ -8293,6 +8321,17 @@ export default function MobileTasksScreen() {
     ],
     [githubProjectFields, githubProjectSortOverride, githubProjectViewSort]
   )
+  const githubProjectViewOptions = useMemo<PickerOption<string>[]>(
+    () =>
+      githubProjectViews.map((view) => ({
+        value: view.id,
+        label: view.name,
+        subtitle:
+          view.layout === 'TABLE_LAYOUT' ? `View #${view.number}` : 'Unsupported layout on mobile',
+        disabled: view.layout !== 'TABLE_LAYOUT'
+      })),
+    [githubProjectViews]
+  )
   const githubPresetOptions = githubKind === 'prs' ? PR_PRESETS : ISSUE_PRESETS
   const githubPresetPickerOptions = useMemo(
     () =>
@@ -8341,6 +8380,16 @@ export default function MobileTasksScreen() {
         linearWorkspaces.find((workspace) => workspace.id === selectedLinearWorkspaceId)
           ?.displayName ??
         'Workspace')
+  const linearWorkspaceOptions = useMemo<PickerOption<string>[]>(
+    () => [
+      { value: 'all', label: 'All workspaces' },
+      ...linearWorkspaces.map((workspace) => ({
+        value: workspace.id,
+        label: workspace.organizationName ?? workspace.displayName ?? workspace.id
+      }))
+    ],
+    [linearWorkspaces]
+  )
   const linearTeamLabel =
     selectedLinearTeamIds.size === 0 || selectedLinearTeamIds.size === linearTeams.length
       ? 'All teams'
@@ -8378,6 +8427,20 @@ export default function MobileTasksScreen() {
   const linearIssueSections = useMemo(
     () => groupLinearIssues(linearIssuesForView, linearGroupBy, linearOrderBy),
     [linearGroupBy, linearIssuesForView, linearOrderBy]
+  )
+  // Why: FlatList treats data identity as meaningful; unrelated renders should
+  // not rebuild the section/item wrapper array.
+  const linearListEntries = useMemo<LinearListEntry[]>(
+    () =>
+      linearIssueSections.flatMap((section) =>
+        linearGroupBy === 'none'
+          ? section.issues.map((issue) => ({ type: 'issue' as const, issue }))
+          : [
+              { type: 'section' as const, section },
+              ...section.issues.map((issue) => ({ type: 'issue' as const, issue }))
+            ]
+      ),
+    [linearGroupBy, linearIssueSections]
   )
   const linearBoardSections = useMemo(
     () =>
@@ -9301,14 +9364,7 @@ export default function MobileTasksScreen() {
           </ScrollView>
         ) : (
           <FlatList
-            data={linearIssueSections.flatMap((section) =>
-              linearGroupBy === 'none'
-                ? section.issues.map((issue) => ({ type: 'issue' as const, issue }))
-                : [
-                    { type: 'section' as const, section },
-                    ...section.issues.map((issue) => ({ type: 'issue' as const, issue }))
-                  ]
-            )}
+            data={linearListEntries}
             keyExtractor={(entry) =>
               entry.type === 'section' ? `linear-section:${entry.section.key}` : entry.issue.id
             }
@@ -10111,15 +10167,7 @@ export default function MobileTasksScreen() {
       <PickerModal
         visible={taskUiReady && showGitHubProjectViewPicker}
         title={pendingGitHubProjectViewSelection ? 'Choose Project View' : 'Project View'}
-        options={githubProjectViews.map((view) => ({
-          value: view.id,
-          label: view.name,
-          subtitle:
-            view.layout === 'TABLE_LAYOUT'
-              ? `View #${view.number}`
-              : 'Unsupported layout on mobile',
-          disabled: view.layout !== 'TABLE_LAYOUT'
-        }))}
+        options={githubProjectViewOptions}
         selected={pendingGitHubProjectViewSelection ? '' : (activeGitHubProjectViewId ?? '')}
         onSelect={(viewId) => {
           const view = githubProjectViews.find((candidate) => candidate.id === viewId)
@@ -10330,13 +10378,7 @@ export default function MobileTasksScreen() {
       <PickerModal
         visible={taskUiReady && showLinearWorkspacePicker}
         title="Linear Workspace"
-        options={[
-          { value: 'all', label: 'All workspaces' },
-          ...linearWorkspaces.map((workspace) => ({
-            value: workspace.id,
-            label: workspace.organizationName ?? workspace.displayName ?? workspace.id
-          }))
-        ]}
+        options={linearWorkspaceOptions}
         selected={selectedLinearWorkspaceId ?? ''}
         onSelect={(workspaceId) => {
           setSelectedLinearWorkspaceId(workspaceId)
@@ -12262,7 +12304,7 @@ export default function MobileTasksScreen() {
                       {projectRowDetail.comments.length === 0 ? (
                         <Text style={styles.detailMuted}>No comments.</Text>
                       ) : (
-                        groupDetailComments(projectRowDetail.comments).map((group) => {
+                        projectDetailCommentGroups.map((group) => {
                           const groupId = detailCommentGroupId(group)
                           const root = detailCommentGroupRoot(group)
                           const count = detailCommentGroupCount(group)

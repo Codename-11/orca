@@ -1,3 +1,4 @@
+import type * as NodePath from 'node:path'
 import { resolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Store } from '../persistence'
@@ -6,8 +7,10 @@ import { listRepoWorktrees } from '../repo-worktrees'
 import type { GitWorktreeInfo, Repo } from '../../shared/types'
 import {
   invalidateAuthorizedRootsCache,
+  isDescendantOrEqual,
   rebuildAuthorizedRootsCache,
-  resolveRegisteredWorktreePath
+  resolveRegisteredWorktreePath,
+  validateGitRelativeFilePath
 } from './filesystem-auth'
 
 vi.mock('../repo-worktrees', async () => {
@@ -63,5 +66,61 @@ describe('filesystem auth worktree roots', () => {
       resolve(lastWorktreePath)
     )
     expect(listRepoWorktrees).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('filesystem-auth path containment', () => {
+  it('allows descendants whose path segment starts with dotdot characters', () => {
+    const root = resolve('/workspace/repo')
+    const child = resolve('/workspace/repo/..fixtures/file.ts')
+
+    expect(isDescendantOrEqual(child, root)).toBe(true)
+  })
+
+  it('allows git-relative files under dotdot-prefixed child directories', () => {
+    expect(validateGitRelativeFilePath(resolve('/workspace/repo'), '..fixtures/file.ts')).toBe(
+      '..fixtures/file.ts'
+    )
+  })
+
+  it('still rejects parent-directory escapes', () => {
+    const root = resolve('/workspace/repo')
+    const outside = resolve('/workspace/repo/../other/file.ts')
+
+    expect(isDescendantOrEqual(outside, root)).toBe(false)
+    expect(() => validateGitRelativeFilePath(root, '../other/file.ts')).toThrow(
+      'Access denied: git file path escapes the selected worktree'
+    )
+  })
+
+  it('accepts Windows descendants when drive and root casing differ', async () => {
+    vi.resetModules()
+    vi.doMock('../repo-worktrees', () => ({
+      isRepoRoot: vi.fn(),
+      listRepoWorktrees: vi.fn()
+    }))
+    vi.doMock('path', async () => {
+      const path = await vi.importActual<typeof NodePath>('node:path')
+      return {
+        ...path.win32,
+        default: path.win32
+      }
+    })
+
+    try {
+      const { isDescendantOrEqual: isDescendantOrEqualWithWinPath } =
+        await import('./filesystem-auth')
+
+      expect(
+        isDescendantOrEqualWithWinPath(String.raw`c:\repo\src\app.ts`, String.raw`C:\Repo`)
+      ).toBe(true)
+      expect(
+        isDescendantOrEqualWithWinPath(String.raw`D:\repo\src\app.ts`, String.raw`C:\Repo`)
+      ).toBe(false)
+    } finally {
+      vi.doUnmock('path')
+      vi.doUnmock('../repo-worktrees')
+      vi.resetModules()
+    }
   })
 })
