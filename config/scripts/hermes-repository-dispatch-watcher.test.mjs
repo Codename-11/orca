@@ -208,6 +208,9 @@ describe('Hermes repository dispatch watcher', () => {
   })
 
   it('supports reusable watcher configuration through args', () => {
+    expect(parseArgs([])).toMatchObject({ includePrereleases: false })
+    expect(parseArgs(['--include-prereleases'])).toMatchObject({ includePrereleases: true })
+
     expect(
       parseArgs([
         '--upstream-repo',
@@ -236,11 +239,14 @@ describe('Hermes repository dispatch watcher', () => {
   })
 
   it('formats actionable Discord-ready handoff output on watcher failures', () => {
-    const message = buildFailureNotification(new Error('GitHub dispatch failed: Bearer ghp_secret'), {
-      upstreamRepo: 'stablyai/orca',
-      targetRepo: 'Codename-11/orca',
-      stateFile: '/home/bailey/.hermes/state/orca-upstream-watcher.json'
-    })
+    const message = buildFailureNotification(
+      new Error('GitHub dispatch failed: Bearer ghp_secret'),
+      {
+        upstreamRepo: 'stablyai/orca',
+        targetRepo: 'Codename-11/orca',
+        stateFile: '/home/bailey/.hermes/state/orca-upstream-watcher.json'
+      }
+    )
 
     expect(message).toContain('🚨 **Dev Automation: Orca Upstream Dispatch Watcher**')
     expect(message).toContain('**Action**')

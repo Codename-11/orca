@@ -22,7 +22,7 @@ node config/scripts/hermes-repository-dispatch-watcher.mjs \
 
 Default behavior:
 
-- watches latest semver upstream tag, including prereleases;
+- watches latest stable semver upstream tag by default;
 - watches upstream `main` SHA;
 - bootstraps missing state by dispatching the current tag/main SHA once, then
   records them;
@@ -46,7 +46,8 @@ cd /home/bailey/.hermes/work/orca-eval/orca
 exec node config/scripts/hermes-repository-dispatch-watcher.mjs \
   --upstream-repo stablyai/orca \
   --target-repo Codename-11/orca \
-  --state-file /home/bailey/.hermes/state/orca-upstream-watcher.json
+  --state-file /home/bailey/.hermes/state/orca-upstream-watcher.json \
+  --stable-only
 ```
 
 Register it as a script-only Hermes cron so success is silent and failures page
@@ -121,15 +122,16 @@ node config/scripts/hermes-repository-dispatch-watcher.mjs \
 
 Useful flags:
 
-| Flag                         | Purpose                                                             |
-| ---------------------------- | ------------------------------------------------------------------- |
-| `--stable-only`              | Ignore prerelease tags.                                             |
-| `--release-only`             | Dispatch only tag/release changes.                                  |
-| `--main-only`                | Dispatch only upstream branch changes.                              |
-| `--upstream-branch <branch>` | Watch a branch other than `main`.                                   |
-| `--dry-run --json`           | Inspect detected changes without dispatching or writing state.      |
-| `--bootstrap-silent`         | On a first run, write current state without dispatching it.         |
-| `--no-gh-token`              | Disable `gh auth token` fallback; require env token if dispatching. |
+| Flag                         | Purpose                                                              |
+| ---------------------------- | -------------------------------------------------------------------- |
+| `--stable-only`              | Ignore prerelease tags. This is Orca's default release-watch mode.   |
+| `--include-prereleases`      | Include prerelease tags when a fork intentionally wants RC dispatch. |
+| `--release-only`             | Dispatch only tag/release changes.                                   |
+| `--main-only`                | Dispatch only upstream branch changes.                               |
+| `--upstream-branch <branch>` | Watch a branch other than `main`.                                    |
+| `--dry-run --json`           | Inspect detected changes without dispatching or writing state.       |
+| `--bootstrap-silent`         | On a first run, write current state without dispatching it.          |
+| `--no-gh-token`              | Disable `gh auth token` fallback; require env token if dispatching.  |
 
 Before reusing, create matching `repository_dispatch` handlers in the target
 repo and make sure the target token has `repo` + `workflow` scope for private

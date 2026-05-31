@@ -38,7 +38,7 @@ function parseArgs(argv) {
     targetRepo: envString('WATCHER_TARGET_REPOSITORY', envString('GITHUB_REPOSITORY', '')),
     stateFile: envString('WATCHER_STATE_FILE', DEFAULT_STATE_FILE),
     upstreamBranch: envString('WATCHER_UPSTREAM_BRANCH', 'main'),
-    includePrereleases: envFlag('WATCHER_INCLUDE_PRERELEASES', true),
+    includePrereleases: envFlag('WATCHER_INCLUDE_PRERELEASES', false),
     releaseEventType: envString('WATCHER_RELEASE_EVENT_TYPE', 'upstream_release'),
     mainEventType: envString('WATCHER_MAIN_EVENT_TYPE', 'upstream_main'),
     source: envString('WATCHER_SOURCE', 'hermes_watcher'),
@@ -440,4 +440,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   })
 }
 
-export { buildDispatches, buildFailureNotification, compareVersions, newestSemverTag, parseArgs, parseVersion, runWatcher }
+export {
+  buildDispatches,
+  buildFailureNotification,
+  compareVersions,
+  newestSemverTag,
+  parseArgs,
+  parseVersion,
+  runWatcher
+}

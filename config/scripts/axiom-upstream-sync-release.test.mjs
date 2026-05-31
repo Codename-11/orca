@@ -92,7 +92,7 @@ describe('Axiom upstream sync release workflow', () => {
   it('keeps fork builds isolated to the deploy branch and fork identity', () => {
     expect(workflow).toContain('AXIOM_DEPLOY_BRANCH: axiom/deploy')
     expect(workflow).toContain('AXIOM_UPSTREAM_BRANCH: main')
-    expect(workflow).toContain("AXIOM_INCLUDE_PRERELEASES: '1'")
+    expect(workflow).toContain("AXIOM_INCLUDE_PRERELEASES: '0'")
     expect(workflow).toContain('ORCA_APP_ID: com.axiomlabs.orca')
     expect(workflow).toContain('ORCA_APP_USER_MODEL_ID: com.axiomlabs.orca')
     expect(workflow).toContain('ORCA_PRODUCT_NAME: Axiom Orca')
@@ -123,7 +123,7 @@ describe('Axiom upstream sync release workflow', () => {
     expect(workflow).not.toContain('cron:')
   })
 
-  it('tracks upstream prerelease cuts while keeping stable-only discovery available', () => {
+  it('skips upstream prerelease cuts unless explicitly opted in or an Axiom tag is pushed', () => {
     expect(newestSemverTag(['v1.4.22', 'v1.4.23-rc.1'], { includePrereleases: false })).toBe(
       'v1.4.22'
     )
@@ -136,22 +136,19 @@ describe('Axiom upstream sync release workflow', () => {
     expect(
       shouldSkipUpstreamPrerelease({
         upstreamPrerelease: true,
-        includePrereleases: false,
-        explicitUpstreamTag: false
+        includePrereleases: false
       })
     ).toBe(true)
     expect(
       shouldSkipUpstreamPrerelease({
         upstreamPrerelease: true,
-        includePrereleases: false,
-        explicitUpstreamTag: true
+        includePrereleases: false
       })
-    ).toBe(false)
+    ).toBe(true)
     expect(
       shouldSkipUpstreamPrerelease({
         upstreamPrerelease: true,
-        includePrereleases: true,
-        explicitUpstreamTag: false
+        includePrereleases: true
       })
     ).toBe(false)
     expect(checkScript).toContain('shouldSkipUpstreamPrerelease')
@@ -373,9 +370,9 @@ describe('Axiom upstream sync release workflow', () => {
     expect(payload.embeds[0].fields.find((field) => field.name === 'Action')?.value).toContain(
       'Required: `no`'
     )
-    expect(payload.embeds[0].fields.find((field) => field.name === 'Agent handoff')?.value).toContain(
-      'gh release view axiom-v1.4.22-axiom.1'
-    )
+    expect(
+      payload.embeds[0].fields.find((field) => field.name === 'Agent handoff')?.value
+    ).toContain('gh release view axiom-v1.4.22-axiom.1')
   })
 
   it('requests agent remediation for unsafe merge conflicts without publishing', () => {
