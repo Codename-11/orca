@@ -49,14 +49,15 @@ fork-owned prerelease versions and tags:
 | `v1.4.10`        | `1.4.10-axiom.1`  | `axiom-v1.4.10-axiom.1` |
 | Axiom hotfix     | `1.4.10-axiom.2`  | `axiom-v1.4.10-axiom.2` |
 
-The workflow tracks upstream prerelease cuts (`AXIOM_INCLUDE_PRERELEASES=1`) so
-Axiom's release lane follows the same automated RC cadence as upstream rather
-than rebuilding older stable tags from newer `main` code. Upstream release/tag
-hooks should enter the fork as `repository_dispatch` events (`upstream_release` or
-`upstream_tag`) with `client_payload.upstream_tag` (or `tag` / `ref`) set to the
-upstream `v*` tag. Manual Axiom-only update builds should use
-`bump_axiom_revision` or `axiom_revision` so the Electron updater sees a
-semantically newer fork version from the `Codename-11/orca` release feed.
+The workflow tracks stable upstream releases by default
+(`AXIOM_INCLUDE_PRERELEASES=0`) so Axiom's fork does not build/publish every
+upstream RC/release-cut. Upstream release/tag hooks may still enter the fork as
+`repository_dispatch` events (`upstream_release` or `upstream_tag`) with
+`client_payload.upstream_tag` (or `tag` / `ref`) set to the upstream `v*` tag,
+but RC tags are detected and skipped before merge/build/release. Manual
+Axiom-only update builds should use `bump_axiom_revision`, `axiom_revision`, or a
+pushed `axiom-v*` tag so the Electron updater sees a semantically newer fork
+version from the `Codename-11/orca` release feed.
 
 ## Axiom patch release workflow
 
@@ -85,7 +86,8 @@ The workflow computes the next `axiom.N` revision, updates `package.json`,
 pushes the release commit back to `axiom/deploy`, creates the `axiom-v*` tag,
 builds release assets from that tag, verifies required assets, and publishes the
 GitHub release. Stable upstream bases build both Windows and Android assets;
-upstream prerelease bases build mobile only when `build_mobile=true`.
+upstream prerelease bases are skipped unless Axiom intentionally pushes/builds an
+`axiom-v*` tag.
 
 Use `axiom_revision=<number>` only when the revision number must be selected
 explicitly. Use `axiom_tag=<existing-axiom-v-tag>` with `force_rebuild=true` only

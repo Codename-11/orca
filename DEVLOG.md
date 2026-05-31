@@ -6,6 +6,20 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-31 — Switched Orca release sync to stable-only upstream releases
+
+Changed the Axiom upstream release lane so automated upstream release/tag events keep syncing `main` but no longer build/publish Axiom releases for upstream RC/release-cut tags. The release workflow now defaults `AXIOM_INCLUDE_PRERELEASES=0`; explicit upstream RC tags are detected and skipped before merge/build/release, while pushed/manual `axiom-v*` fork tags still work for intentional Axiom-owned RC builds. The Hermes repository-dispatch watcher now defaults to stable tags only, the live `~/.hermes/scripts/orca-upstream-watcher.sh` wrapper passes `--stable-only`, and the watcher state was migrated from `v1.4.36-rc.14` to the latest stable `v1.4.35` so the next cron tick does not emit a one-time downgrade release dispatch.
+
+Verification:
+
+- `pnpm exec vitest run --config config/vitest.config.ts config/scripts/axiom-upstream-sync-release.test.mjs config/scripts/hermes-repository-dispatch-watcher.test.mjs` → 31 tests passed.
+- `GITHUB_REPOSITORY=Codename-11/orca AXIOM_UPSTREAM_REPOSITORY=stablyai/orca AXIOM_INCLUDE_PRERELEASES=0 GH_TOKEN="$(gh auth token)" node config/scripts/axiom-check-upstream-release.mjs --upstream-tag v1.4.36-rc.14` → `should_release=false`, `reason=upstream_prerelease_skipped:v1.4.36-rc.14`.
+- `GITHUB_REPOSITORY=Codename-11/orca AXIOM_UPSTREAM_REPOSITORY=stablyai/orca AXIOM_INCLUDE_PRERELEASES=0 GH_TOKEN="$(gh auth token)" node config/scripts/axiom-check-upstream-release.mjs` → latest stable `v1.4.35`, `reason=fork_release_exists:axiom-v1.4.35-axiom.1`.
+- `GITHUB_REPOSITORY=Codename-11/orca AXIOM_UPSTREAM_REPOSITORY=stablyai/orca AXIOM_INCLUDE_PRERELEASES=0 GH_TOKEN="$(gh auth token)" node config/scripts/axiom-check-upstream-release.mjs --axiom-tag axiom-v1.4.36-rc.14.axiom.2` → `should_release=true`, `reason=manual_axiom_tag:axiom-v1.4.36-rc.14.axiom.2`.
+- `node config/scripts/hermes-repository-dispatch-watcher.mjs --upstream-repo stablyai/orca --target-repo Codename-11/orca --state-file /home/bailey/.hermes/state/orca-upstream-watcher.json --stable-only --dry-run --json` → `dispatches: []` after state migration.
+
+---
+
 ## 2026-05-31 — Remediated upstream v1.4.36-rc.13 bot PR
 
 Resolved the agent-remediation merge for upstream `v1.4.36-rc.13` on `bot/upstream-sync-axiom-v1.4.36-rc.13.axiom.1` targeting `axiom/deploy`; no direct deploy-branch push was made. The conflict resolution keeps the fork semver at `1.4.36-rc.13.axiom.1`, preserves Axiom side-by-side app/updater identity, profile portability, and Forge provider/task-registry support, while accepting upstream AppImage CLI redirect, WSL packaged-resource launcher checks, proxy settings, integrations preflight status, and settings network UI changes. Protected deletion review found no deleted files, including no protected Axiom file removals.
@@ -76,6 +90,7 @@ Verification:
 The Axiom release workflow for `axiom-v1.4.29-axiom.2` failed in the Android APK job because Metro could not resolve runtime imports from `mobile/app/h/[hostId]/tasks.tsx` to desktop-root shared modules outside the mobile package (`../../../../src/shared/workspace-name`). Added mobile-local mirrors for the workspace-name and Forge sort helpers, moved mobile runtime imports to those local modules, and added a regression test that blocks non-type mobile imports of desktop shared runtime modules.
 
 Verification:
+
 - `pnpm --dir mobile exec vitest run src/tasks/mobile-runtime-imports.test.ts src/tasks/workspace-create-params.test.ts`
 - `pnpm --dir mobile exec oxfmt --check src/tasks/mobile-runtime-imports.test.ts src/tasks/workspace-name.ts src/tasks/forge-issue-sort.ts src/tasks/workspace-create-params.ts app/h/'[hostId]'/tasks.tsx`
 - `pnpm --dir mobile exec oxlint src/tasks/mobile-runtime-imports.test.ts src/tasks/workspace-name.ts src/tasks/forge-issue-sort.ts src/tasks/workspace-create-params.ts app/h/'[hostId]'/tasks.tsx`
