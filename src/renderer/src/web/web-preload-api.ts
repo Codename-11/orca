@@ -17,6 +17,7 @@ import type {
   StatsSummary,
   Worktree,
   WorktreeLineage,
+  WorkspaceSessionPatch,
   WorkspaceSessionState
 } from '../../../shared/types'
 import {
@@ -435,6 +436,15 @@ function createWebPreloadApi(): Partial<PreloadApi> {
       get: () => Promise.resolve(getStoredWorkspaceSession()),
       set: async (session) => {
         writeJson(SESSION_STORAGE_KEY, sanitizeWebRuntimeWorkspaceSession(session))
+      },
+      patch: async (patch: WorkspaceSessionPatch) => {
+        writeJson(
+          SESSION_STORAGE_KEY,
+          sanitizeWebRuntimeWorkspaceSession({
+            ...getStoredWorkspaceSession(),
+            ...patch
+          })
+        )
       },
       setSync: (session) => {
         writeJson(SESSION_STORAGE_KEY, sanitizeWebRuntimeWorkspaceSession(session))
@@ -1661,6 +1671,7 @@ function createWebUiApi(): NonNullable<Partial<PreloadApi>['ui']> {
     onJumpToTabIndex: () => noopUnsubscribe,
     onWorktreeHistoryNavigate: () => noopUnsubscribe,
     onNewBrowserTab: () => noopUnsubscribe,
+    onNewMarkdownTab: () => noopUnsubscribe,
     onRequestTabCreate: () => noopUnsubscribe,
     replyTabCreate: () => {},
     onRequestTabSetProfile: () => noopUnsubscribe,
