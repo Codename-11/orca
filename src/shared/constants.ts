@@ -402,7 +402,6 @@ export function getDefaultUIState(): PersistedUIState {
     agentActivityDisplayMode: DEFAULT_AGENT_ACTIVITY_DISPLAY_MODE,
     workspaceStatuses: cloneDefaultWorkspaceStatuses(),
     workspaceBoardOpacity: 1,
-    workspaceBoardCompact: false,
     workspaceBoardColumnWidth: 308,
     _workspaceStatusesDefaultOrderMigrated: true,
     _workspaceStatusesDefaultWorkflowMigrated: true,

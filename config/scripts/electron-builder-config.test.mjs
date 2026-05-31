@@ -33,6 +33,50 @@ function loadElectronBuilderConfig(env = {}) {
 const electronBuilderConfig = loadElectronBuilderConfig()
 
 describe('electron-builder config', () => {
+  it('excludes repo-only source trees from app.asar', () => {
+    expect(electronBuilderConfig.files).toEqual(
+      expect.arrayContaining([
+        '!src{,/**/*}',
+        '!config{,/**/*}',
+        '!docs{,/**/*}',
+        '!mobile{,/**/*}',
+        '!native{,/**/*}',
+        '!skills{,/**/*}',
+        '!tests{,/**/*}',
+        '!Casks{,/**/*}',
+        '!{AGENTS.md,CLAUDE.md,DEVELOPING.md,bundle-size-progress.md}',
+        '!out/**/*.test.js'
+      ])
+    )
+  })
+
+  it('keeps runtime resources available through extraResources', () => {
+    expect(electronBuilderConfig.mac.extraResources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          from: 'native/computer-use-macos/.build/release/Orca Computer Use.app',
+          to: 'Orca Computer Use.app'
+        })
+      ])
+    )
+    expect(electronBuilderConfig.linux.extraResources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          from: 'native/computer-use-linux/runtime.py',
+          to: 'computer-use-linux/runtime.py'
+        })
+      ])
+    )
+    expect(electronBuilderConfig.win.extraResources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          from: 'native/computer-use-windows/runtime.ps1',
+          to: 'computer-use-windows/runtime.ps1'
+        })
+      ])
+    )
+  })
+
   it('uses the multi-size icon source for Linux packages', () => {
     expect(electronBuilderConfig.linux.icon).toBe('resources/build/icon.icns')
   })

@@ -93,6 +93,7 @@ const {
   listGitLabMergeRequestsMock,
   listGitLabWorkItemsMock,
   listGitLabIssuesMock,
+  listGitLabLabelsMock,
   listGitLabTodosMock,
   getGitLabProjectRefForRemoteMock,
   getGitLabWorkItemByProjectRefMock,
@@ -100,11 +101,16 @@ const {
   updateGitLabIssueMock,
   addGitLabIssueCommentMock,
   addGitLabMRCommentMock,
+  addGitLabMRInlineCommentMock,
+  resolveGitLabMRDiscussionMock,
+  getGitLabJobTraceMock,
+  retryGitLabJobMock,
   mergeGitLabMRMock,
   closeGitLabMRMock,
   reopenGitLabMRMock,
   getGlabKnownHostsMock,
   getGitLabWorkItemDetailsMock,
+  updateGitLabMRReviewersMock,
   getIssueMock,
   deleteWorktreeHistoryDirMock
 } = vi.hoisted(() => {
@@ -147,6 +153,7 @@ const {
     listGitLabMergeRequestsMock: vi.fn(),
     listGitLabWorkItemsMock: vi.fn(),
     listGitLabIssuesMock: vi.fn(),
+    listGitLabLabelsMock: vi.fn(),
     listGitLabTodosMock: vi.fn(),
     getGitLabProjectRefForRemoteMock: vi.fn(),
     getGitLabWorkItemByProjectRefMock: vi.fn(),
@@ -154,11 +161,16 @@ const {
     updateGitLabIssueMock: vi.fn(),
     addGitLabIssueCommentMock: vi.fn(),
     addGitLabMRCommentMock: vi.fn(),
+    addGitLabMRInlineCommentMock: vi.fn(),
+    resolveGitLabMRDiscussionMock: vi.fn(),
+    getGitLabJobTraceMock: vi.fn(),
+    retryGitLabJobMock: vi.fn(),
     mergeGitLabMRMock: vi.fn(),
     closeGitLabMRMock: vi.fn(),
     reopenGitLabMRMock: vi.fn(),
     getGlabKnownHostsMock: vi.fn(),
     getGitLabWorkItemDetailsMock: vi.fn(),
+    updateGitLabMRReviewersMock: vi.fn(),
     getIssueMock: vi.fn(),
     deleteWorktreeHistoryDirMock: vi.fn()
   }
@@ -258,6 +270,7 @@ vi.mock('../gitlab/client', async (importOriginal) => {
     listMergeRequests: listGitLabMergeRequestsMock,
     listWorkItems: listGitLabWorkItemsMock,
     listIssues: listGitLabIssuesMock,
+    listLabels: listGitLabLabelsMock,
     listTodos: listGitLabTodosMock,
     getProjectRefForRemote: getGitLabProjectRefForRemoteMock,
     getWorkItemByProjectRef: getGitLabWorkItemByProjectRefMock,
@@ -265,9 +278,14 @@ vi.mock('../gitlab/client', async (importOriginal) => {
     updateIssue: updateGitLabIssueMock,
     addIssueComment: addGitLabIssueCommentMock,
     addMRComment: addGitLabMRCommentMock,
+    addMRInlineComment: addGitLabMRInlineCommentMock,
+    resolveMRDiscussion: resolveGitLabMRDiscussionMock,
+    getJobTrace: getGitLabJobTraceMock,
+    retryJob: retryGitLabJobMock,
     mergeMR: mergeGitLabMRMock,
     closeMR: closeGitLabMRMock,
-    reopenMR: reopenGitLabMRMock
+    reopenMR: reopenGitLabMRMock,
+    updateMRReviewers: updateGitLabMRReviewersMock
   }
 })
 
@@ -391,6 +409,8 @@ afterEach(() => {
   listGitLabWorkItemsMock.mockResolvedValue({ items: [] })
   listGitLabIssuesMock.mockReset()
   listGitLabIssuesMock.mockResolvedValue({ items: [] })
+  listGitLabLabelsMock.mockReset()
+  listGitLabLabelsMock.mockResolvedValue(['bug'])
   listGitLabTodosMock.mockReset()
   listGitLabTodosMock.mockResolvedValue([])
   getGitLabProjectRefForRemoteMock.mockReset()
@@ -411,6 +431,14 @@ afterEach(() => {
   addGitLabIssueCommentMock.mockResolvedValue({ ok: true })
   addGitLabMRCommentMock.mockReset()
   addGitLabMRCommentMock.mockResolvedValue({ ok: true })
+  addGitLabMRInlineCommentMock.mockReset()
+  addGitLabMRInlineCommentMock.mockResolvedValue({ ok: true })
+  resolveGitLabMRDiscussionMock.mockReset()
+  resolveGitLabMRDiscussionMock.mockResolvedValue({ ok: true })
+  getGitLabJobTraceMock.mockReset()
+  getGitLabJobTraceMock.mockResolvedValue({ ok: true, trace: 'log' })
+  retryGitLabJobMock.mockReset()
+  retryGitLabJobMock.mockResolvedValue({ ok: true })
   mergeGitLabMRMock.mockReset()
   mergeGitLabMRMock.mockResolvedValue({ ok: true })
   closeGitLabMRMock.mockReset()
@@ -419,6 +447,8 @@ afterEach(() => {
   reopenGitLabMRMock.mockResolvedValue({ ok: true })
   getGitLabWorkItemDetailsMock.mockReset()
   getGitLabWorkItemDetailsMock.mockResolvedValue({ body: 'Details' })
+  updateGitLabMRReviewersMock.mockReset()
+  updateGitLabMRReviewersMock.mockResolvedValue({ ok: true, reviewers: [] })
   getIssueMock.mockReset()
   getIssueMock.mockResolvedValue(null)
 })
@@ -1190,6 +1220,9 @@ describe('OrcaRuntimeService', () => {
     ensurePathWithinWorkspaceMock.mockReturnValue(createdWorktree.path)
     vi.mocked(listWorktrees).mockResolvedValueOnce([createdWorktree])
     const gitSpy = vi.spyOn(gitRunner, 'gitExecFileAsync').mockImplementation(async (args) => {
+      if (args[0] === 'rev-parse' && args.includes('refs/heads/cli-fresh-base^{commit}')) {
+        throw new Error('branch not found')
+      }
       if (args[0] === 'remote') {
         return { stdout: 'origin\n', stderr: '' }
       }
@@ -1369,6 +1402,351 @@ describe('OrcaRuntimeService', () => {
         path: createdWorktree.path,
         branch: 'refs/heads/fix/bug-0'
       })
+    } finally {
+      gitSpy.mockRestore()
+    }
+  })
+
+  it('creates a same-repo PR branch override from a resolved head SHA and matching push target', async () => {
+    const runtime = new OrcaRuntimeService(store)
+    const createdWorktree = {
+      path: '/tmp/workspaces/fix-title',
+      head: 'abc123',
+      branch: 'refs/heads/feature/fix',
+      isBare: false,
+      isMainWorktree: false
+    }
+    computeWorktreePathMock.mockReturnValue(createdWorktree.path)
+    ensurePathWithinWorkspaceMock.mockReturnValue(createdWorktree.path)
+    vi.mocked(getBranchConflictKind).mockResolvedValueOnce('remote')
+    vi.mocked(listWorktrees).mockResolvedValueOnce([createdWorktree])
+    getPRForBranchMock.mockResolvedValueOnce({
+      number: 42,
+      title: 'Selected PR',
+      state: 'open',
+      url: 'https://example.com/pr/42',
+      checksStatus: 'success',
+      updatedAt: '2026-05-21T00:00:00Z',
+      mergeable: 'UNKNOWN'
+    })
+    const gitSpy = vi.spyOn(gitRunner, 'gitExecFileAsync').mockResolvedValue({
+      stdout: '',
+      stderr: ''
+    })
+
+    try {
+      const result = await runtime.createManagedWorktree({
+        repoSelector: 'id:repo-1',
+        name: 'fix-title',
+        baseBranch: 'abc123',
+        branchNameOverride: 'feature/fix',
+        linkedPR: 42,
+        pushTarget: { remoteName: 'origin', branchName: 'feature/fix' }
+      })
+
+      expect(getBranchConflictKind).toHaveBeenCalledWith(TEST_REPO_PATH, 'feature/fix', 'abc123')
+      expect(getPRForBranchMock).toHaveBeenCalledWith(TEST_REPO_PATH, 'feature/fix')
+      expect(addWorktree).toHaveBeenCalledWith(
+        TEST_REPO_PATH,
+        createdWorktree.path,
+        'feature/fix',
+        'abc123',
+        false
+      )
+      expect(gitSpy).toHaveBeenCalledWith(
+        ['branch', '--set-upstream-to', 'origin/feature/fix', 'feature/fix'],
+        { cwd: createdWorktree.path }
+      )
+      expect(result.worktree).toMatchObject({
+        path: createdWorktree.path,
+        branch: 'refs/heads/feature/fix'
+      })
+    } finally {
+      gitSpy.mockRestore()
+    }
+  })
+
+  it('rejects an existing PR when a matching push target lacks selected PR metadata', async () => {
+    const runtime = new OrcaRuntimeService(store)
+    computeWorktreePathMock.mockReturnValue('/tmp/workspaces/fix-title')
+    ensurePathWithinWorkspaceMock.mockReturnValue('/tmp/workspaces/fix-title')
+    vi.mocked(getBranchConflictKind).mockResolvedValueOnce(null)
+    getPRForBranchMock.mockResolvedValueOnce({
+      number: 42,
+      title: 'Existing PR',
+      state: 'open',
+      url: 'https://example.com/pr/42',
+      checksStatus: 'success',
+      updatedAt: '2026-05-21T00:00:00Z',
+      mergeable: 'UNKNOWN'
+    })
+    const gitSpy = vi.spyOn(gitRunner, 'gitExecFileAsync').mockImplementation(async (args) => {
+      if (args[0] === 'rev-parse' && args.includes('refs/heads/feature/fix^{commit}')) {
+        throw new Error('missing local branch')
+      }
+      return { stdout: '', stderr: '' }
+    })
+
+    try {
+      await expect(
+        runtime.createManagedWorktree({
+          repoSelector: 'id:repo-1',
+          name: 'fix-title',
+          baseBranch: 'abc123',
+          branchNameOverride: 'feature/fix',
+          pushTarget: { remoteName: 'origin', branchName: 'feature/fix' }
+        })
+      ).rejects.toThrow('Branch "feature/fix" already has PR #42.')
+
+      expect(getPRForBranchMock).toHaveBeenCalledWith(TEST_REPO_PATH, 'feature/fix')
+      expect(addWorktree).not.toHaveBeenCalled()
+    } finally {
+      gitSpy.mockRestore()
+    }
+  })
+
+  it('rejects a matching push target branch when selected PR metadata has no PR number', async () => {
+    const runtime = new OrcaRuntimeService(store)
+    computeWorktreePathMock.mockReturnValue('/tmp/workspaces/fix-title')
+    ensurePathWithinWorkspaceMock.mockReturnValue('/tmp/workspaces/fix-title')
+    vi.mocked(getBranchConflictKind).mockResolvedValueOnce('remote')
+    const gitSpy = vi.spyOn(gitRunner, 'gitExecFileAsync').mockImplementation(async (args) => {
+      if (args[0] === 'rev-parse' && args.includes('refs/heads/feature/fix^{commit}')) {
+        throw new Error('missing local branch')
+      }
+      return { stdout: '', stderr: '' }
+    })
+
+    try {
+      await expect(
+        runtime.createManagedWorktree({
+          repoSelector: 'id:repo-1',
+          name: 'fix-title',
+          baseBranch: 'abc123',
+          branchNameOverride: 'feature/fix',
+          linkedPR: null,
+          pushTarget: { remoteName: 'origin', branchName: 'feature/fix' }
+        })
+      ).rejects.toThrow('Branch "feature/fix" already exists on a remote.')
+
+      expect(getPRForBranchMock).not.toHaveBeenCalled()
+      expect(addWorktree).not.toHaveBeenCalled()
+    } finally {
+      gitSpy.mockRestore()
+    }
+  })
+
+  it('rejects a matching push target branch when the existing PR is different', async () => {
+    const runtime = new OrcaRuntimeService(store)
+    computeWorktreePathMock.mockReturnValue('/tmp/workspaces/fix-title')
+    ensurePathWithinWorkspaceMock.mockReturnValue('/tmp/workspaces/fix-title')
+    vi.mocked(getBranchConflictKind).mockResolvedValueOnce('remote')
+    getPRForBranchMock.mockResolvedValueOnce({
+      number: 43,
+      title: 'Different PR',
+      state: 'open',
+      url: 'https://example.com/pr/43',
+      checksStatus: 'success',
+      updatedAt: '2026-05-21T00:00:00Z',
+      mergeable: 'UNKNOWN'
+    })
+    const gitSpy = vi.spyOn(gitRunner, 'gitExecFileAsync').mockImplementation(async (args) => {
+      if (args[0] === 'rev-parse' && args.includes('refs/heads/feature/fix^{commit}')) {
+        throw new Error('missing local branch')
+      }
+      return { stdout: '', stderr: '' }
+    })
+
+    try {
+      await expect(
+        runtime.createManagedWorktree({
+          repoSelector: 'id:repo-1',
+          name: 'fix-title',
+          baseBranch: 'abc123',
+          branchNameOverride: 'feature/fix',
+          linkedPR: 42,
+          pushTarget: { remoteName: 'origin', branchName: 'feature/fix' }
+        })
+      ).rejects.toThrow('Branch "feature/fix" already has PR #43.')
+
+      expect(getPRForBranchMock).toHaveBeenCalledWith(TEST_REPO_PATH, 'feature/fix')
+      expect(addWorktree).not.toHaveBeenCalled()
+    } finally {
+      gitSpy.mockRestore()
+    }
+  })
+
+  it('rejects a selected PR remote conflict when the PR lookup fails', async () => {
+    const runtime = new OrcaRuntimeService(store)
+    computeWorktreePathMock.mockReturnValue('/tmp/workspaces/fix-title')
+    ensurePathWithinWorkspaceMock.mockReturnValue('/tmp/workspaces/fix-title')
+    vi.mocked(getBranchConflictKind).mockResolvedValueOnce('remote')
+    getPRForBranchMock.mockRejectedValueOnce(new Error('gh unavailable'))
+    const gitSpy = vi.spyOn(gitRunner, 'gitExecFileAsync').mockImplementation(async (args) => {
+      if (args[0] === 'rev-parse' && args.includes('refs/heads/feature/fix^{commit}')) {
+        throw new Error('missing local branch')
+      }
+      return { stdout: '', stderr: '' }
+    })
+
+    try {
+      await expect(
+        runtime.createManagedWorktree({
+          repoSelector: 'id:repo-1',
+          name: 'fix-title',
+          baseBranch: 'abc123',
+          branchNameOverride: 'feature/fix',
+          linkedPR: 42,
+          pushTarget: { remoteName: 'origin', branchName: 'feature/fix' }
+        })
+      ).rejects.toThrow('Could not verify selected PR branch "feature/fix". Try again.')
+
+      expect(getPRForBranchMock).toHaveBeenCalledWith(TEST_REPO_PATH, 'feature/fix')
+      expect(addWorktree).not.toHaveBeenCalled()
+    } finally {
+      gitSpy.mockRestore()
+    }
+  })
+
+  it('checks out an unused runtime PR branch only when it is at the resolved head SHA', async () => {
+    const runtime = new OrcaRuntimeService(store)
+    const createdWorktree = {
+      path: '/tmp/workspaces/fix-title',
+      head: 'abc123',
+      branch: 'refs/heads/feature/fix',
+      isBare: false,
+      isMainWorktree: false
+    }
+    computeWorktreePathMock.mockReturnValue(createdWorktree.path)
+    ensurePathWithinWorkspaceMock.mockReturnValue(createdWorktree.path)
+    vi.mocked(getBranchConflictKind).mockClear()
+    vi.mocked(listWorktrees)
+      .mockResolvedValueOnce([
+        {
+          path: TEST_REPO_PATH,
+          head: 'main',
+          branch: 'refs/heads/main',
+          isBare: false,
+          isMainWorktree: true
+        }
+      ])
+      .mockResolvedValueOnce([createdWorktree])
+    const gitSpy = vi.spyOn(gitRunner, 'gitExecFileAsync').mockImplementation(async (args) => {
+      if (args[0] === 'rev-parse' && args.includes('refs/heads/feature/fix^{commit}')) {
+        return { stdout: 'abc123\n', stderr: '' }
+      }
+      if (args[0] === 'rev-parse' && args.includes('abc123^{commit}')) {
+        return { stdout: 'abc123\n', stderr: '' }
+      }
+      return { stdout: '', stderr: '' }
+    })
+
+    try {
+      await runtime.createManagedWorktree({
+        repoSelector: 'id:repo-1',
+        name: 'fix-title',
+        baseBranch: 'abc123',
+        branchNameOverride: 'feature/fix'
+      })
+
+      expect(getBranchConflictKind).not.toHaveBeenCalled()
+      expect(addWorktree).toHaveBeenCalledWith(
+        TEST_REPO_PATH,
+        createdWorktree.path,
+        'feature/fix',
+        'abc123',
+        false,
+        false,
+        { checkoutExistingBranch: true }
+      )
+    } finally {
+      gitSpy.mockRestore()
+    }
+  })
+
+  it('suffixes only the runtime worktree path when an exact PR branch checkout path exists', async () => {
+    const runtime = new OrcaRuntimeService(store)
+    const createdWorktree = {
+      path: '/tmp/workspaces/fix-title-2',
+      head: 'abc123',
+      branch: 'refs/heads/feature/fix',
+      isBare: false,
+      isMainWorktree: false
+    }
+    computeWorktreePathMock.mockImplementation((sanitizedName: string) =>
+      sanitizedName === 'fix-title' ? process.cwd() : `/tmp/workspaces/${sanitizedName}`
+    )
+    ensurePathWithinWorkspaceMock.mockImplementation((pathValue: string) => pathValue)
+    vi.mocked(getBranchConflictKind).mockClear()
+    vi.mocked(listWorktrees)
+      .mockResolvedValueOnce([
+        {
+          path: TEST_REPO_PATH,
+          head: 'main',
+          branch: 'refs/heads/main',
+          isBare: false,
+          isMainWorktree: true
+        }
+      ])
+      .mockResolvedValueOnce([createdWorktree])
+    const gitSpy = vi.spyOn(gitRunner, 'gitExecFileAsync').mockImplementation(async (args) => {
+      if (args[0] === 'rev-parse' && args.includes('refs/heads/feature/fix^{commit}')) {
+        return { stdout: 'abc123\n', stderr: '' }
+      }
+      if (args[0] === 'rev-parse' && args.includes('abc123^{commit}')) {
+        return { stdout: 'abc123\n', stderr: '' }
+      }
+      return { stdout: '', stderr: '' }
+    })
+
+    try {
+      await runtime.createManagedWorktree({
+        repoSelector: 'id:repo-1',
+        name: 'fix-title',
+        baseBranch: 'abc123',
+        branchNameOverride: 'feature/fix'
+      })
+
+      expect(getBranchConflictKind).not.toHaveBeenCalled()
+      expect(addWorktree).toHaveBeenCalledWith(
+        TEST_REPO_PATH,
+        createdWorktree.path,
+        'feature/fix',
+        'abc123',
+        false,
+        false,
+        { checkoutExistingBranch: true }
+      )
+    } finally {
+      gitSpy.mockRestore()
+    }
+  })
+
+  it('rejects when every exact PR branch checkout path suffix is occupied', async () => {
+    const runtime = new OrcaRuntimeService(store)
+    computeWorktreePathMock.mockReturnValue(process.cwd())
+    ensurePathWithinWorkspaceMock.mockImplementation((pathValue: string) => pathValue)
+    vi.mocked(getBranchConflictKind).mockResolvedValueOnce(null)
+    const gitSpy = vi.spyOn(gitRunner, 'gitExecFileAsync').mockImplementation(async (args) => {
+      if (args[0] === 'rev-parse' && args.includes('refs/heads/feature/fix^{commit}')) {
+        throw new Error('missing local branch')
+      }
+      return { stdout: '', stderr: '' }
+    })
+
+    try {
+      await expect(
+        runtime.createManagedWorktree({
+          repoSelector: 'id:repo-1',
+          name: 'fix-title',
+          baseBranch: 'abc123',
+          branchNameOverride: 'feature/fix'
+        })
+      ).rejects.toThrow(
+        'Could not find an available worktree path for "fix-title". Pick a different worktree name.'
+      )
+
+      expect(addWorktree).not.toHaveBeenCalled()
     } finally {
       gitSpy.mockRestore()
     }
@@ -8690,6 +9068,7 @@ describe('OrcaRuntimeService', () => {
       ]
     })
     listGitLabTodosMock.mockResolvedValue([])
+    listGitLabLabelsMock.mockResolvedValue(['bug', 'frontend'])
     getGitLabWorkItemByProjectRefMock.mockResolvedValue({
       id: 'gitlab-issue-7',
       type: 'issue',
@@ -8703,10 +9082,15 @@ describe('OrcaRuntimeService', () => {
     updateGitLabIssueMock.mockResolvedValue({ ok: true })
     addGitLabIssueCommentMock.mockResolvedValue({ ok: true })
     addGitLabMRCommentMock.mockResolvedValue({ ok: true })
+    addGitLabMRInlineCommentMock.mockResolvedValue({ ok: true })
+    resolveGitLabMRDiscussionMock.mockResolvedValue({ ok: true })
+    getGitLabJobTraceMock.mockResolvedValue({ ok: true, trace: 'log' })
+    retryGitLabJobMock.mockResolvedValue({ ok: true })
     mergeGitLabMRMock.mockResolvedValue({ ok: true })
     closeGitLabMRMock.mockResolvedValue({ ok: true })
     reopenGitLabMRMock.mockResolvedValue({ ok: true })
     getGitLabWorkItemDetailsMock.mockResolvedValue({ body: 'Details' })
+    updateGitLabMRReviewersMock.mockResolvedValue({ ok: true, reviewers: [] })
 
     const remoteRepo = {
       id: TEST_REPO_ID,
@@ -8728,14 +9112,28 @@ describe('OrcaRuntimeService', () => {
     await runtime.listGitLabRepoWorkItems(TEST_REPO_ID, 'closed', 2, 25, 'ambiguous selector')
     const issues = await runtime.listGitLabRepoIssues(TEST_REPO_ID, 'opened', '@me', 50)
     await runtime.listGitLabRepoTodos(TEST_REPO_ID)
+    await runtime.listGitLabRepoLabels(TEST_REPO_ID)
     await runtime.createGitLabRepoIssue(TEST_REPO_ID, 'New issue', 'Body')
     await runtime.updateGitLabRepoIssue(TEST_REPO_ID, 7, { state: 'closed' })
     await runtime.addGitLabRepoIssueComment(TEST_REPO_ID, 7, 'Looks good')
     await runtime.addGitLabRepoMRComment(TEST_REPO_ID, 8, 'Ship it')
+    const inlineCommentInput = {
+      body: 'please fix',
+      path: 'src/app.ts',
+      line: 12,
+      baseSha: 'base',
+      startSha: 'start',
+      headSha: 'head'
+    }
+    await runtime.addGitLabRepoMRInlineComment(TEST_REPO_ID, 8, inlineCommentInput)
+    await runtime.resolveGitLabRepoMRDiscussion(TEST_REPO_ID, 8, 'discussion-1', true)
+    await runtime.getGitLabRepoJobTrace(TEST_REPO_ID, 99)
+    await runtime.retryGitLabRepoJob(TEST_REPO_ID, 99)
     await runtime.mergeGitLabRepoMR(TEST_REPO_ID, 8, 'squash')
     await runtime.updateGitLabRepoMRState(TEST_REPO_ID, 8, 'closed')
     await runtime.updateGitLabRepoMRState(TEST_REPO_ID, 8, 'opened')
     await runtime.getGitLabRepoWorkItemDetails(TEST_REPO_ID, 8, 'mr')
+    await runtime.updateGitLabRepoMRReviewers(TEST_REPO_ID, 8, [1, 2])
     await runtime.getGitLabRepoWorkItemByPath(
       TEST_REPO_ID,
       { host: 'gitlab.example.com', path: 'group/project' },
@@ -8784,6 +9182,7 @@ describe('OrcaRuntimeService', () => {
       }
     ])
     expect(listGitLabTodosMock).toHaveBeenCalledWith('/remote/repo', 'ssh-1')
+    expect(listGitLabLabelsMock).toHaveBeenCalledWith('/remote/repo', 'origin', 'ssh-1')
     expect(createGitLabIssueMock).toHaveBeenCalledWith(
       '/remote/repo',
       'New issue',
@@ -8815,6 +9214,37 @@ describe('OrcaRuntimeService', () => {
       'ssh-1',
       undefined
     )
+    expect(addGitLabMRInlineCommentMock).toHaveBeenCalledWith(
+      '/remote/repo',
+      8,
+      inlineCommentInput,
+      'origin',
+      'ssh-1',
+      undefined
+    )
+    expect(resolveGitLabMRDiscussionMock).toHaveBeenCalledWith(
+      '/remote/repo',
+      8,
+      'discussion-1',
+      true,
+      'origin',
+      'ssh-1',
+      undefined
+    )
+    expect(getGitLabJobTraceMock).toHaveBeenCalledWith(
+      '/remote/repo',
+      99,
+      'origin',
+      'ssh-1',
+      undefined
+    )
+    expect(retryGitLabJobMock).toHaveBeenCalledWith(
+      '/remote/repo',
+      99,
+      'origin',
+      'ssh-1',
+      undefined
+    )
     expect(mergeGitLabMRMock).toHaveBeenCalledWith(
       '/remote/repo',
       8,
@@ -8829,6 +9259,14 @@ describe('OrcaRuntimeService', () => {
       '/remote/repo',
       8,
       'mr',
+      'origin',
+      'ssh-1',
+      undefined
+    )
+    expect(updateGitLabMRReviewersMock).toHaveBeenCalledWith(
+      '/remote/repo',
+      8,
+      [1, 2],
       'origin',
       'ssh-1',
       undefined

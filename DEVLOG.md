@@ -6,6 +6,22 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-31 — Remediated upstream v1.4.36-rc.10 bot PR
+
+Resolved the agent-remediation merge for upstream `v1.4.36-rc.10` on `bot/upstream-sync-axiom-v1.4.36-rc.10.axiom.1` targeting `axiom/deploy`; no direct deploy-branch push was made. The conflict resolution keeps the fork semver at `1.4.36-rc.10.axiom.1`, preserves Axiom side-by-side app/updater identity, profile portability, and Forge provider/task-registry support, while accepting upstream's shared store test helper extraction for the session cascade and tab tests. Protected deletion review found only upstream sidebar hover helper/test deletions outside the protected Axiom path list.
+
+Verification:
+
+- `pnpm install --frozen-lockfile` → passed. Node engine warning only (`wanted node 24`, local `v25.6.0`).
+- `pnpm run typecheck` → passed. Node engine warning only (`wanted node 24`, local `v25.6.0`).
+- `pnpm exec vitest run --config config/vitest.config.ts src/shared/task-providers.test.ts src/main/axiom-release-hardening.test.ts src/main/updater-endpoints.test.ts src/main/app-build-identity.test.ts config/scripts/axiom-upstream-sync-release.test.mjs` → 50 tests passed.
+- `pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/store/slices/store-session-cascades.test.ts src/renderer/src/store/slices/tabs.test.ts` → 110 tests passed.
+- `pnpm exec oxlint config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml` → 0 warnings / 0 errors.
+- `pnpm exec oxfmt --check config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml config/axiom-merge-remediation-policy.json` → passed.
+- `git diff --check` → passed.
+
+---
+
 ## 2026-05-28 — Remediated upstream v1.4.35-rc.1 bot PR
 
 Resolved the agent-remediation merge for upstream `v1.4.35-rc.1` on `bot/upstream-sync-axiom-v1.4.35-rc.1.axiom.1` targeting `axiom/deploy`; no direct deploy-branch push was made. The conflict resolution keeps the fork semver at `1.4.35-rc.1.axiom.1`, preserves Axiom side-by-side app/updater identity, profile portability, and Forge provider/task-source support, while accepting upstream settings-change broadcast and disabled TUI-agent RPC updates. Protected deletion review found no protected Axiom files removed by the merge.
