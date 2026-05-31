@@ -2,11 +2,11 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import type { ReactNode } from 'react'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
+  GitConflictOperation,
   GlobalSettings,
   Repo,
   Worktree,
-  WorktreeCardProperty,
-  WorkspaceStatusDefinition
+  WorktreeCardProperty
 } from '../../../../shared/types'
 import type WorktreeCardComponent from './WorktreeCard'
 import type * as WorkspaceDeleteQuickAction from './workspace-delete-quick-action'
@@ -21,18 +21,8 @@ let tabsByWorktree: Record<string, { id: string }[]> = {}
 let ptyIdsByTabId: Record<string, string[]> = {}
 let browserTabsByWorktree: Record<string, { id: string }[]> = {}
 let settings: Partial<GlobalSettings> | null = null
-let workspaceStatuses: WorkspaceStatusDefinition[] = [
-  { id: 'completed', label: 'Done', color: 'conductor-done', icon: 'conductor-done' },
-  { id: 'in-review', label: 'In review', color: 'conductor-review', icon: 'conductor-review' },
-  {
-    id: 'in-progress',
-    label: 'In progress',
-    color: 'conductor-progress',
-    icon: 'conductor-progress'
-  },
-  { id: 'todo', label: 'Todo', color: 'neutral', icon: 'circle' }
-]
 let workspaceDeleteModifierPressed = false
+let gitConflictOperationByWorktree: Record<string, GitConflictOperation> = {}
 let WorktreeCard: typeof WorktreeCardComponent
 
 vi.mock('@/store', () => ({
@@ -41,7 +31,7 @@ vi.mock('@/store', () => ({
       deleteStateByWorktreeId: {},
       fetchHostedReviewForBranch,
       fetchIssue,
-      gitConflictOperationByWorktree: {},
+      gitConflictOperationByWorktree,
       hostedReviewCache: {},
       issueCache: {},
       openModal,
@@ -53,7 +43,6 @@ vi.mock('@/store', () => ({
       ptyIdsByTabId,
       tabsByWorktree,
       updateWorktreeMeta,
-      workspaceStatuses,
       worktreeCardProperties
     })
 }))
@@ -145,18 +134,8 @@ describe('WorktreeCard quick actions', () => {
     ptyIdsByTabId = {}
     browserTabsByWorktree = {}
     settings = null
-    workspaceStatuses = [
-      { id: 'completed', label: 'Done', color: 'conductor-done', icon: 'conductor-done' },
-      { id: 'in-review', label: 'In review', color: 'conductor-review', icon: 'conductor-review' },
-      {
-        id: 'in-progress',
-        label: 'In progress',
-        color: 'conductor-progress',
-        icon: 'conductor-progress'
-      },
-      { id: 'todo', label: 'Todo', color: 'neutral', icon: 'circle' }
-    ]
     workspaceDeleteModifierPressed = false
+    gitConflictOperationByWorktree = {}
   })
 
   it('marks the unread toggle as a workspace-board-preserving action', () => {
@@ -168,7 +147,31 @@ describe('WorktreeCard quick actions', () => {
     expect(markup).toContain('data-workspace-board-preserve-open=""')
   })
 
-  it('keeps the branch row by default when it repeats the workspace title', () => {
+  it('renders repo identity inline without creating a repo-only metadata row', () => {
+    const markup = renderToStaticMarkup(
+      <WorktreeCard worktree={makeWorktree()} repo={makeRepo()} isActive={false} />
+    )
+
+    expect(markup).toContain('aria-label="Project orca"')
+    expect(markup.indexOf('aria-label="Project orca"')).toBeLessThan(markup.indexOf('Quick action'))
+    expect(markup).not.toContain('data-worktree-card-meta-row=""')
+  })
+
+  it('omits folder kind from the title row without creating a folder-only metadata row', () => {
+    const markup = renderToStaticMarkup(
+      <WorktreeCard
+        worktree={makeWorktree({ displayName: 'Docs folder', branch: '' })}
+        repo={{ ...makeRepo(), kind: 'folder' }}
+        isActive={false}
+      />
+    )
+
+    expect(markup).toContain('Docs folder')
+    expect(markup).not.toContain('>Folder</span>')
+    expect(markup).not.toContain('data-worktree-card-meta-row=""')
+  })
+
+  it('omits the branch metadata row by default when it repeats the workspace title', () => {
     worktreeCardProperties = []
 
     const markup = renderToStaticMarkup(
@@ -181,12 +184,12 @@ describe('WorktreeCard quick actions', () => {
     )
 
     expect(markup).toContain('quick-action')
-    expect(markup).toContain('text-[11px] text-muted-foreground truncate leading-none')
-    expect(markup).toContain('data-worktree-card-meta-row=""')
+    expect(markup).not.toContain('text-[11px] text-muted-foreground truncate leading-none')
+    expect(markup).not.toContain('data-worktree-card-meta-row=""')
     expect(markup).toContain('tabindex="0"')
   })
 
-  it('hides the repeated branch row only when compact cards are enabled', () => {
+  it('omits the repeated branch metadata row when compact cards are enabled', () => {
     worktreeCardProperties = []
     settings = { experimentalCompactWorktreeCards: true }
 
@@ -203,7 +206,7 @@ describe('WorktreeCard quick actions', () => {
     expect(markup).toContain('tabindex="0"')
   })
 
-  it('keeps the branch row when the workspace has a custom title', () => {
+  it('omits the branch metadata row when the workspace has a custom title', () => {
     worktreeCardProperties = []
     settings = { experimentalCompactWorktreeCards: true }
 
@@ -217,9 +220,9 @@ describe('WorktreeCard quick actions', () => {
     )
 
     expect(markup).toContain('Custom workspace')
-    expect(markup).toContain('quick-action')
-    expect(markup).toContain('data-worktree-card-meta-row=""')
-    expect(markup).toContain('text-[11px] text-muted-foreground truncate leading-none')
+    expect(markup).not.toContain('>quick-action<')
+    expect(markup).not.toContain('data-worktree-card-meta-row=""')
+    expect(markup).not.toContain('text-[11px] text-muted-foreground truncate leading-none')
   })
 
   it('uses the pre-compact unread lane and primary badge when compact cards are disabled', () => {
@@ -240,7 +243,7 @@ describe('WorktreeCard quick actions', () => {
 
     expect(markup).toContain('primary')
     expect(markup).not.toContain('aria-label="Primary worktree"')
-    expect(markup).toContain('data-worktree-card-meta-row=""')
+    expect(markup).not.toContain('data-worktree-card-meta-row=""')
   })
 
   it('moves unread and primary into the title row when compact cards are enabled', () => {
@@ -265,16 +268,15 @@ describe('WorktreeCard quick actions', () => {
     expect(markup).not.toContain('data-worktree-card-meta-row=""')
   })
 
-  it('shows mark done as the top-right quick action for an inactive workspace', () => {
+  it('hides delete by default for an inactive workspace', () => {
     const markup = renderToStaticMarkup(
       <WorktreeCard worktree={makeWorktree()} repo={makeRepo()} isActive={false} />
     )
 
-    expect(markup).toContain('aria-label="Mark workspace done"')
     expect(markup).not.toContain('aria-label="Delete workspace"')
   })
 
-  it('replaces mark done with delete while Option/Alt is held', () => {
+  it('shows delete as the top-right quick action while Option/Alt is held', () => {
     workspaceDeleteModifierPressed = true
 
     const markup = renderToStaticMarkup(
@@ -282,27 +284,9 @@ describe('WorktreeCard quick actions', () => {
     )
 
     expect(markup).toContain('aria-label="Delete workspace"')
-    expect(markup).not.toContain('aria-label="Mark workspace done"')
   })
 
-  it('shows mark done as the quick action for inactive folder workspace instances', () => {
-    const markup = renderToStaticMarkup(
-      <WorktreeCard
-        worktree={makeWorktree({
-          id: 'repo-1::/repo::workspace:123e4567-e89b-12d3-a456-426614174000',
-          path: '/repo',
-          isMainWorktree: false
-        })}
-        repo={{ ...makeRepo(), kind: 'folder' }}
-        isActive={false}
-      />
-    )
-
-    expect(markup).toContain('aria-label="Mark workspace done"')
-    expect(markup).not.toContain('aria-label="Delete workspace"')
-  })
-
-  it('replaces mark done with delete for folder workspace instances while Option/Alt is held', () => {
+  it('shows delete as the quick action for folder workspace instances while Option/Alt is held', () => {
     workspaceDeleteModifierPressed = true
 
     const markup = renderToStaticMarkup(
@@ -318,7 +302,6 @@ describe('WorktreeCard quick actions', () => {
     )
 
     expect(markup).toContain('aria-label="Delete workspace"')
-    expect(markup).not.toContain('aria-label="Mark workspace done"')
   })
 
   it('shows delete for a current workspace while Option/Alt is held', () => {
@@ -344,10 +327,9 @@ describe('WorktreeCard quick actions', () => {
     )
 
     expect(markup).not.toContain('aria-label="Delete workspace"')
-    expect(markup).toContain('aria-label="Mark workspace done"')
   })
 
-  it('keeps mark done available for a workspace with live activity', () => {
+  it('does not replace sleep with delete for a workspace with live activity', () => {
     const worktree = makeWorktree()
     tabsByWorktree = { [worktree.id]: [{ id: 'tab-1' }] }
     ptyIdsByTabId = { 'tab-1': ['pty-1'] }
@@ -358,10 +340,9 @@ describe('WorktreeCard quick actions', () => {
 
     expect(markup).not.toContain('aria-label="Sleep workspace"')
     expect(markup).not.toContain('aria-label="Delete workspace"')
-    expect(markup).toContain('aria-label="Mark workspace done"')
   })
 
-  it('keeps mark done available for an active workspace', () => {
+  it('does not show sleep as the top-right quick action for an active workspace', () => {
     const worktree = makeWorktree()
     tabsByWorktree = { [worktree.id]: [{ id: 'tab-1' }] }
     ptyIdsByTabId = { 'tab-1': ['pty-1'] }
@@ -372,21 +353,9 @@ describe('WorktreeCard quick actions', () => {
 
     expect(markup).not.toContain('aria-label="Sleep workspace"')
     expect(markup).not.toContain('aria-label="Delete workspace"')
-    expect(markup).toContain('aria-label="Mark workspace done"')
   })
 
-  it('reverses the quick action for a done workspace', () => {
-    const worktree = makeWorktree({ workspaceStatus: 'completed' })
-
-    const markup = renderToStaticMarkup(
-      <WorktreeCard worktree={worktree} repo={makeRepo()} isActive={false} />
-    )
-
-    expect(markup).toContain('aria-label="Mark workspace in progress"')
-    expect(markup).not.toContain('aria-label="Delete workspace"')
-  })
-
-  it('keeps delete hidden when the workspace is current but not selected in the sidebar', () => {
+  it('does not show delete when the workspace is current but not selected in the sidebar', () => {
     const worktree = makeWorktree()
 
     const markup = renderToStaticMarkup(
@@ -394,17 +363,29 @@ describe('WorktreeCard quick actions', () => {
     )
 
     expect(markup).not.toContain('aria-label="Delete workspace"')
-    expect(markup).toContain('aria-label="Mark workspace done"')
   })
 
-  it('hides the completion quick action when the Done status is unavailable', () => {
-    workspaceStatuses = [{ id: 'todo', label: 'Todo', color: 'neutral', icon: 'circle' }]
+  it('does not show the rebase operation chip on the card', () => {
+    const worktree = makeWorktree()
+    gitConflictOperationByWorktree = { [worktree.id]: 'rebase' }
 
     const markup = renderToStaticMarkup(
-      <WorktreeCard worktree={makeWorktree()} repo={makeRepo()} isActive={false} />
+      <WorktreeCard worktree={worktree} repo={makeRepo()} isActive={false} />
     )
 
-    expect(markup).not.toContain('aria-label="Mark workspace done"')
-    expect(markup).not.toContain('aria-label="Delete workspace"')
+    expect(markup).not.toContain('Rebasing')
+    expect(markup).not.toContain('data-worktree-card-meta-row=""')
+  })
+
+  it('keeps non-rebase operation chips on the card', () => {
+    const worktree = makeWorktree()
+    gitConflictOperationByWorktree = { [worktree.id]: 'merge' }
+
+    const markup = renderToStaticMarkup(
+      <WorktreeCard worktree={worktree} repo={makeRepo()} isActive={false} />
+    )
+
+    expect(markup).toContain('Merging')
+    expect(markup).toContain('data-worktree-card-meta-row=""')
   })
 })
