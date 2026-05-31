@@ -1,6 +1,11 @@
 const { chmodSync, existsSync, readdirSync, writeFileSync } = require('node:fs')
 const { execFileSync } = require('node:child_process')
 const { join, resolve } = require('node:path')
+const electronBuilderNativeRebuild = require('./scripts/electron-builder-native-rebuild.cjs')
+const {
+  createPackagedRuntimeNodeModuleResources,
+  verifyPackagedMainRuntimeDeps
+} = require('./packaged-runtime-node-modules.cjs')
 
 const isMacRelease = process.env.ORCA_MAC_RELEASE === '1'
 const skipElectronBuilderRebuild = process.env.ORCA_SKIP_ELECTRON_BUILDER_REBUILD === '1'
@@ -50,6 +55,25 @@ const featureWallResources = {
 const relayExtraResource = {
   from: 'out/relay',
   to: 'relay'
+}
+// Why: the main bundle, packaged CLI, SSH paths, and speech worker all execute
+// from package directories where pnpm's symlink farm is absent. Copy the exact
+// runtime dependency closure to Resources/node_modules so bare require() calls
+// do not fall through to a developer checkout's node_modules.
+const packagedRuntimeNodeModuleResources = createPackagedRuntimeNodeModuleResources()
+
+const commonExtraResources = [relayExtraResource, ...packagedRuntimeNodeModuleResources]
+const macSpeechNativeResource = {
+  from: 'node_modules/sherpa-onnx-darwin-${arch}',
+  to: 'node_modules/sherpa-onnx-darwin-${arch}'
+}
+const linuxSpeechNativeResource = {
+  from: 'node_modules/sherpa-onnx-linux-${arch}',
+  to: 'node_modules/sherpa-onnx-linux-${arch}'
+}
+const winSpeechNativeResource = {
+  from: 'node_modules/sherpa-onnx-win-x64',
+  to: 'node_modules/sherpa-onnx-win-x64'
 }
 const windowsCliExecutableMarker = 'orca-electron-executable.txt'
 const windowsExecutableFilename = windowsExecutableName.endsWith('.exe')
@@ -135,6 +159,7 @@ module.exports = {
     if (!existsSync(resourcesDir)) {
       return
     }
+    verifyPackagedMainRuntimeDeps(resourcesDir)
     for (const filename of readdirSync(resourcesDir)) {
       if (!filename.startsWith('agent-browser-')) {
         continue
@@ -162,7 +187,8 @@ module.exports = {
   win: {
     executableName: windowsExecutableName,
     extraResources: [
-      relayExtraResource,
+      ...commonExtraResources,
+      winSpeechNativeResource,
       {
         from: 'resources/win32/bin/orca.cmd',
         to: 'bin/orca.cmd'
@@ -226,7 +252,8 @@ module.exports = {
     hardenedRuntime: isMacRelease,
     notarize: isMacRelease,
     extraResources: [
-      relayExtraResource,
+      ...commonExtraResources,
+      macSpeechNativeResource,
       {
         from: 'resources/darwin/bin/orca',
         to: 'bin/orca'
@@ -266,7 +293,8 @@ module.exports = {
     // sizes; a single 1024px PNG is ignored by some Linux docks/launchers.
     icon: 'resources/build/icon.icns',
     extraResources: [
-      relayExtraResource,
+      ...commonExtraResources,
+      linuxSpeechNativeResource,
       {
         from: 'resources/linux/bin/orca-ide',
         to: 'bin/orca-ide'
@@ -298,12 +326,10 @@ module.exports = {
     artifactName: 'orca-ide-${version}.${arch}.${ext}',
     depends: ['python3', 'python3-gobject', 'at-spi2-core', 'xdotool', 'xclip']
   },
-  // Why: must be true by default so that electron-builder rebuilds native
-  // modules (node-pty) for each target architecture when producing dual-arch
-  // macOS builds (x64 + arm64). Windows release CI performs the targeted
-  // postinstall rebuild via config/scripts/rebuild-native-deps.mjs instead,
-  // which intentionally skips optional cpu-features because it is incompatible
-  // with Electron 42's V8 external-pointer API.
+  ...(skipElectronBuilderRebuild ? {} : { beforeBuild: electronBuilderNativeRebuild }),
+  // Why: keep the default native rebuild path for dual-arch macOS packaging, but
+  // let Windows release CI opt out after running the targeted
+  // config/scripts/rebuild-native-deps.mjs path that skips optional cpu-features.
   npmRebuild: !skipElectronBuilderRebuild,
   publish: {
     provider: 'github',

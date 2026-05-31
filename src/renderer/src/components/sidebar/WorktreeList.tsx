@@ -62,6 +62,7 @@ import {
 import { track } from '@/lib/telemetry'
 import { tabHasLivePty } from '@/lib/tab-has-live-pty'
 import { deriveRunningAgentSendTargets } from '@/lib/running-agent-targets'
+import { rightSidebarShowsPullRequestData } from '@/lib/right-sidebar-visibility'
 import {
   type GroupHeaderRow,
   type ProjectGroupOrdering,
@@ -170,7 +171,7 @@ import {
 } from '../../../../shared/worktree-ownership'
 import { RepoIconGlyph } from '@/components/repo/repo-icon'
 import { RepoBadgeMark } from '@/components/repo/RepoBadgeLabel'
-import ImportedWorktreesVisibilityCard from './ImportedWorktreesVisibilityCard'
+import ImportedWorktreesVisibilityLine from './ImportedWorktreesVisibilityLine'
 import {
   keepImportedWorktreesHiddenCard,
   showImportedWorktreesCard,
@@ -293,7 +294,7 @@ function getWorktreeVisibilityMenuLabel(repo: Repo): string {
     repo,
     isLegacyRepoForExternalWorktreeVisibility(repo)
   )
-  return visibility === 'show' ? 'Hide non-Orca worktrees' : 'Import Worktrees'
+  return visibility === 'show' ? 'Hide non-Orca worktrees' : 'Show hidden worktrees'
 }
 
 const LINEAGE_INDENT = 18
@@ -742,6 +743,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     (s) => s.reportVisibleGitHubPRRefreshCandidates
   )
   const cardProps = useAppStore((s) => s.worktreeCardProperties)
+  const rightSidebarShowsPR = useAppStore((s) => rightSidebarShowsPullRequestData(s))
   const keybindings = useAppStore((s) => s.keybindings)
   const sshConnectedGeneration = useAppStore((s) => s.sshConnectedGeneration)
   const prVisibleRefreshGeneration = useAppStore((s) => s.prVisibleRefreshGeneration)
@@ -2086,7 +2088,17 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
       lastVisibleRefreshKeyRef.current = '__document_hidden__'
       return
     }
-    if (groupBy !== 'pr-status' && !cardProps.includes('pr') && !cardProps.includes('ci')) {
+    const currentWorktree = currentWorktreeId ? (worktreeMap.get(currentWorktreeId) ?? null) : null
+    // Why: this visible reporter feeds the GitHub coordinator; GitLab-only MR
+    // panels refresh through hosted-review paths instead.
+    const sidebarWorktreeHasGitHubReview =
+      currentWorktree !== null &&
+      ((currentWorktree.linkedGitLabMR ?? null) === null ||
+        (currentWorktree.linkedPR ?? null) !== null)
+    const shouldTrackSidebarWorktree = rightSidebarShowsPR && sidebarWorktreeHasGitHubReview
+    const shouldTrackVisibleRows =
+      groupBy === 'pr-status' || cardProps.includes('pr') || cardProps.includes('ci')
+    if (!shouldTrackVisibleRows && !shouldTrackSidebarWorktree) {
       if (lastVisibleRefreshKeyRef.current !== '__hidden__') {
         lastVisibleRefreshKeyRef.current = '__hidden__'
         reportVisibleGitHubPRRefreshCandidates([], Date.now())
@@ -2104,25 +2116,40 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
       .map((item) => renderRows[item.index])
       .filter((row): row is Extract<Row, { type: 'item' }> => row?.type === 'item')
       .filter((row) => row.repo?.kind === 'git' && !row.worktree.isBare && row.worktree.branch)
-    const visibleWorktreeIds = visibleRows.map((row) => row.worktree.id)
+    const visibleWorktreeIds = new Set(visibleRows.map((row) => row.worktree.id))
+    if (
+      shouldTrackSidebarWorktree &&
+      currentWorktree &&
+      !currentWorktree.isBare &&
+      currentWorktree.branch
+    ) {
+      visibleWorktreeIds.add(currentWorktree.id)
+    }
     const visibleIdentity = visibleRows
       .map((row) => `${row.worktree.id}:${row.worktree.branch}:${row.worktree.linkedPR ?? ''}`)
       .join('|')
-    const key = `${visibleIdentity}:${sshConnectedGeneration}:${prVisibleRefreshGeneration}:${cardProps.join(',')}`
+    const sidebarIdentity =
+      shouldTrackSidebarWorktree && currentWorktree
+        ? `${currentWorktree.id}:${currentWorktree.branch}:${currentWorktree.linkedPR ?? ''}`
+        : ''
+    const key = `${visibleIdentity}:${sidebarIdentity}:${sshConnectedGeneration}:${prVisibleRefreshGeneration}:${cardProps.join(',')}`
     if (!key || key === lastVisibleRefreshKeyRef.current) {
       return
     }
     lastVisibleRefreshKeyRef.current = key
-    reportVisibleGitHubPRRefreshCandidates(visibleWorktreeIds, Date.now())
+    reportVisibleGitHubPRRefreshCandidates(Array.from(visibleWorktreeIds), Date.now())
   }, [
     cardProps,
+    currentWorktreeId,
     documentVisibilityRevision,
     groupBy,
     renderRows,
     reportVisibleGitHubPRRefreshCandidates,
     prVisibleRefreshGeneration,
+    rightSidebarShowsPR,
     sshConnectedGeneration,
-    virtualItems
+    virtualItems,
+    worktreeMap
   ])
 
   const activeDescendantId =
@@ -3016,7 +3043,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                   className="absolute left-0 right-0 top-0"
                   style={{ transform: getVirtualRowTransform(vItem.start) }}
                 >
-                  <ImportedWorktreesVisibilityCard
+                  <ImportedWorktreesVisibilityLine
                     repoDisplayName={row.repo.displayName}
                     hiddenWorktrees={row.hiddenWorktrees}
                     placement={row.placement}
