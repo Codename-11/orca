@@ -34,6 +34,7 @@ import type {
   DetectedWorktree,
   DetectedWorktreeListResult,
   ForceDeleteWorktreeBranchResult,
+  GitHubPrStartPoint,
   GitPushTarget,
   GitWorktreeInfo,
   GitHubCreateIssueFields,
@@ -193,17 +194,25 @@ import { getRateLimit } from '../github/rate-limit'
 import {
   closeMR as closeGitLabMR,
   createIssue as createGitLabIssue,
+  diagnoseAuth as diagnoseGitLabAuthClient,
+  getJobTrace as getGitLabJobTrace,
   getProjectRefForRemote as getGitLabProjectRefForRemote,
+  getRateLimit as getGitLabRateLimit,
   getWorkItemByProjectRef as getGitLabWorkItemByProjectRef,
   addIssueComment as addGitLabIssueComment,
+  addMRInlineComment as addGitLabMRInlineComment,
   addMRComment as addGitLabMRComment,
   listTodos as listGitLabTodos,
   listIssues as listGitLabIssues,
+  listLabels as listGitLabLabels,
   listMergeRequests as listGitLabMergeRequests,
   listWorkItems as listGitLabWorkItems,
   mergeMR as mergeGitLabMR,
   reopenMR as reopenGitLabMR,
+  resolveMRDiscussion as resolveGitLabMRDiscussion,
+  retryJob as retryGitLabJob,
   updateMR as updateGitLabMR,
+  updateMRReviewers as updateGitLabMRReviewers,
   updateIssue as updateGitLabIssue
 } from '../gitlab/client'
 import { getGlabKnownHosts } from '../gitlab/gl-utils'
@@ -221,6 +230,7 @@ import type {
   GitHubPRFile,
   GitHubPRReviewCommentInput,
   GitLabIssueUpdate,
+  GitLabMRInlineCommentInput,
   GitLabProjectRef,
   GitLabWorkItem,
   MRListState
@@ -921,21 +931,85 @@ async function canCheckoutExistingLocalBranch(
   branchName: string,
   baseBranch: string
 ): Promise<boolean> {
-  if (normalizeLocalBranchName(baseBranch) !== branchName) {
-    return false
-  }
+  let localHead = ''
   try {
-    await gitExecFileAsync(
+    const { stdout } = await gitExecFileAsync(
       ['rev-parse', '--verify', '--quiet', `refs/heads/${branchName}^{commit}`],
       {
         cwd: repoPath
       }
     )
+    localHead = stdout.trim()
   } catch {
     return false
   }
+  if (normalizeLocalBranchName(baseBranch) !== branchName) {
+    if (!localHead) {
+      return false
+    }
+    try {
+      const { stdout } = await gitExecFileAsync(
+        ['rev-parse', '--verify', '--quiet', `${baseBranch}^{commit}`],
+        { cwd: repoPath }
+      )
+      if (stdout.trim() !== localHead) {
+        return false
+      }
+    } catch {
+      return false
+    }
+  }
   const worktrees = await listWorktrees(repoPath)
   return !worktrees.some((worktree) => normalizeLocalBranchName(worktree.branch) === branchName)
+}
+
+type SelectedPrBranchInput = {
+  branchNameOverride?: string
+  linkedPR?: number | null
+  pushTarget?: GitPushTarget
+}
+
+function isSelectedGitHubPrBranchOverride(
+  args: SelectedPrBranchInput,
+  branchName: string
+): boolean {
+  return typeof args.linkedPR === 'number' && args.branchNameOverride === branchName
+}
+
+function isMatchingSelectedGitHubPr(
+  existingPR: Awaited<ReturnType<typeof getPRForBranch>>,
+  args: SelectedPrBranchInput,
+  branchName: string
+): boolean {
+  return Boolean(
+    existingPR &&
+    isSelectedGitHubPrBranchOverride(args, branchName) &&
+    existingPR.number === args.linkedPR
+  )
+}
+
+function isAllowedPushTargetRemoteConflict(
+  conflictKind: 'local' | 'remote' | null,
+  branchName: string,
+  args: SelectedPrBranchInput
+): boolean {
+  return (
+    conflictKind === 'remote' &&
+    isSelectedGitHubPrBranchOverride(args, branchName) &&
+    args.pushTarget?.branchName === branchName
+  )
+}
+
+async function pathExists(pathValue: string): Promise<boolean> {
+  try {
+    await stat(pathValue)
+    return true
+  } catch (error) {
+    if (isENOENT(error)) {
+      return false
+    }
+    throw error
+  }
 }
 
 type ResolvedWorktree = Worktree & {
@@ -6156,6 +6230,24 @@ export class OrcaRuntimeService {
     return listGitLabTodos(repo.path, repo.connectionId ?? null)
   }
 
+  async diagnoseGitLabAuth(): Promise<Awaited<ReturnType<typeof diagnoseGitLabAuthClient>>> {
+    return diagnoseGitLabAuthClient()
+  }
+
+  async getGitLabRateLimit(options?: {
+    force?: boolean
+    host?: string | null
+  }): Promise<Awaited<ReturnType<typeof getGitLabRateLimit>>> {
+    return getGitLabRateLimit(options)
+  }
+
+  async listGitLabRepoLabels(
+    repoSelector: string
+  ): Promise<Awaited<ReturnType<typeof listGitLabLabels>>> {
+    const repo = await this.resolveRepoSelector(repoSelector)
+    return listGitLabLabels(repo.path, repo.issueSourcePreference, repo.connectionId ?? null)
+  }
+
   async createGitLabRepoIssue(
     repoSelector: string,
     title: string,
@@ -6222,6 +6314,72 @@ export class OrcaRuntimeService {
     )
   }
 
+  async addGitLabRepoMRInlineComment(
+    repoSelector: string,
+    iid: number,
+    input: GitLabMRInlineCommentInput,
+    projectRef?: GitLabProjectRef | null
+  ): Promise<Awaited<ReturnType<typeof addGitLabMRInlineComment>>> {
+    const repo = await this.resolveRepoSelector(repoSelector)
+    return addGitLabMRInlineComment(
+      repo.path,
+      iid,
+      input,
+      repo.issueSourcePreference,
+      repo.connectionId ?? null,
+      projectRef
+    )
+  }
+
+  async resolveGitLabRepoMRDiscussion(
+    repoSelector: string,
+    iid: number,
+    discussionId: string,
+    resolved: boolean,
+    projectRef?: GitLabProjectRef | null
+  ): Promise<Awaited<ReturnType<typeof resolveGitLabMRDiscussion>>> {
+    const repo = await this.resolveRepoSelector(repoSelector)
+    return resolveGitLabMRDiscussion(
+      repo.path,
+      iid,
+      discussionId,
+      resolved,
+      repo.issueSourcePreference,
+      repo.connectionId ?? null,
+      projectRef
+    )
+  }
+
+  async getGitLabRepoJobTrace(
+    repoSelector: string,
+    jobId: number,
+    projectRef?: GitLabProjectRef | null
+  ): Promise<Awaited<ReturnType<typeof getGitLabJobTrace>>> {
+    const repo = await this.resolveRepoSelector(repoSelector)
+    return getGitLabJobTrace(
+      repo.path,
+      jobId,
+      repo.issueSourcePreference,
+      repo.connectionId ?? null,
+      projectRef
+    )
+  }
+
+  async retryGitLabRepoJob(
+    repoSelector: string,
+    jobId: number,
+    projectRef?: GitLabProjectRef | null
+  ): Promise<Awaited<ReturnType<typeof retryGitLabJob>>> {
+    const repo = await this.resolveRepoSelector(repoSelector)
+    return retryGitLabJob(
+      repo.path,
+      jobId,
+      repo.issueSourcePreference,
+      repo.connectionId ?? null,
+      projectRef
+    )
+  }
+
   async mergeGitLabRepoMR(
     repoSelector: string,
     iid: number,
@@ -6274,6 +6432,23 @@ export class OrcaRuntimeService {
       repo.path,
       iid,
       updates,
+      repo.issueSourcePreference,
+      repo.connectionId ?? null,
+      projectRef
+    )
+  }
+
+  async updateGitLabRepoMRReviewers(
+    repoSelector: string,
+    iid: number,
+    reviewerIds: number[],
+    projectRef?: GitLabProjectRef | null
+  ): Promise<Awaited<ReturnType<typeof updateGitLabMRReviewers>>> {
+    const repo = await this.resolveRepoSelector(repoSelector)
+    return updateGitLabMRReviewers(
+      repo.path,
+      iid,
+      reviewerIds,
       repo.issueSourcePreference,
       repo.connectionId ?? null,
       projectRef
@@ -7456,9 +7631,10 @@ export class OrcaRuntimeService {
       args.lineage || args.comment ? { ...args.lineage, comment: args.comment } : undefined
     const lineageResolution = await this.resolveLineageForWorktreeCreate(lineageInput)
     const settings = createSettings
-    const requestedName = args.name
+    let effectiveRequestedName = args.name
     const requestedDisplayName = args.displayName?.trim() || undefined
     const sanitizedName = sanitizeWorktreeName(args.name)
+    let effectiveSanitizedName = sanitizedName
     const username = getGitUsername(repo.path)
     const branchName = await resolveCreateBranchName(
       repo.path,
@@ -7484,10 +7660,12 @@ export class OrcaRuntimeService {
       branchName,
       baseBranch
     )
-    const branchConflictKind = checkoutExistingBranch
+    let branchConflictKind = checkoutExistingBranch
       ? null
       : await getBranchConflictKind(repo.path, branchName, baseBranch)
-    if (branchConflictKind) {
+    const allowedPushTargetRemoteConflict =
+      branchConflictKind && isAllowedPushTargetRemoteConflict(branchConflictKind, branchName, args)
+    if (branchConflictKind && !allowedPushTargetRemoteConflict) {
       throw new Error(
         `Branch "${branchName}" already exists ${branchConflictKind === 'local' ? 'locally' : 'on a remote'}.`
       )
@@ -7498,23 +7676,57 @@ export class OrcaRuntimeService {
       try {
         existingPR = await getPRForBranch(repo.path, branchName)
       } catch {
+        if (allowedPushTargetRemoteConflict) {
+          throw new Error(`Could not verify selected PR branch "${branchName}". Try again.`)
+        }
         // Why: worktree creation should not hard-fail on transient GitHub reachability
         // issues because git state is still the source of truth for whether the
         // worktree can be created locally.
       }
-      if (existingPR) {
+      if (
+        allowedPushTargetRemoteConflict &&
+        !isMatchingSelectedGitHubPr(existingPR, args, branchName)
+      ) {
+        if (existingPR) {
+          throw new Error(`Branch "${branchName}" already has PR #${existingPR.number}.`)
+        }
+        throw new Error(`Branch "${branchName}" already exists on a remote.`)
+      }
+      if (existingPR && !isMatchingSelectedGitHubPr(existingPR, args, branchName)) {
         throw new Error(`Branch "${branchName}" already has PR #${existingPR.number}.`)
       }
     }
 
-    let worktreePath = computeWorktreePath(sanitizedName, repo.path, settings)
     // Why: CLI-managed WSL worktrees live under ~/orca/workspaces inside the
     // distro filesystem. If home lookup fails, still validate against the
     // configured workspace dir so the traversal guard is never bypassed.
     const wslInfo = isWslPath(repo.path) ? parseWslPath(repo.path) : null
     const wslHome = wslInfo ? getWslHome(wslInfo.distro) : null
     const workspaceRoot = wslHome ? join(wslHome, 'orca', 'workspaces') : settings.workspaceDir
-    worktreePath = ensurePathWithinWorkspace(worktreePath, workspaceRoot)
+    let worktreePath = ''
+    let worktreePathResolved = !args.branchNameOverride
+    for (let suffix = 1; suffix < 100; suffix += 1) {
+      effectiveSanitizedName = suffix === 1 ? sanitizedName : `${sanitizedName}-${suffix}`
+      effectiveRequestedName =
+        suffix === 1
+          ? args.name
+          : args.name.trim()
+            ? `${args.name}-${suffix}`
+            : effectiveSanitizedName
+      worktreePath = ensurePathWithinWorkspace(
+        computeWorktreePath(effectiveSanitizedName, repo.path, settings),
+        workspaceRoot
+      )
+      if (!args.branchNameOverride || !(await pathExists(worktreePath))) {
+        worktreePathResolved = true
+        break
+      }
+    }
+    if (!worktreePathResolved) {
+      throw new Error(
+        `Could not find an available worktree path for "${sanitizedName}". Pick a different worktree name.`
+      )
+    }
     const remoteTrackingBase = await this.resolveRemoteTrackingBase(repo.path, baseBranch)
     if (remoteTrackingBase) {
       const hadLocalBaseRef = await this.hasRemoteTrackingRef(repo.path, remoteTrackingBase)
@@ -7622,8 +7834,8 @@ export class OrcaRuntimeService {
     const now = Date.now()
     const displayNameMeta = requestedDisplayName
       ? { displayName: requestedDisplayName }
-      : shouldSetDisplayName(requestedName, branchName, sanitizedName)
-        ? { displayName: requestedName }
+      : shouldSetDisplayName(effectiveRequestedName, branchName, effectiveSanitizedName)
+        ? { displayName: effectiveRequestedName }
         : {}
     const meta = this.store.setWorktreeMeta(worktreeId, {
       // Why: worktree IDs are path-derived. If a path is deleted outside Orca
@@ -8495,7 +8707,7 @@ export class OrcaRuntimeService {
     prNumber: number
     headRefName?: string
     isCrossRepository?: boolean
-  }): Promise<{ baseBranch: string; pushTarget?: GitPushTarget } | { error: string }> {
+  }): Promise<GitHubPrStartPoint | { error: string }> {
     if (!this.store) {
       throw new Error('runtime_unavailable')
     }

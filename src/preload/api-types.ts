@@ -40,6 +40,7 @@ import type {
   GitHubAssignableUser,
   GitHubPRFile,
   GitHubPRFileContents,
+  GitHubPrStartPoint,
   GitHubPRReviewCommentInput,
   GitHubCommentResult,
   GitHubOwnerRepo,
@@ -47,14 +48,22 @@ import type {
   GitHubWorkItemDetails,
   GitHubViewer,
   GitLabAssignableUser,
+  GitLabAuthDiagnostic,
   GitLabCommentResult,
+  GitLabDiscussionResolveResult,
   GitLabIssueInfo,
   GitLabIssueUpdate,
+  GitLabJobTraceResult,
+  GitLabMRInlineCommentInput,
+  GitLabMRReviewersUpdateResult,
+  GitLabMRUpdate,
   GitLabProjectRef,
+  GitLabRetryJobResult,
   GitLabTodo,
   GitLabViewer,
   GitLabWorkItem,
   GitLabWorkItemDetails,
+  GetGitLabRateLimitResult,
   ListMergeRequestsResult,
   MRInfo,
   MRListState,
@@ -764,7 +773,7 @@ export type PreloadApi = {
       prNumber: number
       headRefName?: string
       isCrossRepository?: boolean
-    }) => Promise<{ baseBranch: string; pushTarget?: GitPushTarget } | { error: string }>
+    }) => Promise<GitHubPrStartPoint | { error: string }>
     /** GitLab parallel of resolvePrBase. For same-project MRs returns
      *  `<remote>/<source_branch>`; for fork MRs fetches
      *  refs/merge-requests/<iid>/head and returns the SHA. */
@@ -1190,6 +1199,11 @@ export type PreloadApi = {
   // host, paginated envelope from `glab api -i`).
   gl: {
     viewer: () => Promise<GitLabViewer | null>
+    diagnoseAuth: () => Promise<GitLabAuthDiagnostic>
+    rateLimit: (args?: {
+      force?: boolean
+      host?: string | null
+    }) => Promise<GetGitLabRateLimitResult>
     projectSlug: (args: { repoPath: string }) => Promise<GitLabProjectRef | null>
     mrForBranch: (args: {
       repoPath: string
@@ -1256,11 +1270,44 @@ export type PreloadApi = {
       iid: number
       method?: 'merge' | 'squash' | 'rebase'
     }) => Promise<{ ok: true } | { ok: false; error: string }>
+    updateMR: (args: {
+      repoPath: string
+      iid: number
+      updates: GitLabMRUpdate
+    }) => Promise<{ ok: true } | { ok: false; error: string }>
+    updateMRReviewers: (args: {
+      repoPath: string
+      iid: number
+      reviewerIds: number[]
+      projectRef?: GitLabProjectRef | null
+    }) => Promise<GitLabMRReviewersUpdateResult>
     addMRComment: (args: {
       repoPath: string
       iid: number
       body: string
     }) => Promise<GitLabCommentResult>
+    addMRInlineComment: (args: {
+      repoPath: string
+      iid: number
+      input: GitLabMRInlineCommentInput
+      projectRef?: GitLabProjectRef | null
+    }) => Promise<GitLabCommentResult>
+    resolveMRDiscussion: (args: {
+      repoPath: string
+      iid: number
+      discussionId: string
+      resolved: boolean
+    }) => Promise<GitLabDiscussionResolveResult>
+    jobTrace: (args: {
+      repoPath: string
+      jobId: number
+      projectRef?: GitLabProjectRef | null
+    }) => Promise<GitLabJobTraceResult>
+    retryJob: (args: {
+      repoPath: string
+      jobId: number
+      projectRef?: GitLabProjectRef | null
+    }) => Promise<GitLabRetryJobResult>
     workItemByPath: (args: {
       repoPath: string
       host: string
