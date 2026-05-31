@@ -87,6 +87,8 @@ export type Repo = {
   kind?: RepoKind
   gitUsername?: string
   worktreeBaseRef?: string
+  /** Optional repo-scoped workspace root override. Relative paths resolve from `path`. */
+  worktreeBasePath?: string
   hookSettings?: RepoHookSettings
   /** SSH target ID for remote repos. null/undefined = local. */
   connectionId?: string | null
@@ -699,6 +701,10 @@ export type WorkspaceSessionState = {
    *  older builds — hydration tolerates missing/partial maps and the
    *  active worktree is seeded on first restore. */
   lastVisitedAtByWorktreeId?: Record<string, number>
+  /** Worktrees whose repo-defined default terminal tabs have already been
+   *  considered. Persisted so closing all tabs and re-opening the workspace
+   *  does not recreate the template. */
+  defaultTerminalTabsAppliedByWorktreeId?: Record<string, true>
 }
 
 export type WorkspaceSessionPatch = Partial<WorkspaceSessionState>
@@ -1489,6 +1495,13 @@ export type OrcaHooks = {
     archive?: string // Runs before worktree is archived
   }
   issueCommand?: string // Shared default command for linked GitHub issues
+  defaultTabs?: OrcaDefaultTabTemplate[] // Terminal tabs to create once for a new worktree
+}
+
+export type OrcaDefaultTabTemplate = {
+  title?: string
+  color?: string
+  command?: string
 }
 
 export type RepoHookSettings = {
@@ -1511,6 +1524,11 @@ export type WorktreeSetupLaunch = {
 export type WorktreeStartupLaunch = {
   command: string
   env?: Record<string, string>
+}
+
+export type WorktreeDefaultTabsLaunch = {
+  tabs: OrcaDefaultTabTemplate[]
+  runCommands: boolean
 }
 
 export type CreateSparseCheckoutRequest = {
@@ -1578,6 +1596,7 @@ export type CreateWorktreeResult = {
   lineage?: WorktreeLineage | null
   warnings?: WorktreeLineageWarning[]
   setup?: WorktreeSetupLaunch
+  defaultTabs?: WorktreeDefaultTabsLaunch
   warning?: string
   initialBaseStatus?: WorktreeBaseStatusEvent
   localBaseRefRefresh?: LocalBaseRefRefreshResult
@@ -1992,6 +2011,11 @@ export type GlobalSettings = {
    *  usable without the setup output crowding the initial pane. */
   setupScriptLaunchMode: SetupScriptLaunchMode
   terminalScrollbackBytes: number
+  /** Optional app-level proxy for Electron networking and locally spawned PTYs.
+   *  Empty preserves system proxy settings plus inherited proxy env behavior. */
+  httpProxyUrl?: string
+  /** Optional semicolon/comma/newline-separated bypass rules for httpProxyUrl. */
+  httpProxyBypassRules?: string
   /** Why: opening arbitrary links inside Orca uses an isolated guest browser surface.
    *  The setting stays opt-in so existing workflows continue to use the system browser
    *  until the user explicitly wants worktree-scoped in-app browsing. */
@@ -2292,6 +2316,7 @@ export type CommitMessageAiSettings = {
 export type GhosttyImportPreview = {
   found: boolean
   configPath?: string
+  configPaths?: string[]
   diff: Partial<GlobalSettings>
   unsupportedKeys: string[]
   error?: string
@@ -2477,6 +2502,8 @@ export type PersistedUIState = {
    *  the predicate in visible-worktrees.ts excludes worktrees with an empty
    *  branch. */
   hideDefaultBranchWorkspace: boolean
+  /** Per-worktree Explorer dotfile visibility. Missing entries inherit the default: show. */
+  showDotfilesByWorktree?: Record<string, boolean>
   filterRepoIds: string[]
   collapsedGroups: string[]
   uiZoomLevel: number

@@ -4,10 +4,14 @@ GitHub slice's cross-cutting invariants verifiable in one place. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { create } from 'zustand'
 import {
+  _clearGitHubPRRefreshStartedEntriesForTest,
+  _getGitHubPRRefreshStartedEntryCountForTest,
   _getGitHubPRRequestGenerationCountForTest,
   createGitHubSlice,
   mergePRCommentIntoList,
   prChecksCacheSuffix,
+  prCommentsCacheSuffix,
+  projectViewCacheKey,
   workItemsCacheKey
 } from './github'
 import { createHostedReviewSlice } from './hosted-review'
@@ -182,6 +186,78 @@ describe('createGitHubSlice.evictGitHubRepoCaches', () => {
     await secondFetch
 
     expect(mockApi.gh.listWorkItems).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('createGitHubSlice cache bounds', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetRemoteRuntimeMocks()
+    mockApi.gh.issue.mockReset()
+    mockApi.gh.refreshPRNow.mockReset()
+    mockApi.hostedReview.forBranch.mockResolvedValue(null)
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('bounds restored PR and issue caches', async () => {
+    const store = createTestStore()
+    const pr = Object.fromEntries(
+      Array.from({ length: 505 }, (_, index) => [
+        `repo-id::branch-${index}`,
+        { data: makePR({ number: index }), fetchedAt: index }
+      ])
+    )
+    const issue = Object.fromEntries(
+      Array.from({ length: 505 }, (_, index) => [
+        `repo-id::${index}`,
+        { data: { number: index } as never, fetchedAt: index }
+      ])
+    )
+    mockApi.cache.getGitHub.mockResolvedValueOnce({ pr, issue })
+
+    await store.getState().initGitHubCache()
+
+    expect(Object.keys(store.getState().prCache)).toHaveLength(500)
+    expect(Object.keys(store.getState().issueCache)).toHaveLength(500)
+    expect(store.getState().prCache['repo-id::branch-0']).toBeUndefined()
+    expect(store.getState().issueCache['repo-id::0']).toBeUndefined()
+  })
+
+  it('bounds PR and issue caches as fetches add entries', async () => {
+    vi.useFakeTimers()
+    const store = createTestStore()
+    const repoPath = '/repo'
+    const repoId = 'repo-id'
+    mockApi.gh.refreshPRNow.mockImplementation(({ candidate }) => ({
+      kind: 'found',
+      pr: makePR({ title: candidate.branch }),
+      fetchedAt: Date.now()
+    }))
+    mockApi.gh.issue.mockImplementation(({ number }) => ({
+      number,
+      title: `Issue ${number}`,
+      state: 'open',
+      url: `https://example.com/issues/${number}`
+    }))
+
+    for (let index = 0; index < 505; index++) {
+      vi.setSystemTime(index)
+      await store.getState().fetchPRForBranch(repoPath, `branch-${index}`, {
+        force: true,
+        repoId
+      })
+      await store.getState().fetchIssue(repoPath, index, { repoId })
+    }
+
+    expect(Object.keys(store.getState().prCache)).toHaveLength(500)
+    expect(Object.keys(store.getState().issueCache)).toHaveLength(500)
+    expect(store.getState().prCache['repo-id::branch-0']).toBeUndefined()
+    expect(store.getState().issueCache['repo-id::0']).toBeUndefined()
+
+    await vi.runOnlyPendingTimersAsync()
   })
 })
 
@@ -523,6 +599,30 @@ describe('createGitHubSlice.fetchPRChecks', () => {
     })
   })
 
+  it('bounds checks cache entries across many repo and head combinations', async () => {
+    vi.useFakeTimers()
+
+    try {
+      const store = createTestStore()
+      mockApi.gh.prChecks.mockResolvedValue([])
+
+      for (let i = 0; i <= 500; i++) {
+        vi.setSystemTime(1_000 + i)
+        await store.getState().fetchPRChecks(`/repo/${i}`, 12, `feature/${i}`, `head-${i}`, null, {
+          force: true,
+          repoId: `repo-${i}`
+        })
+      }
+
+      const cache = store.getState().checksCache
+      expect(Object.keys(cache)).toHaveLength(500)
+      expect(cache[`repo-0::${prChecksCacheSuffix(12, null, 'head-0')}`]).toBeUndefined()
+      expect(cache[`repo-500::${prChecksCacheSuffix(12, null, 'head-500')}`]).toBeDefined()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('does not sync stale checks into a PR cache entry for a different PR repo', async () => {
     const store = createTestStore()
     const repoPath = '/repo'
@@ -679,6 +779,30 @@ describe('createGitHubSlice.fetchPRComments', () => {
     expect(
       store.getState().commentsCache[`${repoId}::pr-comments::acme/widgets::12`]
     ).toBeUndefined()
+  })
+
+  it('bounds PR comment cache entries across many repos', async () => {
+    vi.useFakeTimers()
+
+    try {
+      const store = createTestStore()
+      mockApi.gh.prComments.mockResolvedValue([])
+
+      for (let i = 0; i <= 500; i++) {
+        vi.setSystemTime(1_000 + i)
+        await store.getState().fetchPRComments(`/repo/${i}`, 12, {
+          force: true,
+          repoId: `repo-${i}`
+        })
+      }
+
+      const cache = store.getState().commentsCache
+      expect(Object.keys(cache)).toHaveLength(500)
+      expect(cache[`repo-0::${prCommentsCacheSuffix(12)}`]).toBeUndefined()
+      expect(cache[`repo-500::${prCommentsCacheSuffix(12)}`]).toBeDefined()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('preserves cached checks when the checks IPC fails', async () => {
@@ -980,6 +1104,11 @@ describe('createGitHubSlice.fetchPRForBranch', () => {
     mockApi.gh.refreshPRNow.mockReset()
     mockApi.gh.refreshPRNow.mockResolvedValue({ kind: 'no-pr', fetchedAt: Date.now() })
     mockApi.hostedReview.forBranch.mockResolvedValue(null)
+    _clearGitHubPRRefreshStartedEntriesForTest()
+  })
+
+  afterEach(() => {
+    _clearGitHubPRRefreshStartedEntriesForTest()
   })
 
   it('lets a forced refresh bypass a non-forced inflight request and keeps the newer result', async () => {
@@ -1893,6 +2022,74 @@ describe('createGitHubSlice.fetchPRForBranch', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('drops request-start hosted-review snapshots when refreshes pause before outcomes', () => {
+    const store = createTestStore()
+    const repoPath = '/repo'
+    const repoId = 'repo-1'
+    const branch = 'feature/rate-limit-pause'
+    const cacheKey = `${repoId}::${branch}`
+    const hostedReviewCacheKey = getHostedReviewCacheKey(repoPath, branch, null, repoId)
+
+    store.setState({
+      hostedReviewCache: {
+        [hostedReviewCacheKey]: {
+          data: {
+            provider: 'github',
+            number: 12,
+            title: 'Existing PR',
+            state: 'open',
+            url: 'https://github.com/acme/orca/pull/12',
+            status: 'pending',
+            updatedAt: '2026-03-28T00:00:00Z',
+            mergeable: 'UNKNOWN'
+          },
+          fetchedAt: 100,
+          linkedReviewHintKey: 'github:12'
+        }
+      }
+    } as unknown as Partial<AppState>)
+
+    for (let i = 0; i < 40; i += 1) {
+      const inFlightSequence = i * 2 + 1
+      store.getState().applyGitHubPRRefreshEvent({
+        sequence: inFlightSequence,
+        aliases: [{ cacheKey, repoId, repoPath, branch }],
+        reason: 'visible',
+        requestStartedAt: Date.now(),
+        status: 'in-flight'
+      })
+      expect(_getGitHubPRRefreshStartedEntryCountForTest()).toBe(1)
+
+      store.getState().applyGitHubPRRefreshEvent({
+        sequence: inFlightSequence + 1,
+        aliases: [{ cacheKey, repoId, repoPath, branch }],
+        reason: 'visible',
+        status: 'paused',
+        pausedUntil: Date.now() + 60_000,
+        skippedReason: 'rate-limit'
+      })
+      expect(_getGitHubPRRefreshStartedEntryCountForTest()).toBe(0)
+    }
+  })
+
+  it('does not retain empty request-start entries for PR refreshes without a hosted-review cache entry', () => {
+    const store = createTestStore()
+    const repoPath = '/repo'
+    const repoId = 'repo-1'
+    const branch = 'feature/no-hosted-review'
+    const cacheKey = `${repoId}::${branch}`
+
+    store.getState().applyGitHubPRRefreshEvent({
+      sequence: 1,
+      aliases: [{ cacheKey, repoId, repoPath, branch }],
+      reason: 'visible',
+      requestStartedAt: Date.now(),
+      status: 'in-flight'
+    })
+
+    expect(_getGitHubPRRefreshStartedEntryCountForTest()).toBe(0)
   })
 
   it('does not overwrite a non-GitHub hosted review from GitHub PR refresh events', () => {
@@ -3068,6 +3265,30 @@ describe('createGitHubSlice.fetchWorkItems source/error envelope', () => {
     })
   })
 
+  it('bounds work-item cache entries across many repos', async () => {
+    vi.useFakeTimers()
+
+    try {
+      const store = createTestStore()
+      mockApi.gh.listWorkItems.mockResolvedValue({
+        items: [],
+        sources: { issues: null, prs: null, upstreamCandidate: null }
+      })
+
+      for (let i = 0; i <= 500; i++) {
+        vi.setSystemTime(1_000 + i)
+        await store.getState().fetchWorkItems(`repo-${i}`, `/repo/${i}`, 24, '')
+      }
+
+      const cache = store.getState().workItemsCache
+      expect(Object.keys(cache)).toHaveLength(500)
+      expect(cache[workItemsCacheKey('repo-0', 24, '')]).toBeUndefined()
+      expect(cache[workItemsCacheKey('repo-500', 24, '')]).toBeDefined()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('quietly skips SSH repos without a resolved GitHub remote in cross-repo fetches', async () => {
     const store = createTestStore()
     const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -3203,6 +3424,62 @@ describe('createGitHubSlice.fetchWorkItems source/error envelope', () => {
       },
       timeoutMs: 60_000
     })
+  })
+
+  it('bounds project view table cache entries across many projects', async () => {
+    vi.useFakeTimers()
+
+    try {
+      const store = createTestStore()
+      mockApi.gh.getProjectViewTable.mockImplementation(
+        async (args: Parameters<AppState['fetchProjectViewTable']>[0]) => ({
+          ok: true,
+          data: {
+            project: {
+              id: `project-${args.projectNumber}`,
+              owner: args.owner,
+              ownerType: args.ownerType,
+              number: args.projectNumber,
+              title: 'Roadmap',
+              url: `https://github.com/orgs/${args.owner}/projects/${args.projectNumber}`
+            },
+            selectedView: {
+              id: args.viewId ?? `view-${args.projectNumber}`,
+              number: args.projectNumber,
+              name: 'Table',
+              layout: 'TABLE_LAYOUT',
+              filter: '',
+              fields: [],
+              groupByFields: [],
+              sortByFields: []
+            },
+            rows: [],
+            totalCount: 0,
+            parentFieldDropped: false
+          }
+        })
+      )
+
+      for (let i = 0; i <= 500; i++) {
+        vi.setSystemTime(1_000 + i)
+        await store.getState().fetchProjectViewTable(
+          {
+            owner: 'acme',
+            ownerType: 'organization',
+            projectNumber: i,
+            viewId: `view-${i}`
+          },
+          { force: true }
+        )
+      }
+
+      const cache = store.getState().projectViewCache
+      expect(Object.keys(cache)).toHaveLength(500)
+      expect(projectViewCacheKey('organization', 'acme', 0, 'view-0') in cache).toBe(false)
+      expect(projectViewCacheKey('organization', 'acme', 500, 'view-500') in cache).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

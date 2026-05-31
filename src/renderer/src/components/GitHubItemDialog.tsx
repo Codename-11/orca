@@ -38,6 +38,7 @@ import {
   Plus,
   RefreshCw,
   Send,
+  Settings,
   UndoDot,
   Users,
   Wrench,
@@ -85,6 +86,24 @@ import type { DiffSection } from '@/components/editor/diff-section-types'
 import type { CombinedDiffFileTreeEntry } from '@/components/editor/combined-diff-file-tree-model'
 import { CHECK_COLOR, CHECK_ICON } from '@/components/right-sidebar/checks-panel-content'
 import {
+  createGitHubChecksTabState,
+  resolveGitHubChecksTabState,
+  toggleGitHubChecksTabExpandedKey,
+  updateGitHubChecksTabDetails,
+  updateGitHubChecksTabLocalChecks,
+  type CheckDetailsLoadState
+} from '@/components/github-checks-tab-state'
+import {
+  clearGitHubLinkCopied,
+  createGitHubLinkCopyState,
+  markGitHubLinkCopied,
+  resolveGitHubLinkCopyState
+} from '@/components/github-link-copy-state'
+import {
+  resolveGitHubBodyDraft,
+  shouldSyncGitHubBodyDraft
+} from '@/components/github-body-draft-state'
+import {
   filterPRCommentsByAudience,
   getPRCommentAudienceCounts,
   getPRCommentAudienceEmptyLabel,
@@ -102,6 +121,13 @@ import {
   PR_COMMENT_RESOLVED_CONTAINER_CLASS,
   type PRCommentGroup
 } from '@/lib/pr-comment-groups'
+import {
+  createCommentCodeContextExpansionState,
+  resolveCommentCodeContextExpansionState,
+  updateCommentCodeContextExpansionState,
+  type CommentCodeContextLineUpdate
+} from '@/components/comment-code-context-state'
+import { resolveCommentReplyTarget } from '@/components/comment-reply-target-state'
 import { useAppStore } from '@/store'
 import { useAllWorktrees } from '@/store/selectors'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
@@ -143,7 +169,6 @@ import type {
   GitBranchChangeEntry,
   GitDiffResult,
   PRCheckDetail,
-  PRCheckRunDetails,
   PRComment,
   TuiAgent
 } from '../../../shared/types'
@@ -168,6 +193,27 @@ function parseOwnerRepoFromItemUrl(url: string): GitHubOwnerRepo | null {
       return null
     }
     return { owner: segments[0], repo: segments[1] }
+  } catch {
+    return null
+  }
+}
+
+function getGitHubRepositoryLabelsUrl(itemUrl: string): string | null {
+  try {
+    const parsed = new URL(itemUrl)
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      return null
+    }
+    const segments = parsed.pathname.split('/').filter(Boolean)
+    if (segments.length < 2) {
+      return null
+    }
+    // Why: label management is repository-scoped; preserving the origin keeps
+    // GitHub Enterprise URLs working while navigating away from the issue path.
+    parsed.pathname = `/${segments[0]}/${segments[1]}/labels`
+    parsed.search = ''
+    parsed.hash = ''
+    return parsed.toString()
   } catch {
     return null
   }
@@ -2050,8 +2096,9 @@ function CommentCodeContext({
 }): React.JSX.Element | null {
   const [contents, setContents] = useState<GitHubPRFileContents | null>(null)
   const [error, setError] = useState(false)
-  const [contextBefore, setContextBefore] = useState(0)
-  const [contextAfter, setContextAfter] = useState(0)
+  const [contextExpansionState, setContextExpansionState] = useState(() =>
+    createCommentCodeContextExpansionState(comment.id)
+  )
   const file = useMemo(
     () => files.find((candidate) => candidate.path === comment.path),
     [comment.path, files]
@@ -2082,10 +2129,37 @@ function CommentCodeContext({
     }
   }, [baseSha, file, headSha, line, prNumber, repoId, repoPath])
 
-  useEffect(() => {
-    setContextBefore(0)
-    setContextAfter(0)
-  }, [comment.id])
+  const resolvedContextExpansionState = resolveCommentCodeContextExpansionState(
+    contextExpansionState,
+    comment.id
+  )
+  if (resolvedContextExpansionState !== contextExpansionState) {
+    // Why: comment rows can be reused when a PR refreshes; reset before paint
+    // so expanded context from the previous comment is never shown on the next.
+    setContextExpansionState(resolvedContextExpansionState)
+  }
+  const contextBefore = resolvedContextExpansionState.contextBefore
+  const contextAfter = resolvedContextExpansionState.contextAfter
+  const setContextBefore = useCallback(
+    (contextBeforeUpdate: CommentCodeContextLineUpdate) => {
+      setContextExpansionState((current) =>
+        updateCommentCodeContextExpansionState(current, comment.id, {
+          contextBefore: contextBeforeUpdate
+        })
+      )
+    },
+    [comment.id]
+  )
+  const setContextAfter = useCallback(
+    (contextAfterUpdate: CommentCodeContextLineUpdate) => {
+      setContextExpansionState((current) =>
+        updateCommentCodeContextExpansionState(current, comment.id, {
+          contextAfter: contextAfterUpdate
+        })
+      )
+    },
+    [comment.id]
+  )
 
   if (!comment.path || !line || !file || file.isBinary || error) {
     return null
@@ -2324,18 +2398,20 @@ function ConversationTab({
     [commentFilter, comments]
   )
   const visibleCommentGroups = useMemo(() => groupPRComments(visibleComments), [visibleComments])
+  const resolvedReplyingTo = resolveCommentReplyTarget(replyingTo, visibleComments)
 
-  useEffect(() => {
-    if (replyingTo !== null && !visibleComments.some((comment) => comment.id === replyingTo)) {
-      setReplyingTo(null)
-    }
-  }, [replyingTo, visibleComments])
+  if (resolvedReplyingTo !== replyingTo) {
+    // Why: comment filters/refetches can hide the active reply target; clear it
+    // before paint so a stale composer does not flash for the wrong comment set.
+    setReplyingTo(resolvedReplyingTo)
+  }
 
-  useEffect(() => {
-    if (!bodyEditing) {
-      setBodyDraft(body)
-    }
-  }, [body, bodyEditing, item.id])
+  const resolvedBodyDraft = resolveGitHubBodyDraft(bodyDraft, body, bodyEditing)
+  if (shouldSyncGitHubBodyDraft(bodyDraft, body, bodyEditing)) {
+    // Why: background detail refreshes can change the body while the editor is
+    // closed; reconcile before paint so reopening never sees a stale draft.
+    setBodyDraft(resolvedBodyDraft)
+  }
 
   const bodySlug = useMemo(() => parseOwnerRepoFromItemUrl(item.url), [item.url])
   const markdownGitHubRepo = useMemo(
@@ -2344,7 +2420,7 @@ function ConversationTab({
   )
   const canEditBody =
     item.type === 'pr' ? Boolean(projectOrigin || bodySlug) : Boolean(projectOrigin || repoPath)
-  const bodyChanged = bodyDraft !== body
+  const bodyChanged = resolvedBodyDraft !== body
 
   const handleSaveBody = useCallback(async (): Promise<void> => {
     if (bodySaving || !bodyChanged) {
@@ -2357,10 +2433,10 @@ function ConversationTab({
         item,
         repoPath,
         projectOrigin,
-        body: bodyDraft,
+        body: resolvedBodyDraft,
         parsedSlug: bodySlug
       })
-      onBodyUpdated(bodyDraft)
+      onBodyUpdated(resolvedBodyDraft)
       setBodyEditing(false)
       toast.success('Description updated.')
     } catch (err) {
@@ -2368,7 +2444,16 @@ function ConversationTab({
     } finally {
       setBodySaving(false)
     }
-  }, [bodyChanged, bodyDraft, bodySaving, bodySlug, item, onBodyUpdated, projectOrigin, repoPath])
+  }, [
+    bodyChanged,
+    resolvedBodyDraft,
+    bodySaving,
+    bodySlug,
+    item,
+    onBodyUpdated,
+    projectOrigin,
+    repoPath
+  ])
 
   const handleReply = useCallback(
     async (comment: PRComment, replyBody: string): Promise<boolean> => {
@@ -2534,7 +2619,7 @@ function ConversationTab({
           className="min-w-0 max-w-full overflow-hidden break-words text-[13px] leading-relaxed [&_a]:break-all [&_code]:break-words [&_pre]:max-w-full"
         />
         <CommentReactions reactions={comment.reactions} />
-        {replyingTo === comment.id && (
+        {resolvedReplyingTo === comment.id && (
           <CommentReplyForm
             className="mt-3"
             placeholder={
@@ -2663,7 +2748,7 @@ function ConversationTab({
               </div>
             ) : bodyEditing ? (
               <GitHubMarkdownComposer
-                value={bodyDraft}
+                value={resolvedBodyDraft}
                 onChange={setBodyDraft}
                 placeholder="Description"
                 disabled={bodySaving}
@@ -3213,12 +3298,6 @@ function pickDefaultAgent(
   return AGENT_CATALOG.find((entry) => enabledAgents.includes(entry.id))?.id ?? null
 }
 
-type CheckDetailsLoadState = {
-  loading: boolean
-  details: PRCheckRunDetails | null
-  error: string | null
-}
-
 function getCheckDetailsKey(check: PRCheckDetail): string {
   return String(check.checkRunId ?? check.workflowRunId ?? check.url ?? check.name)
 }
@@ -3258,15 +3337,18 @@ function ChecksTab({
   variant?: 'compact' | 'page'
   onChecksUpdated: (checks: PRCheckDetail[]) => void
 }): React.JSX.Element {
-  const [localChecks, setLocalChecks] = useState<PRCheckDetail[] | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [rerunning, setRerunning] = useState(false)
   const [fixingChecks, setFixingChecks] = useState(false)
-  const [expandedCheckKey, setExpandedCheckKey] = useState<string | null>(null)
-  const [detailsByCheckKey, setDetailsByCheckKey] = useState<Record<string, CheckDetailsLoadState>>(
-    {}
-  )
+  const [checksState, setChecksState] = useState(() => createGitHubChecksTabState(checks))
   const mountedRef = useMountedRef()
+  const resolvedChecksState = resolveGitHubChecksTabState(checksState, checks)
+  if (resolvedChecksState !== checksState) {
+    // Why: parent check refreshes replace the source list; clear local refresh
+    // and inline detail state before stale rows/details can paint.
+    setChecksState(resolvedChecksState)
+  }
+  const { localChecks, expandedCheckKey, detailsByCheckKey } = resolvedChecksState
   const list = useMemo(() => localChecks ?? checks ?? [], [checks, localChecks])
   const prRepo = useMemo(() => parseOwnerRepoFromItemUrl(item.url), [item.url])
   const sorted = [...list].sort(
@@ -3295,12 +3377,6 @@ function ChecksTab({
           : 'text-muted-foreground'
   const canFixBrokenChecks = Boolean((repoId ?? item.repoId) && failedChecks.length > 0)
 
-  useEffect(() => {
-    setLocalChecks(null)
-    setExpandedCheckKey(null)
-    setDetailsByCheckKey({})
-  }, [checks])
-
   const handleRefresh = useCallback(async (): Promise<PRCheckDetail[] | null> => {
     if (!repoPath) {
       toast.error('Unable to refresh checks without a repository path.')
@@ -3315,7 +3391,7 @@ function ChecksTab({
         headSha,
         noCache: true
       })) as PRCheckDetail[]
-      setLocalChecks(nextChecks)
+      setChecksState((current) => updateGitHubChecksTabLocalChecks(current, nextChecks))
       onChecksUpdated(nextChecks)
       return nextChecks
     } catch (err) {
@@ -3435,7 +3511,7 @@ function ChecksTab({
   const handleToggleCheckDetails = useCallback(
     (check: PRCheckDetail): void => {
       const key = getCheckDetailsKey(check)
-      setExpandedCheckKey((current) => (current === key ? null : key))
+      setChecksState((current) => toggleGitHubChecksTabExpandedKey(current, key))
       if (
         !repoPath ||
         detailsByCheckKey[key] ||
@@ -3443,10 +3519,9 @@ function ChecksTab({
       ) {
         return
       }
-      setDetailsByCheckKey((current) => ({
-        ...current,
-        [key]: { loading: true, details: null, error: null }
-      }))
+      setChecksState((current) =>
+        updateGitHubChecksTabDetails(current, key, { loading: true, details: null, error: null })
+      )
       void window.api.gh
         .prCheckDetails({
           repoPath,
@@ -3461,27 +3536,25 @@ function ChecksTab({
           if (!mountedRef.current) {
             return
           }
-          setDetailsByCheckKey((current) => ({
-            ...current,
-            [key]: {
+          setChecksState((current) =>
+            updateGitHubChecksTabDetails(current, key, {
               loading: false,
               details,
               error: details ? null : 'No inline details are available for this check.'
-            }
-          }))
+            })
+          )
         })
         .catch((err) => {
           if (!mountedRef.current) {
             return
           }
-          setDetailsByCheckKey((current) => ({
-            ...current,
-            [key]: {
+          setChecksState((current) =>
+            updateGitHubChecksTabDetails(current, key, {
               loading: false,
               details: null,
               error: err instanceof Error ? err.message : 'Failed to load check details.'
-            }
-          }))
+            })
+          )
         })
     },
     [detailsByCheckKey, mountedRef, prRepo, repoId, repoPath]
@@ -4068,6 +4141,37 @@ async function runPullRequestStateUpdate(args: {
   }
 }
 
+function GitHubLabelsSettingsLink({
+  url,
+  separated,
+  onOpen
+}: {
+  url: string | null
+  separated?: boolean
+  onOpen?: () => void
+}): React.JSX.Element | null {
+  if (!url) {
+    return null
+  }
+
+  return (
+    <div className={cn(separated && 'mt-1 border-t border-border/60 pt-1')}>
+      <button
+        type="button"
+        onClick={() => {
+          onOpen?.()
+          void window.api.shell.openUrl(url)
+        }}
+        className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-[12px] text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+      >
+        <Settings className="size-3.5 shrink-0" />
+        <span className="min-w-0 flex-1 text-left">Edit labels on GitHub</span>
+        <ExternalLink className="size-3 shrink-0 opacity-70" />
+      </button>
+    </div>
+  )
+}
+
 function GHEditSection({
   item,
   repoPath,
@@ -4139,6 +4243,7 @@ function GHEditSection({
   )
   const repoLabelsBySlug = useRepoLabelsBySlug(slugOwner, slugRepo)
   const repoLabels = projectOrigin ? repoLabelsBySlug : repoLabelsByPath
+  const repositoryLabelsUrl = useMemo(() => getGitHubRepositoryLabelsUrl(item.url), [item.url])
   const repoAssigneesByPath = useRepoAssignees(
     projectOrigin ? null : repoPath,
     projectOrigin ? null : repoId
@@ -4544,7 +4649,8 @@ function GHEditSection({
                   <div className="px-2 py-3 text-center text-[12px] text-destructive">
                     {repoLabels.error}
                   </div>
-                ) : (
+                ) : null}
+                {!repoLabels.error ? (
                   <div>
                     {repoLabels.data.map((label) => (
                       <button
@@ -4567,7 +4673,12 @@ function GHEditSection({
                       </button>
                     ))}
                   </div>
-                )}
+                ) : null}
+                <GitHubLabelsSettingsLink
+                  url={repositoryLabelsUrl}
+                  separated={!repoLabels.error && repoLabels.data.length > 0}
+                  onOpen={() => setLabelPopoverOpen(false)}
+                />
               </PopoverContent>
             </Popover>
           </div>
@@ -4711,7 +4822,8 @@ function GHEditSection({
             <div className="px-2 py-3 text-center text-[12px] text-destructive">
               {repoLabels.error}
             </div>
-          ) : (
+          ) : null}
+          {!repoLabels.error ? (
             <div>
               {repoLabels.data.map((label) => (
                 <button
@@ -4734,7 +4846,12 @@ function GHEditSection({
                 </button>
               ))}
             </div>
-          )}
+          ) : null}
+          <GitHubLabelsSettingsLink
+            url={repositoryLabelsUrl}
+            separated={!repoLabels.error && repoLabels.data.length > 0}
+            onOpen={() => setLabelPopoverOpen(false)}
+          />
         </PopoverContent>
       </Popover>
 
@@ -5008,11 +5125,18 @@ export default function GitHubItemDialog({
   onReviewRequestsChange,
   onClose
 }: GitHubItemDialogProps): React.JSX.Element {
+  const workItemId = workItem?.id
   const [tab, setTab] = useState<ItemDialogTab>(() => normalizeItemDialogTab(workItem, initialTab))
   const [localState, setLocalState] = useState<GitHubWorkItem['state']>(workItem?.state ?? 'open')
   const [localLabels, setLocalLabels] = useState<string[]>(workItem?.labels ?? [])
-  const [linkCopied, setLinkCopied] = useState(false)
-  const workItemId = workItem?.id
+  const [linkCopyState, setLinkCopyState] = useState(() => createGitHubLinkCopyState(workItemId))
+  const resolvedLinkCopyState = resolveGitHubLinkCopyState(linkCopyState, workItemId)
+  if (resolvedLinkCopyState !== linkCopyState) {
+    // Why: switching GitHub items should not paint a stale copied indicator
+    // from the previous item while waiting for a passive Effect pass.
+    setLinkCopyState(resolvedLinkCopyState)
+  }
+  const linkCopied = resolvedLinkCopyState.copied
   const workItemState = workItem?.state
   const workItemLabels = workItem?.labels
   const effectiveRepoId = repoId ?? workItem?.repoId ?? null
@@ -5325,16 +5449,17 @@ export default function GitHubItemDialog({
     window.clearTimeout(linkCopiedResetTimerRef.current)
     linkCopiedResetTimerRef.current = null
   }, [])
-  const setLinkCopyButtonRef = useCallback((node: HTMLButtonElement | null) => {
-    linkCopyMountedRef.current = node !== null
-  }, [])
-
-  useEffect(() => {
-    clearLinkCopiedResetTimer()
-    setLinkCopied(false)
-  }, [clearLinkCopiedResetTimer, workItemId])
-
-  useEffect(() => clearLinkCopiedResetTimer, [clearLinkCopiedResetTimer])
+  const setLinkCopyButtonRef = useCallback(
+    (node: HTMLButtonElement | null) => {
+      linkCopyMountedRef.current = node !== null
+      if (node === null) {
+        // Why: the copied-state timer belongs to the copy control surface;
+        // clear it when that surface detaches without a passive cleanup Effect.
+        clearLinkCopiedResetTimer()
+      }
+    },
+    [clearLinkCopiedResetTimer]
+  )
 
   const handleCopyWorkItemLink = useCallback(async (): Promise<void> => {
     if (!workItem) {
@@ -5348,10 +5473,11 @@ export default function GitHubItemDialog({
         return
       }
       clearLinkCopiedResetTimer()
-      setLinkCopied(true)
+      const copiedWorkItemId = workItem.id
+      setLinkCopyState(markGitHubLinkCopied(copiedWorkItemId))
       linkCopiedResetTimerRef.current = window.setTimeout(() => {
         linkCopiedResetTimerRef.current = null
-        setLinkCopied(false)
+        setLinkCopyState((current) => clearGitHubLinkCopied(current, copiedWorkItemId))
       }, 1500)
       toast.success('GitHub link copied')
     } catch {

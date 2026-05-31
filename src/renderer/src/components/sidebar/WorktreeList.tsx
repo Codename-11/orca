@@ -719,22 +719,52 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   const worktreeNativeAutoscrollLastFrameTimeRef = useRef<number | null>(null)
   const worktreeNativeLatestPointRef = useRef<WorktreeSidebarDragPoint | null>(null)
   const pendingRevealRetryRef = useRef<{ worktreeId: string; count: number } | null>(null)
+  const pendingRevealFrameIdsRef = useRef<Set<number>>(new Set())
+  const revealHighlightFrameIdRef = useRef<number | null>(null)
   const revealHighlightTimeoutRef = useRef<number | null>(null)
-  const flashRevealedWorktree = useCallback((worktreeId: string) => {
+  const cancelPendingRevealFrames = useCallback(() => {
+    for (const frameId of pendingRevealFrameIdsRef.current) {
+      window.cancelAnimationFrame(frameId)
+    }
+    pendingRevealFrameIdsRef.current.clear()
+  }, [])
+  const schedulePendingRevealFrame = useCallback((callback: FrameRequestCallback) => {
+    const frameId = window.requestAnimationFrame((time) => {
+      pendingRevealFrameIdsRef.current.delete(frameId)
+      callback(time)
+    })
+    pendingRevealFrameIdsRef.current.add(frameId)
+  }, [])
+  const clearRevealHighlightFrame = useCallback(() => {
+    if (revealHighlightFrameIdRef.current !== null) {
+      window.cancelAnimationFrame(revealHighlightFrameIdRef.current)
+      revealHighlightFrameIdRef.current = null
+    }
+  }, [])
+  const clearRevealHighlightTimeout = useCallback(() => {
     if (revealHighlightTimeoutRef.current !== null) {
       window.clearTimeout(revealHighlightTimeoutRef.current)
+      revealHighlightTimeoutRef.current = null
     }
-    // Why: remove before add restarts the CSS glow when the user repeatedly
-    // asks to reveal the same active workspace.
-    setHighlightedRevealWorktreeId(null)
-    window.requestAnimationFrame(() => {
-      setHighlightedRevealWorktreeId(worktreeId)
-      revealHighlightTimeoutRef.current = window.setTimeout(() => {
-        revealHighlightTimeoutRef.current = null
-        setHighlightedRevealWorktreeId(null)
-      }, 1500)
-    })
   }, [])
+  const flashRevealedWorktree = useCallback(
+    (worktreeId: string) => {
+      clearRevealHighlightTimeout()
+      clearRevealHighlightFrame()
+      // Why: remove before add restarts the CSS glow when the user repeatedly
+      // asks to reveal the same active workspace.
+      setHighlightedRevealWorktreeId(null)
+      revealHighlightFrameIdRef.current = window.requestAnimationFrame(() => {
+        revealHighlightFrameIdRef.current = null
+        setHighlightedRevealWorktreeId(worktreeId)
+        revealHighlightTimeoutRef.current = window.setTimeout(() => {
+          revealHighlightTimeoutRef.current = null
+          setHighlightedRevealWorktreeId(null)
+        }, 1500)
+      })
+    },
+    [clearRevealHighlightFrame, clearRevealHighlightTimeout]
+  )
   const suppressWorktreeClickUntilRef = useRef(0)
   const hasProjectGroups = projectGroups.length > 0
   const canReorderRepoHeaders =
@@ -919,6 +949,13 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   const sshConnectionStates = useAppStore((s) => s.sshConnectionStates)
   const activeLineageChildSshDisconnected =
     activeLineageChildSshStatus !== null && activeLineageChildSshStatus !== 'connected'
+  const lineageReconnectPromptKey =
+    activeLineageChildWorktreeId && activeLineageChildSshDisconnected
+      ? activeLineageChildWorktreeId
+      : null
+  const [lastLineageReconnectPromptKey, setLastLineageReconnectPromptKey] = useState<string | null>(
+    null
+  )
   const renderRowsRef = useRef(renderRows)
   renderRowsRef.current = renderRows
   const getVirtualItemKey = useCallback(
@@ -1122,7 +1159,11 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
       }
     }
 
-    requestAnimationFrame(() => {
+    let cancelled = false
+    schedulePendingRevealFrame(() => {
+      if (cancelled) {
+        return
+      }
       const targetWorktreeStillExists = worktrees.some(
         (worktree) => worktree.id === pendingRevealWorktree.worktreeId
       )
@@ -1144,7 +1185,11 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
             count: nextRetryCount
           }
           if (nextRetryCount <= 8) {
-            requestAnimationFrame(() => setPendingRevealRetryTick((tick) => tick + 1))
+            schedulePendingRevealFrame(() => {
+              if (!cancelled) {
+                setPendingRevealRetryTick((tick) => tick + 1)
+              }
+            })
           } else {
             pendingRevealRetryRef.current = null
             clearPendingRevealWorktreeId()
@@ -1193,6 +1238,10 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
         clearPendingRevealWorktreeId()
       }
     })
+    return () => {
+      cancelled = true
+      cancelPendingRevealFrames()
+    }
   }, [
     pendingRevealWorktree,
     agentSendTargetWorktreeId,
@@ -1211,7 +1260,9 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     settings,
     projectGroups,
     pendingRevealRetryTick,
-    flashRevealedWorktree
+    flashRevealedWorktree,
+    schedulePendingRevealFrame,
+    cancelPendingRevealFrames
   ])
 
   const prCacheLen = useAppStore((s) => countRecordKeysByReference(s.prCache))
@@ -1388,12 +1439,14 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   }, [activeModal, keybindings, markDirectScrollInput, navigateWorktree])
 
   // Why: lightweight nested cards do not mount WorktreeCard, so the viewport
-  // owns the SSH reconnect prompt for an active lineage child.
-  useEffect(() => {
-    if (activeLineageChildWorktreeId && activeLineageChildSshDisconnected) {
-      setLineageReconnectWorktreeId(activeLineageChildWorktreeId)
+  // owns the SSH reconnect prompt for an active lineage child. The prompt key
+  // keeps dismissals sticky until the active/disconnected child changes.
+  if (lineageReconnectPromptKey !== lastLineageReconnectPromptKey) {
+    setLastLineageReconnectPromptKey(lineageReconnectPromptKey)
+    if (lineageReconnectPromptKey) {
+      setLineageReconnectWorktreeId(lineageReconnectPromptKey)
     }
-  }, [activeLineageChildWorktreeId, activeLineageChildSshDisconnected])
+  }
 
   const handleContainerKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -1435,14 +1488,6 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   const handleScroll = useCallback(() => {
     markScrollMovement()
   }, [markScrollMovement])
-
-  useEffect(() => {
-    return () => {
-      if (revealHighlightTimeoutRef.current !== null) {
-        window.clearTimeout(revealHighlightTimeoutRef.current)
-      }
-    }
-  }, [])
 
   const cancelWorktreePointerAutoscroll = useCallback(() => {
     if (worktreePointerAutoscrollFrameIdRef.current !== null) {
@@ -1488,13 +1533,21 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   const setScrollRootRef = useCallback(
     (node: HTMLDivElement | null) => {
       if (node === null && scrollRef.current !== null) {
-        // Why: sidebar drag previews and autoscroll frames are tied to the
-        // scroll root surface; clear them before that DOM owner disappears.
+        // Why: sidebar drag previews, autoscroll frames, and reveal row
+        // snapshots are tied to the scroll root; clear them before it disappears.
+        cancelPendingRevealFrames()
+        clearRevealHighlightFrame()
+        clearRevealHighlightTimeout()
         clearWorktreeDrag()
       }
       scrollRef.current = node
     },
-    [clearWorktreeDrag]
+    [
+      cancelPendingRevealFrames,
+      clearRevealHighlightFrame,
+      clearRevealHighlightTimeout,
+      clearWorktreeDrag
+    ]
   )
 
   const flushWorktreePointerDrag = useCallback(() => {

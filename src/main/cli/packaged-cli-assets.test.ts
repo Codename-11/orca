@@ -1,15 +1,5 @@
 import { execFile } from 'node:child_process'
-import {
-  chmod,
-  copyFile,
-  mkdir,
-  mkdtemp,
-  readFile,
-  rm,
-  stat,
-  symlink,
-  writeFile
-} from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -82,7 +72,7 @@ describe('packaged CLI assets', () => {
         await mkdir(launcherDir, { recursive: true })
         await mkdir(cliDir, { recursive: true })
         await copyFile(linuxLauncherAsset, launcherPath)
-        await chmod(launcherPath, 0o755)
+        expect((await stat(launcherPath)).mode & 0o111).not.toBe(0)
         await writeFile(cliPath, '', 'utf8')
         await writeFile(
           electronPath,

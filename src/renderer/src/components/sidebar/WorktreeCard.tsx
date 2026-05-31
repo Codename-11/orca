@@ -174,16 +174,21 @@ const WorktreeCard = React.memo(function WorktreeCard({
   })
   const isSshDisconnected = sshStatus != null && sshStatus !== 'connected'
   const [showDisconnectedDialog, setShowDisconnectedDialog] = useState(false)
+  const sshDisconnectedPromptKey = isActive && isSshDisconnected ? worktree.id : null
+  const [lastSshDisconnectedPromptKey, setLastSshDisconnectedPromptKey] = useState<string | null>(
+    null
+  )
   const [titleRenaming, setTitleRenaming] = useState(false)
 
   // Why: on restart the previously-active worktree is auto-restored without a
   // click, so the dialog never opens. Auto-show it for the active card when SSH
-  // is disconnected so the user sees the reconnect prompt immediately.
-  useEffect(() => {
-    if (isActive && isSshDisconnected) {
+  // is disconnected, but keep dismissals sticky until that prompt key changes.
+  if (sshDisconnectedPromptKey !== lastSshDisconnectedPromptKey) {
+    setLastSshDisconnectedPromptKey(sshDisconnectedPromptKey)
+    if (sshDisconnectedPromptKey) {
       setShowDisconnectedDialog(true)
     }
-  }, [isActive, isSshDisconnected])
+  }
   // Why: read the target label from the store (populated during hydration in
   // useIpcEvents.ts) instead of calling listTargets IPC per card instance.
   const sshTargetLabel = useAppStore((s) =>
@@ -644,7 +649,7 @@ const WorktreeCard = React.memo(function WorktreeCard({
   const cardBody = (
     <div
       className={cn(
-        'group relative flex items-start gap-1.5 px-1.5 pt-1.5 pb-1 cursor-pointer transition-[background-color,border-color,opacity,box-shadow] duration-200 outline-none select-none',
+        'group relative flex items-start gap-1.5 px-1.5 pt-1.5 pb-2 cursor-pointer transition-[background-color,border-color,opacity,box-shadow] duration-200 outline-none select-none',
         flushSurface ? 'ml-1 w-[calc(100%-0.25rem)]' : 'ml-1',
         isMultiSelected ? 'rounded-sm' : 'rounded-lg',
         isActiveSurface

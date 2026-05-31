@@ -1,12 +1,14 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 const {
+  applyElectronProxySettingsMock,
   browserWindowGetAllWindowsMock,
   handleMock,
   previewGhosttyImportMock,
   showSaveDialogMock,
   showOpenDialogMock
 } = vi.hoisted(() => ({
+  applyElectronProxySettingsMock: vi.fn(),
   browserWindowGetAllWindowsMock: vi.fn(),
   handleMock: vi.fn(),
   previewGhosttyImportMock: vi.fn(),
@@ -24,6 +26,10 @@ vi.mock('electron', () => ({
 
 vi.mock('../ghostty/index', () => ({
   previewGhosttyImport: previewGhosttyImportMock
+}))
+
+vi.mock('../network/proxy-settings', () => ({
+  applyElectronProxySettings: applyElectronProxySettingsMock
 }))
 
 import { registerSettingsHandlers } from './settings'
@@ -50,6 +56,8 @@ const store = {
 describe('registerSettingsHandlers', () => {
   beforeEach(() => {
     handleMock.mockClear()
+    applyElectronProxySettingsMock.mockClear()
+    applyElectronProxySettingsMock.mockResolvedValue({ source: 'settings' })
     previewGhosttyImportMock.mockClear()
     showSaveDialogMock.mockReset()
     showOpenDialogMock.mockReset()
@@ -172,5 +180,55 @@ describe('registerSettingsHandlers', () => {
       {},
       { notifyListeners: true, originWebContentsId: 1 }
     )
+  })
+
+  it('sanitizes and applies proxy settings from renderer settings IPC', async () => {
+    store.getSettings.mockReturnValue({ httpProxyUrl: '' })
+    store.updateSettings.mockReturnValue({
+      httpProxyUrl: 'http://proxy.example:8080',
+      httpProxyBypassRules: 'localhost;*.internal'
+    })
+    registerSettingsHandlers(store as never)
+
+    const handler = handleMock.mock.calls.find((call) => call[0] === 'settings:set')?.[1] as (
+      _event: unknown,
+      args: unknown
+    ) => Promise<unknown>
+
+    await handler(settingsInvokeEvent, {
+      httpProxyUrl: ' http://proxy.example:8080/path#frag ',
+      httpProxyBypassRules: 'localhost, *.internal'
+    })
+
+    expect(store.updateSettings).toHaveBeenCalledWith(
+      {
+        httpProxyUrl: 'http://proxy.example:8080',
+        httpProxyBypassRules: 'localhost;*.internal'
+      },
+      { notifyListeners: true, originWebContentsId: 1 }
+    )
+    expect(applyElectronProxySettingsMock).toHaveBeenCalledWith({
+      httpProxyUrl: 'http://proxy.example:8080',
+      httpProxyBypassRules: 'localhost;*.internal'
+    })
+  })
+
+  it('drops invalid proxy URLs at the settings boundary', async () => {
+    store.getSettings.mockReturnValue({ httpProxyUrl: 'http://proxy.example:8080' })
+    store.updateSettings.mockReturnValue({ httpProxyUrl: '' })
+    registerSettingsHandlers(store as never)
+
+    const handler = handleMock.mock.calls.find((call) => call[0] === 'settings:set')?.[1] as (
+      _event: unknown,
+      args: unknown
+    ) => Promise<unknown>
+
+    await handler(settingsInvokeEvent, { httpProxyUrl: 'ftp://proxy.example:2121' })
+
+    expect(store.updateSettings).toHaveBeenCalledWith(
+      { httpProxyUrl: '' },
+      { notifyListeners: true, originWebContentsId: 1 }
+    )
+    expect(applyElectronProxySettingsMock).toHaveBeenCalledWith({ httpProxyUrl: '' })
   })
 })

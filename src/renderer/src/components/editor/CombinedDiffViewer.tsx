@@ -54,6 +54,10 @@ import { getDiffSectionEstimatedHeight, isIntrinsicHeightImageDiff } from './dif
 import type { DiffSection } from './diff-section-types'
 import { getInitialCombinedDiffSectionLoadIndices } from './combined-diff-initial-section-load'
 import { createCombinedDiffLoadScheduler } from './combined-diff-load-scheduler'
+import {
+  beginCombinedDiffScrollbarDrag,
+  type CombinedDiffScrollbarDragCleanup
+} from './combined-diff-scrollbar-drag'
 
 type CachedCombinedDiffViewState = {
   entrySignature: string
@@ -187,6 +191,12 @@ export default function CombinedDiffViewer({
   const [sectionHeights, setSectionHeights] = useState<Record<number, number>>({})
   const [clearNotesDialogOpen, setClearNotesDialogOpen] = useState(false)
   const [isClearingNotes, setIsClearingNotes] = useState(false)
+  const clearNotesDialogVisible = clearNotesDialogOpen && (diffCommentCount > 0 || isClearingNotes)
+  if (clearNotesDialogOpen && !clearNotesDialogVisible) {
+    // Why: notes may be cleared outside this dialog; keep the modal closed in
+    // the same render instead of showing an empty confirmation for one frame.
+    setClearNotesDialogOpen(false)
+  }
   const [notesCopied, setNotesCopied] = useState(false)
   const mountedRef = useRef(true)
   // Why: copy feedback is created by the copy action, so the same handler owns
@@ -210,6 +220,7 @@ export default function CombinedDiffViewer({
     height: COMBINED_DIFF_SCROLLBAR_THUMB_MIN_HEIGHT
   })
   const pendingRestoreScrollTopRef = useRef<number | null>(null)
+  const activeScrollbarDragCleanupRef = useRef<CombinedDiffScrollbarDragCleanup | null>(null)
   const loadedIndicesRef = useRef<Set<number>>(new Set())
   const loadingIndicesRef = useRef<Set<number>>(new Set())
   const sectionsRef = useRef<DiffSection[]>([])
@@ -246,6 +257,10 @@ export default function CombinedDiffViewer({
     }
   }, [])
 
+  const cleanupActiveScrollbarDrag = useCallback((): void => {
+    activeScrollbarDragCleanupRef.current?.()
+  }, [])
+
   const setScrollContainerRef = useCallback(
     (node: HTMLDivElement | null) => {
       scrollContainerRef.current = node
@@ -254,19 +269,21 @@ export default function CombinedDiffViewer({
         // Why: copied feedback is tied to the combined-diff surface lifetime;
         // the root ref unmount is the same boundary that disables stale feedback.
         clearNotesCopiedResetTimer()
+        cleanupActiveScrollbarDrag()
         return
       }
       window.requestAnimationFrame(updateCombinedDiffScrollbar)
     },
-    [clearNotesCopiedResetTimer, updateCombinedDiffScrollbar]
+    [cleanupActiveScrollbarDrag, clearNotesCopiedResetTimer, updateCombinedDiffScrollbar]
   )
 
   useEffect(() => {
     mountedRef.current = true
     return () => {
       mountedRef.current = false
+      cleanupActiveScrollbarDrag()
     }
-  }, [])
+  }, [cleanupActiveScrollbarDrag])
   const loadSchedulerRef = useRef(
     createCombinedDiffLoadScheduler({
       loadSection: (index) => loadSectionRef.current(index)
@@ -674,10 +691,17 @@ export default function CombinedDiffViewer({
     () => createCombinedDiffSectionIndexMap(sections),
     [sections]
   )
-  const [activeTreeSectionKey, setActiveTreeSectionKey] = useState<string | null>(null)
-  useEffect(() => {
-    setActiveTreeSectionKey(null)
-  }, [entrySignature])
+  const [activeTreeSectionState, setActiveTreeSectionState] = useState<{
+    entrySignature: string
+    key: string | null
+  }>(() => ({ entrySignature, key: null }))
+  const activeTreeSectionKey =
+    activeTreeSectionState.entrySignature === entrySignature ? activeTreeSectionState.key : null
+  if (activeTreeSectionState.entrySignature !== entrySignature) {
+    // Why: the tree highlight belongs to one diff entry set and must not flash
+    // on another entry set before an Effect reset would run.
+    setActiveTreeSectionState({ entrySignature, key: null })
+  }
   const viewedSectionKeys = React.useMemo(
     () => new Set(sections.filter((section) => !section.loading).map((section) => section.key)),
     [sections]
@@ -693,10 +717,13 @@ export default function CombinedDiffViewer({
         scrollToIndex: (index) => virtualizer.scrollToIndex(index, { align: 'start' })
       })
       if (navigatedIndex !== null) {
-        setActiveTreeSectionKey(sectionsRef.current[navigatedIndex]?.key ?? null)
+        setActiveTreeSectionState({
+          entrySignature,
+          key: sectionsRef.current[navigatedIndex]?.key ?? null
+        })
       }
     },
-    [sectionIndexByKey, toggleSection, treeMode, virtualizer]
+    [entrySignature, sectionIndexByKey, toggleSection, treeMode, virtualizer]
   )
 
   const setAllSectionsCollapsed = useCallback((collapsed: boolean) => {
@@ -991,30 +1018,22 @@ export default function CombinedDiffViewer({
         container.scrollTop = getScrollTopForPointer(moveEvent.clientY, grabOffset)
         updateCombinedDiffScrollbar()
       }
-      const cleanupPointerDrag = (): void => {
-        if (track.hasPointerCapture(event.pointerId)) {
-          track.releasePointerCapture(event.pointerId)
+      cleanupActiveScrollbarDrag()
+      let cleanupPointerDrag: CombinedDiffScrollbarDragCleanup
+      cleanupPointerDrag = beginCombinedDiffScrollbarDrag({
+        track,
+        pointerId: event.pointerId,
+        onPointerMove: handlePointerMove,
+        onEnd: () => {
+          if (activeScrollbarDragCleanupRef.current === cleanupPointerDrag) {
+            activeScrollbarDragCleanupRef.current = null
+          }
         }
-        window.removeEventListener('pointermove', handlePointerMove)
-        window.removeEventListener('pointerup', cleanupPointerDrag)
-        window.removeEventListener('pointercancel', cleanupPointerDrag)
-        track.removeEventListener('lostpointercapture', cleanupPointerDrag)
-      }
-
-      track.setPointerCapture(event.pointerId)
-      window.addEventListener('pointermove', handlePointerMove)
-      window.addEventListener('pointerup', cleanupPointerDrag)
-      window.addEventListener('pointercancel', cleanupPointerDrag)
-      track.addEventListener('lostpointercapture', cleanupPointerDrag)
+      })
+      activeScrollbarDragCleanupRef.current = cleanupPointerDrag
     },
-    [updateCombinedDiffScrollbar]
+    [cleanupActiveScrollbarDrag, updateCombinedDiffScrollbar]
   )
-
-  useEffect(() => {
-    if (diffCommentCount === 0 && !isClearingNotes) {
-      setClearNotesDialogOpen(false)
-    }
-  }, [diffCommentCount, isClearingNotes])
 
   const handleCopyNotes = useCallback(async (): Promise<void> => {
     if (diffCommentCount === 0) {
@@ -1368,7 +1387,7 @@ export default function CombinedDiffViewer({
         </div>
       </div>
       <Dialog
-        open={clearNotesDialogOpen}
+        open={clearNotesDialogVisible}
         onOpenChange={(open) => {
           if (!open && !isClearingNotes) {
             setClearNotesDialogOpen(false)

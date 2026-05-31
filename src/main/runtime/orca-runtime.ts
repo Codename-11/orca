@@ -15,7 +15,6 @@ import {
   deriveValidatedClonePath,
   getClonePathComparisonKey
 } from '../git/repo-clone-path'
-import { isWslPath, parseWslPath, getWslHome } from '../wsl'
 import { createHash, randomUUID } from 'crypto'
 import { isAbsolute, join } from 'path'
 import { mkdir, readFile, readdir, rm, stat } from 'fs/promises'
@@ -346,6 +345,8 @@ import type { AddWorktreeResult } from '../git/worktree'
 import { isENOENT } from '../ipc/filesystem-auth'
 import {
   createSetupRunnerScript,
+  getDefaultTabCommandTrustContent,
+  getDefaultTabsLaunch,
   getEffectiveHooks,
   getEffectiveSetupRunPolicy,
   hasUnrecognizedOrcaYamlKeys,
@@ -375,8 +376,11 @@ import { AgentDetector } from '../stats/agent-detector'
 import {
   computeBranchName,
   computeWorktreePath,
+  computeWorkspaceRoot,
   ensurePathWithinWorkspace,
   formatWorktreeRemovalError,
+  getWorktreeCreationLayout,
+  getWorktreePathSettings,
   isOrphanCompatiblePreflightError,
   isOrphanedWorktreeError,
   mergeWorktree,
@@ -611,6 +615,7 @@ type RuntimePtyWorktreeRecord = {
   tabId: string | null
   paneKey: string | null
   connected: boolean
+  disconnectedAt: number | null
   lastExitCode: number | null
   lastAgentStatus: AgentStatus | null
   lastOscTitle: string | null
@@ -682,7 +687,8 @@ type RuntimeNotifier = {
     repoId: string,
     worktreeId: string,
     setup?: CreateWorktreeResult['setup'],
-    startup?: WorktreeStartupLaunch
+    startup?: WorktreeStartupLaunch,
+    defaultTabs?: CreateWorktreeResult['defaultTabs']
   ): void
   createTerminal(worktreeId: string, opts: { command?: string; title?: string }): void
   revealTerminalSession?(
@@ -1571,6 +1577,7 @@ export class OrcaRuntimeService {
     return this.store.createAutomation({
       name: input.name,
       prompt: input.prompt,
+      precheck: input.precheck,
       agentId: input.agentId,
       projectId: target.projectId,
       workspaceMode: target.workspaceMode,
@@ -1596,6 +1603,9 @@ export class OrcaRuntimeService {
     }
     if (hasRuntimeAutomationUpdateValue(updates, 'prompt')) {
       patch.prompt = updates.prompt
+    }
+    if (hasRuntimeAutomationUpdateValue(updates, 'precheck')) {
+      patch.precheck = updates.precheck
     }
     if (hasRuntimeAutomationUpdateValue(updates, 'agentId')) {
       patch.agentId = updates.agentId
@@ -2323,6 +2333,7 @@ export class OrcaRuntimeService {
     const pty = this.getOrCreatePtyWorktreeRecord(ptyId)
     if (pty) {
       pty.connected = true
+      pty.disconnectedAt = null
     }
     for (const leaf of this.getLeavesForPty(ptyId)) {
       leaf.connected = true
@@ -2383,6 +2394,7 @@ export class OrcaRuntimeService {
     let ptyTailAfter: ReturnType<typeof appendNormalizedToTailBuffer> | null = null
     if (pty) {
       pty.connected = true
+      pty.disconnectedAt = null
       pty.lastOutputAt = at
       const nextTail = appendNormalizedToTailBuffer(
         pty.tailBuffer,
@@ -3556,6 +3568,7 @@ export class OrcaRuntimeService {
     const pty = this.ptysById.get(ptyId)
     if (pty) {
       pty.connected = false
+      pty.disconnectedAt = Date.now()
       pty.lastExitCode = exitCode
       this.resolvePtyExitWaiters(pty, ptyId)
       this.pruneDisconnectedPtyTranscript(pty)
@@ -3569,6 +3582,7 @@ export class OrcaRuntimeService {
       this.resolveExitWaiters(leaf)
       this.failActiveDispatchOnExit(leaf, exitCode)
     }
+    this.pruneDisconnectedPtyRecords()
   }
 
   // ─── Driver state (mobile-presence lock) ──────────────────────────
@@ -4373,6 +4387,9 @@ export class OrcaRuntimeService {
         this.setDriver(ptyId, { kind: 'idle' })
       }
     }, SOFT_LEAVE_GRACE_MS)
+    if (typeof softTimer.unref === 'function') {
+      softTimer.unref()
+    }
     this.pendingSoftLeavers.set(ptyId, {
       clientId,
       timer: softTimer,
@@ -4426,6 +4443,11 @@ export class OrcaRuntimeService {
             rows: restoreRows
           })
         }, autoRestoreMs)
+        // Why: a delayed mobile restore should not keep Electron main alive
+        // after the last window/runtime transport has otherwise shut down.
+        if (typeof timer.unref === 'function') {
+          timer.unref()
+        }
 
         this.pendingRestoreTimers.set(ptyId, { timer, clientId })
       }
@@ -5761,6 +5783,7 @@ export class OrcaRuntimeService {
         | 'repoIcon'
         | 'hookSettings'
         | 'worktreeBaseRef'
+        | 'worktreeBasePath'
         | 'kind'
         | 'symlinkPaths'
         | 'issueSourcePreference'
@@ -5776,9 +5799,16 @@ export class OrcaRuntimeService {
       throw new Error('runtime_unavailable')
     }
     const repo = await this.resolveRepoSelector(repoSelector)
-    const updated = this.store.updateRepo(repo.id, omitUndefinedProperties(updates))
+    const sanitizedUpdates = omitUndefinedProperties(updates)
+    if ('worktreeBasePath' in updates && updates.worktreeBasePath === undefined) {
+      sanitizedUpdates.worktreeBasePath = undefined
+    }
+    const updated = this.store.updateRepo(repo.id, sanitizedUpdates)
     if (!updated) {
       throw new Error('repo_not_found')
+    }
+    if ('worktreeBasePath' in updates) {
+      invalidateAuthorizedRootsCache()
     }
     this.invalidateResolvedWorktreeCache()
     this.notifier?.reposChanged()
@@ -6852,9 +6882,9 @@ export class OrcaRuntimeService {
 
   private getSetupHookTrustPayload(
     repo: Repo,
-    setupScript: string | undefined
+    scriptContentValue: string | undefined
   ): { contentHash: string; scriptContent: string } | undefined {
-    const scriptContent = setupScript?.trim()
+    const scriptContent = scriptContentValue?.trim()
     if (!scriptContent || repo.hookSettings?.commandSourcePolicy === 'local-only') {
       return undefined
     }
@@ -6894,7 +6924,10 @@ export class OrcaRuntimeService {
           hooks,
           setupRunPolicy: getEffectiveSetupRunPolicy(repo),
           source: hooks ? 'orca.yaml' : null,
-          setupTrust: this.getSharedSetupHookTrustPayload(repo, hooks?.scripts?.setup)
+          setupTrust: this.getSharedSetupHookTrustPayload(
+            repo,
+            getDefaultTabCommandTrustContent(hooks)
+          )
         }
       } catch {
         return {
@@ -6914,7 +6947,10 @@ export class OrcaRuntimeService {
       hooks,
       setupRunPolicy,
       source: hasFile ? 'orca.yaml' : hooks ? 'legacy' : null,
-      setupTrust: this.getSharedSetupHookTrustPayload(repo, sharedHooks?.scripts?.setup)
+      setupTrust: this.getSharedSetupHookTrustPayload(
+        repo,
+        getDefaultTabCommandTrustContent(sharedHooks)
+      )
     }
   }
 
@@ -6934,9 +6970,7 @@ export class OrcaRuntimeService {
         if (result.isBinary) {
           return { hasHooks: false, hooks: null, mayNeedUpdate: false }
         }
-        const { parse } = await import('yaml')
-        const parsed = parse(result.content)
-        return { hasHooks: true, hooks: parsed, mayNeedUpdate: false }
+        return { hasHooks: true, hooks: parseOrcaYaml(result.content), mayNeedUpdate: false }
       } catch {
         return { hasHooks: false, hooks: null, mayNeedUpdate: false }
       }
@@ -7195,7 +7229,7 @@ export class OrcaRuntimeService {
       worktree,
       meta: this.store?.getWorktreeMeta(worktree.id),
       settings,
-      knownOrcaLayouts: repo.connectionId ? [] : buildKnownOrcaWorkspaceLayouts(settings, repo),
+      knownOrcaLayouts: buildKnownOrcaWorkspaceLayouts(settings, repo),
       isLegacyRepoForVisibility: isLegacyRepoForExternalWorktreeVisibility(repo)
     })
   }
@@ -7631,6 +7665,7 @@ export class OrcaRuntimeService {
       args.lineage || args.comment ? { ...args.lineage, comment: args.comment } : undefined
     const lineageResolution = await this.resolveLineageForWorktreeCreate(lineageInput)
     const settings = createSettings
+    const worktreePathSettings = getWorktreePathSettings(repo, settings)
     let effectiveRequestedName = args.name
     const requestedDisplayName = args.displayName?.trim() || undefined
     const sanitizedName = sanitizeWorktreeName(args.name)
@@ -7697,12 +7732,10 @@ export class OrcaRuntimeService {
       }
     }
 
+    const workspaceRoot = computeWorkspaceRoot(repo.path, worktreePathSettings)
     // Why: CLI-managed WSL worktrees live under ~/orca/workspaces inside the
-    // distro filesystem. If home lookup fails, still validate against the
-    // configured workspace dir so the traversal guard is never bypassed.
-    const wslInfo = isWslPath(repo.path) ? parseWslPath(repo.path) : null
-    const wslHome = wslInfo ? getWslHome(wslInfo.distro) : null
-    const workspaceRoot = wslHome ? join(wslHome, 'orca', 'workspaces') : settings.workspaceDir
+    // distro filesystem through computeWorkspaceRoot. If home lookup fails,
+    // still validate against the effective workspace dir.
     let worktreePath = ''
     let worktreePathResolved = !args.branchNameOverride
     for (let suffix = 1; suffix < 100; suffix += 1) {
@@ -7714,7 +7747,7 @@ export class OrcaRuntimeService {
             ? `${args.name}-${suffix}`
             : effectiveSanitizedName
       worktreePath = ensurePathWithinWorkspace(
-        computeWorktreePath(effectiveSanitizedName, repo.path, settings),
+        computeWorktreePath(effectiveSanitizedName, repo.path, worktreePathSettings),
         workspaceRoot
       )
       if (!args.branchNameOverride || !(await pathExists(worktreePath))) {
@@ -7850,10 +7883,7 @@ export class OrcaRuntimeService {
       createdAt: now,
       orcaCreatedAt: now,
       orcaCreationSource: 'runtime',
-      orcaCreationWorkspaceLayout: {
-        path: settings.workspaceDir,
-        nestWorkspaces: settings.nestWorkspaces
-      },
+      orcaCreationWorkspaceLayout: getWorktreeCreationLayout(repo, settings),
       ...displayNameMeta,
       baseRef: baseBranch,
       ...(checkoutExistingBranch ? { preserveBranchOnDelete: true } : {}),
@@ -7932,12 +7962,22 @@ export class OrcaRuntimeService {
     // Why: CLI-created worktrees do not have a renderer preview to mismatch
     // against. Trust is granted by the direct CLI invocation (`--run-hooks`),
     // so loading the setup hook from the created worktree is intentional here.
+    const yamlHooks = loadHooks(worktreePath)
     const hooks = getEffectiveHooks(repo, worktreePath)
     // Why: setupDecision lets mobile/CLI callers control whether the setup
     // script runs. 'skip' suppresses it, 'run' forces it, 'inherit' (default)
     // defers to the repo's orca.yaml setupRunPolicy. runHooks === true maps
     // to 'run' for backwards compatibility with the desktop create flow.
     const effectiveDecision = args.runHooks ? 'run' : (args.setupDecision ?? 'inherit')
+    let defaultTabs: CreateWorktreeResult['defaultTabs']
+    try {
+      defaultTabs = getDefaultTabsLaunch(yamlHooks, repo, effectiveDecision)
+    } catch (error) {
+      console.warn(`[hooks] default tab commands skipped for ${worktreePath}:`, error)
+      defaultTabs = yamlHooks?.defaultTabs
+        ? { tabs: yamlHooks.defaultTabs, runCommands: false }
+        : undefined
+    }
     const shouldRunSetup = hooks?.scripts.setup && shouldRunSetupForCreate(repo, effectiveDecision)
     if (shouldRunSetup && hooks?.scripts.setup) {
       if (this.authoritativeWindowId !== null) {
@@ -8049,9 +8089,21 @@ export class OrcaRuntimeService {
       // the user can watch prompts/output in a visible pane.
       const activationSetup = didSpawnSetup ? undefined : setup
       if (effectiveStartup && !didSpawnStartup) {
-        this.notifier?.activateWorktree(repo.id, worktree.id, activationSetup, effectiveStartup)
+        this.notifier?.activateWorktree(
+          repo.id,
+          worktree.id,
+          activationSetup,
+          effectiveStartup,
+          defaultTabs
+        )
       } else {
-        this.notifier?.activateWorktree(repo.id, worktree.id, activationSetup)
+        this.notifier?.activateWorktree(
+          repo.id,
+          worktree.id,
+          activationSetup,
+          undefined,
+          defaultTabs
+        )
       }
     } else if (this.ptyController?.spawn) {
       try {
@@ -8086,6 +8138,7 @@ export class OrcaRuntimeService {
       },
       ...(lineageInput ? { lineage, warnings: lineageWarnings } : {}),
       ...(setup ? { setup } : {}),
+      ...(defaultTabs ? { defaultTabs } : {}),
       ...(warning ? { warning } : {}),
       ...(addResult.localBaseRefRefresh
         ? { localBaseRefRefresh: addResult.localBaseRefRefresh }
@@ -8988,9 +9041,10 @@ export class OrcaRuntimeService {
   }
 
   private removeWorktreeMetadataAndHistory(store: RuntimeStore, worktreeId: string): void {
-    // Why: terminal history is keyed by worktree ID, so metadata cleanup must
-    // also purge history before the same path-derived ID can be recreated.
+    // Why: worktree IDs are path-derived and can be recreated, so removal must
+    // purge history and process-local caches before the ID points at new state.
     store.removeWorktreeMeta(worktreeId)
+    advertisedUrlWatcher.forgetWorktree(worktreeId)
     deleteWorktreeHistoryDir(worktreeId)
   }
 
@@ -9154,9 +9208,7 @@ export class OrcaRuntimeService {
       )
       if (!registeredWorktree) {
         let canCleanOrphanedDirectory = false
-        const knownOrcaLayouts = repo.connectionId
-          ? []
-          : buildKnownOrcaWorkspaceLayouts(store.getSettings(), repo)
+        const knownOrcaLayouts = buildKnownOrcaWorkspaceLayouts(store.getSettings(), repo)
         if (
           canCleanupUnregisteredOrcaWorktreeDirectory({
             meta: removedMeta,
@@ -10868,6 +10920,7 @@ export class OrcaRuntimeService {
         tabId: state.tabId ?? null,
         paneKey: state.paneKey ?? null,
         connected: state.connected ?? true,
+        disconnectedAt: state.connected === false ? Date.now() : null,
         lastExitCode: null,
         lastAgentStatus: null,
         lastOscTitle: null,
@@ -10895,6 +10948,7 @@ export class OrcaRuntimeService {
     }
     if (state.connected !== undefined) {
       pty.connected = state.connected
+      pty.disconnectedAt = state.connected ? null : (pty.disconnectedAt ?? Date.now())
     }
     if (state.lastOutputAt !== undefined) {
       pty.lastOutputAt = maxTimestamp(pty.lastOutputAt, state.lastOutputAt)
@@ -10957,8 +11011,10 @@ export class OrcaRuntimeService {
     for (const pty of this.ptysById.values()) {
       if (!livePtyIds.has(pty.ptyId) && !this.leafExistsForPty(pty.ptyId)) {
         pty.connected = false
+        pty.disconnectedAt ??= Date.now()
       }
     }
+    this.pruneDisconnectedPtyRecords()
   }
 
   private pruneDisconnectedPtyTranscript(pty: RuntimePtyWorktreeRecord): void {
@@ -10971,6 +11027,35 @@ export class OrcaRuntimeService {
     pty.tailPartialLine = ''
     pty.tailTruncated = false
     pty.tailLinesTotal = 0
+  }
+
+  private pruneDisconnectedPtyRecords(): void {
+    const retained = [...this.ptysById.values()]
+      .filter((pty) => !pty.connected && !this.leafExistsForPty(pty.ptyId))
+      .sort((a, b) => (a.disconnectedAt ?? 0) - (b.disconnectedAt ?? 0))
+    while (retained.length > DISCONNECTED_PTY_RECORD_MAX) {
+      const stale = retained.shift()
+      if (!stale) {
+        return
+      }
+      // Why: exited runtime-owned PTYs stay readable after exit, but long-lived
+      // runtimes can churn through many background sessions. Bound the archive.
+      this.dropDisconnectedPtyRecord(stale.ptyId)
+    }
+  }
+
+  private dropDisconnectedPtyRecord(ptyId: string): void {
+    this.ptysById.delete(ptyId)
+    this.recentPtyOutputById.delete(ptyId)
+    this.ptyOutputSequenceById.delete(ptyId)
+    const handle = this.handleByPtyId.get(ptyId)
+    if (handle) {
+      this.handleByPtyId.delete(ptyId)
+      const record = this.handles.get(handle)
+      if (record?.tabId.startsWith('pty:')) {
+        this.handles.delete(handle)
+      }
+    }
   }
 
   private leafExistsForPty(ptyId: string): boolean {
@@ -12769,6 +12854,7 @@ const DEFAULT_REPO_SEARCH_REFS_LIMIT = 25
 const DEFAULT_TERMINAL_LIST_LIMIT = 200
 const DEFAULT_WORKTREE_LIST_LIMIT = 200
 const DEFAULT_WORKTREE_PS_LIMIT = 200
+const DISCONNECTED_PTY_RECORD_MAX = 128
 const RESOLVED_WORKTREE_CACHE_TTL_MS = 1000
 const RESOLVED_WORKTREE_REPO_TIMEOUT_MS = 5000
 const PTY_CONTROLLER_LIST_TIMEOUT_MS = 3000

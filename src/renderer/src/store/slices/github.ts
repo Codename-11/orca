@@ -364,10 +364,21 @@ const prRefreshStartedHostedReviewEntries = new Map<
   string,
   AppState['hostedReviewCache'][string] | undefined
 >()
+const PR_REFRESH_STARTED_HOSTED_REVIEW_ENTRY_MAX = 128
 
 /** @internal - exposed for leak-regression tests only */
 export function _getGitHubPRRequestGenerationCountForTest(): number {
   return prRequestGenerations.size
+}
+
+/** @internal - exposed for leak-regression tests only */
+export function _getGitHubPRRefreshStartedEntryCountForTest(): number {
+  return prRefreshStartedHostedReviewEntries.size
+}
+
+/** @internal - exposed for leak-regression tests only */
+export function _clearGitHubPRRefreshStartedEntriesForTest(): void {
+  prRefreshStartedHostedReviewEntries.clear()
 }
 
 // Why: cap in-flight cross-repo fan-out and hover-prefetches at the renderer
@@ -816,7 +827,7 @@ function applyPRCacheResult(
     return cache
   }
   if (accepted) {
-    return { ...cache, [cacheKey]: { data: pr, fetchedAt } }
+    return withBoundedCacheEntry(cache, cacheKey, { data: pr, fetchedAt })
   }
   if (!cache[cacheKey]) {
     return cache
@@ -828,6 +839,41 @@ function applyPRCacheResult(
 
 function prRefreshStartedEntryKey(sequence: number, cacheKey: string): string {
   return `${sequence}::${cacheKey}`
+}
+
+function deletePRRefreshStartedEntry(sequence: number | undefined, cacheKey: string): void {
+  if (sequence !== undefined && sequence > 0) {
+    prRefreshStartedHostedReviewEntries.delete(prRefreshStartedEntryKey(sequence, cacheKey))
+  }
+}
+
+function setPRRefreshStartedHostedReviewEntry(
+  key: string,
+  entry: AppState['hostedReviewCache'][string] | undefined
+): void {
+  if (entry === undefined) {
+    prRefreshStartedHostedReviewEntries.delete(key)
+    return
+  }
+  prRefreshStartedHostedReviewEntries.delete(key)
+  prRefreshStartedHostedReviewEntries.set(key, entry)
+  while (prRefreshStartedHostedReviewEntries.size > PR_REFRESH_STARTED_HOSTED_REVIEW_ENTRY_MAX) {
+    const oldest = prRefreshStartedHostedReviewEntries.keys().next()
+    if (oldest.done) {
+      return
+    }
+    prRefreshStartedHostedReviewEntries.delete(oldest.value)
+  }
+}
+
+function deletePRRefreshStartedEntriesForEvent(
+  event: GitHubPRRefreshEvent,
+  sequences: AppState['prRefreshSequences']
+): void {
+  for (const alias of event.aliases) {
+    deletePRRefreshStartedEntry(event.sequence, alias.cacheKey)
+    deletePRRefreshStartedEntry(sequences[alias.cacheKey], alias.cacheKey)
+  }
 }
 
 function setGitHubPRResultCaches(
@@ -968,10 +1014,10 @@ function applyGitHubPRResultToCaches(args: {
  * Evict the oldest entries from a cache record when it exceeds the max size.
  * Returns a pruned copy, or the original reference if no eviction was needed.
  */
-function evictStaleEntries<T>(
-  cache: Record<string, CacheEntry<T>>,
+function evictStaleEntries<T extends { fetchedAt: number }>(
+  cache: Record<string, T>,
   maxEntries = MAX_CACHE_ENTRIES
-): Record<string, CacheEntry<T>> {
+): Record<string, T> {
   const keys = Object.keys(cache)
   if (keys.length <= maxEntries) {
     return cache
@@ -980,11 +1026,19 @@ function evictStaleEntries<T>(
     .map((k) => ({ key: k, fetchedAt: cache[k].fetchedAt }))
     .sort((a, b) => b.fetchedAt - a.fetchedAt)
   const keep = new Set(sorted.slice(0, maxEntries).map((e) => e.key))
-  const pruned: Record<string, CacheEntry<T>> = {}
+  const pruned: Record<string, T> = {}
   for (const k of keep) {
     pruned[k] = cache[k]
   }
   return pruned
+}
+
+function withBoundedCacheEntry<T extends { fetchedAt: number }>(
+  cache: Record<string, T>,
+  key: string,
+  entry: T
+): Record<string, T> {
+  return evictStaleEntries({ ...cache, [key]: entry })
 }
 
 function shouldRefreshIssueDecorations(state: AppState): boolean {
@@ -1307,24 +1361,21 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
             args.queryOverride
           )
           set((s) => ({
-            projectViewCache: {
-              ...s.projectViewCache,
-              [key]: { data: table, fetchedAt: Date.now() }
-            }
+            projectViewCache: withBoundedCacheEntry(s.projectViewCache, key, {
+              data: table,
+              fetchedAt: Date.now()
+            })
           }))
         } else if (maybeKnownKey) {
           // Only stamp the error onto the cache when we have a resolved key
           // (i.e. caller supplied viewId). Otherwise we have nowhere to write
           // it — the renderer classifies the error directly from the envelope.
           set((s) => ({
-            projectViewCache: {
-              ...s.projectViewCache,
-              [maybeKnownKey]: {
-                data: s.projectViewCache[maybeKnownKey]?.data ?? null,
-                fetchedAt: Date.now(),
-                error: envelope.error
-              }
-            }
+            projectViewCache: withBoundedCacheEntry(s.projectViewCache, maybeKnownKey, {
+              data: s.projectViewCache[maybeKnownKey]?.data ?? null,
+              fetchedAt: Date.now(),
+              error: envelope.error
+            })
           }))
         }
         return envelope
@@ -1772,16 +1823,13 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
             ? { ...issuesError, source: envelope.sources.issues }
             : undefined
         set((s) => ({
-          workItemsCache: {
-            ...s.workItemsCache,
-            [key]: {
-              data: items,
-              fetchedAt: Date.now(),
-              sources: envelope.sources,
-              ...(errorForCache ? { error: errorForCache } : {}),
-              ...(envelope.issueSourceFellBack ? { issueSourceFellBack: true } : {})
-            }
-          }
+          workItemsCache: withBoundedCacheEntry(s.workItemsCache, key, {
+            data: items,
+            fetchedAt: Date.now(),
+            sources: envelope.sources,
+            ...(errorForCache ? { error: errorForCache } : {}),
+            ...(envelope.issueSourceFellBack ? { issueSourceFellBack: true } : {})
+          })
         }))
         return items
       } catch (err) {
@@ -1915,8 +1963,8 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
       const persisted = await window.api.cache.getGitHub()
       if (persisted) {
         set({
-          prCache: persisted.pr || {},
-          issueCache: persisted.issue || {}
+          prCache: evictStaleEntries(persisted.pr || {}),
+          issueCache: evictStaleEntries(persisted.issue || {})
         })
       }
     } catch (err) {
@@ -2105,14 +2153,20 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
       try {
         const issue = await window.api.gh.issue({ repoPath, repoId, number })
         set((s) => ({
-          issueCache: { ...s.issueCache, [cacheKey]: { data: issue, fetchedAt: Date.now() } }
+          issueCache: withBoundedCacheEntry(s.issueCache, cacheKey, {
+            data: issue,
+            fetchedAt: Date.now()
+          })
         }))
         debouncedSaveCache(get())
         return issue
       } catch (err) {
         console.error('Failed to fetch issue:', err)
         set((s) => ({
-          issueCache: { ...s.issueCache, [cacheKey]: { data: null, fetchedAt: Date.now() } }
+          issueCache: withBoundedCacheEntry(s.issueCache, cacheKey, {
+            data: null,
+            fetchedAt: Date.now()
+          })
         }))
         debouncedSaveCache(get())
         return null
@@ -2211,10 +2265,11 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
             })) as PRCheckDetail[])
         set((s) => {
           const nextState: Partial<AppState> = {
-            checksCache: {
-              ...s.checksCache,
-              [cacheKey]: { data: checks, fetchedAt: Date.now(), headSha }
-            }
+            checksCache: withBoundedCacheEntry(s.checksCache, cacheKey, {
+              data: checks,
+              fetchedAt: Date.now(),
+              headSha
+            })
           }
 
           const prStatusUpdate = syncPRChecksStatus(
@@ -2330,10 +2385,10 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
               noCache: options?.force
             })) as PRComment[])
         set((s) => ({
-          commentsCache: {
-            ...s.commentsCache,
-            [cacheKey]: { data: comments, fetchedAt: Date.now() }
-          }
+          commentsCache: withBoundedCacheEntry(s.commentsCache, cacheKey, {
+            data: comments,
+            fetchedAt: Date.now()
+          })
         }))
         return comments
       } catch (err) {
@@ -2395,13 +2450,10 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
     set((s) => {
       const entry = s.commentsCache[cacheKey]
       return {
-        commentsCache: {
-          ...s.commentsCache,
-          [cacheKey]: {
-            data: mergePRCommentIntoList(entry?.data, result.comment),
-            fetchedAt: Date.now()
-          }
-        }
+        commentsCache: withBoundedCacheEntry(s.commentsCache, cacheKey, {
+          data: mergePRCommentIntoList(entry?.data, result.comment),
+          fetchedAt: Date.now()
+        })
       }
     })
     return result
@@ -2466,13 +2518,10 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
     set((s) => {
       const entry = s.commentsCache[cacheKey]
       return {
-        commentsCache: {
-          ...s.commentsCache,
-          [cacheKey]: {
-            data: mergePRCommentIntoList(entry?.data, comment),
-            fetchedAt: Date.now()
-          }
-        }
+        commentsCache: withBoundedCacheEntry(s.commentsCache, cacheKey, {
+          data: mergePRCommentIntoList(entry?.data, comment),
+          fetchedAt: Date.now()
+        })
       }
     })
     return { ok: true, comment }
@@ -2608,6 +2657,7 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
       // Why: local main-process refresh events are keyed only by repo/branch;
       // applying them while a runtime is active can leak local PR state into SSH.
       if (getActiveRuntimeTarget(s.settings).kind === 'environment') {
+        deletePRRefreshStartedEntriesForEvent(event, s.prRefreshSequences)
         return {}
       }
       const nextSequences = { ...s.prRefreshSequences }
@@ -2621,6 +2671,9 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
         if (
           event.outcome ? event.sequence < previousSequence : event.sequence <= previousSequence
         ) {
+          if (event.outcome || event.status !== 'in-flight') {
+            deletePRRefreshStartedEntry(event.sequence, alias.cacheKey)
+          }
           continue
         }
         nextSequences[alias.cacheKey] = event.sequence
@@ -2630,6 +2683,9 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
           const startedEntryKey = prRefreshStartedEntryKey(event.sequence, alias.cacheKey)
           const requestStartedEntry = prRefreshStartedHostedReviewEntries.get(startedEntryKey)
           prRefreshStartedHostedReviewEntries.delete(startedEntryKey)
+          if (previousSequence !== event.sequence) {
+            deletePRRefreshStartedEntry(previousSequence, alias.cacheKey)
+          }
           delete nextStates[alias.cacheKey]
           if (event.outcome.kind === 'upstream-error') {
             nextStates[alias.cacheKey] = {
@@ -2703,6 +2759,9 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
         }
 
         if (event.status) {
+          if (previousSequence !== event.sequence) {
+            deletePRRefreshStartedEntry(previousSequence, alias.cacheKey)
+          }
           if (event.status === 'in-flight' && event.requestStartedAt !== undefined) {
             const hostedReviewCacheKey = getHostedReviewCacheKey(
               alias.repoPath,
@@ -2711,10 +2770,15 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
               alias.repoId,
               alias.connectionId
             )
-            prRefreshStartedHostedReviewEntries.set(
+            setPRRefreshStartedHostedReviewEntry(
               prRefreshStartedEntryKey(event.sequence, alias.cacheKey),
               s.hostedReviewCache[hostedReviewCacheKey]
             )
+          } else {
+            // Why: rate-limit pauses/skips can follow an in-flight broadcast
+            // without an outcome; the cached request-start snapshot is no
+            // longer live and would otherwise accumulate per refresh sequence.
+            deletePRRefreshStartedEntry(event.sequence, alias.cacheKey)
           }
           nextStates[alias.cacheKey] = {
             status: event.status,
@@ -2741,12 +2805,15 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
 
   refreshAllGitHub: () => {
     // Invalidate comments cache so it refreshes on next access.
-    // Also evict old entries from prCache and issueCache to prevent unbounded
-    // growth across many repos and branches over a long-running session.
+    // Also evict old entries from retained caches to prevent unbounded growth
+    // across many repos and branches over a long-running session.
     set((s) => ({
       commentsCache: {},
       prCache: evictStaleEntries(s.prCache),
-      issueCache: evictStaleEntries(s.issueCache)
+      issueCache: evictStaleEntries(s.issueCache),
+      checksCache: evictStaleEntries(s.checksCache),
+      workItemsCache: evictStaleEntries(s.workItemsCache),
+      projectViewCache: evictStaleEntries(s.projectViewCache)
     }))
 
     // Why: prRequestGenerations tracks only live inflight fetches and is

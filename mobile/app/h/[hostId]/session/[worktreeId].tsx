@@ -1099,6 +1099,14 @@ export default function SessionScreen() {
     activeSessionTab?.type !== 'browser'
   const liveInputEnabled = activeHandle ? liveInputTerminalHandles.has(activeHandle) : false
   const [browserScreencastSupported, setBrowserScreencastSupported] = useState<boolean | null>(null)
+  // Why: terminal gesture/input callbacks are intentionally stable and
+  // imperative; keep their refs current before commit instead of one effect later.
+  clientRef.current = client
+  connStateRef.current = connState
+  activeSessionTabTypeRef.current = activeSessionTab?.type ?? null
+  sessionTabsRef.current = sessionTabs
+  activeSessionTabIdRef.current = activeSessionTabId
+  markdownDocsRef.current = markdownDocs
   const reconciledCreateWarningState = reconcileMobileSessionCreateWarningState(
     createWarningState,
     initialCreateWarning
@@ -1160,17 +1168,6 @@ export default function SessionScreen() {
     [clearToastHideTimer]
   )
 
-  useEffect(() => {
-    return () => {
-      // Why: toast timers can outlive quick route changes; bump the sequence
-      // so pending animation callbacks cannot clear a newer/unmounted surface.
-      toastSeqRef.current += 1
-      clearToastHideTimer()
-      clearDelayedActionTimers()
-      clearTerminalLiveInputFocusTimer(liveInputFocusTimerRef)
-    }
-  }, [clearDelayedActionTimers, clearToastHideTimer])
-
   const dictation = useMobileDictation({
     client,
     enabled: canSend,
@@ -1188,22 +1185,6 @@ export default function SessionScreen() {
       showToast(err.message)
     }
   })
-
-  useEffect(() => {
-    activeSessionTabTypeRef.current = activeSessionTab?.type ?? null
-  }, [activeSessionTab])
-
-  useEffect(() => {
-    sessionTabsRef.current = sessionTabs
-  }, [sessionTabs])
-
-  useEffect(() => {
-    activeSessionTabIdRef.current = activeSessionTabId
-  }, [activeSessionTabId])
-
-  useEffect(() => {
-    markdownDocsRef.current = markdownDocs
-  }, [markdownDocs])
 
   useEffect(() => {
     diffCommentsRef.current = diffComments
@@ -2133,15 +2114,7 @@ export default function SessionScreen() {
     }
   }, [applySessionTabs, client, worktreeId])
 
-  // Why: keep clientRef in sync with the shared client from
-  // useHostClient() so the existing imperative call sites
-  // (clientRef.current.sendRequest...) keep working without churn.
   useEffect(() => {
-    clientRef.current = client
-  }, [client])
-
-  useEffect(() => {
-    connStateRef.current = connState
     if (connState === 'connected') return
     for (const queued of terminalGestureInputQueuesRef.current.values()) {
       if (queued.timer) clearTimeout(queued.timer)
@@ -2172,17 +2145,6 @@ export default function SessionScreen() {
       stale = true
     }
   }, [client, connState])
-
-  // Why: only clear terminal cache on actual unmount. Running it whenever
-  // `client` changes — including the initial null → real-client transition
-  // from useHostClient's async open path — would unsubscribe terminals and
-  // wipe xterm state mid-subscribe on a normal session-screen mount.
-  useEffect(() => {
-    return () => {
-      clearTerminalCache()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   // Why: deviceToken is read from host record so feature code can pass
   // `client.id` on subscribe/send for driver-state-machine identity.
@@ -2993,9 +2955,23 @@ export default function SessionScreen() {
     },
     [stopAccessoryRepeat]
   )
-  useEffect(() => {
-    return () => stopAccessoryRepeat()
-  }, [stopAccessoryRepeat])
+  const setMobileSessionRootRef = useCallback(
+    (node: View | null): void => {
+      if (node !== null) {
+        return
+      }
+      // Why: terminal subscriptions and route-level timers must clear only on
+      // real route detach; client churn during mount can otherwise wipe xterm
+      // state mid-subscribe.
+      toastSeqRef.current += 1
+      clearTerminalCache()
+      clearToastHideTimer()
+      clearDelayedActionTimers()
+      clearTerminalLiveInputFocusTimer(liveInputFocusTimerRef)
+      stopAccessoryRepeat()
+    },
+    [clearDelayedActionTimers, clearTerminalCache, clearToastHideTimer, stopAccessoryRepeat]
+  )
 
   const handleSelectionMode = useCallback((handle: string, active: boolean) => {
     if (handle !== activeHandleRef.current) return
@@ -3678,7 +3654,7 @@ export default function SessionScreen() {
               : []
 
   return (
-    <View style={styles.container}>
+    <View ref={setMobileSessionRootRef} style={styles.container}>
       <View style={styles.kavInner}>
         <SafeAreaView style={styles.sessionChrome} edges={['top']}>
           <View style={styles.sessionTopBar}>

@@ -37,6 +37,7 @@ import type {
   SearchResult,
   UpdateStatus,
   WorktreeBaseStatusEvent,
+  WorktreeDefaultTabsLaunch,
   WorktreeRemoteBranchConflictEvent
 } from '../shared/types'
 import type { GitHistoryOptions, GitHistoryResult } from '../shared/git-history'
@@ -131,6 +132,7 @@ import type {
   ExternalAutomationRunsPage,
   ExternalAutomationUpdateInput,
   AutomationRun,
+  AutomationPrecheckResult,
   AutomationUpdateInput
 } from '../shared/automations-types'
 import type { KeybindingActionId, KeybindingFileSnapshot } from '../shared/keybindings'
@@ -157,6 +159,7 @@ import { subscribeRuntimeEnvironmentFromPreload } from './runtime-environment-su
 import type { RuntimeEnvironmentSubscriptionHandle } from './runtime-environment-subscriptions'
 import type { HostedReviewForBranchArgs } from '../shared/hosted-review'
 import type {
+  CrashReportBreadcrumbData,
   CrashReportSubmitArgs,
   CrashReportSubmitResult,
   ReactErrorBoundaryReportArgs,
@@ -674,10 +677,6 @@ const api = {
       ipcRenderer.send('pty:ackColdRestore', { id })
     },
 
-    pauseOutput: (id: string, paused: boolean): void => {
-      ipcRenderer.send('pty:pauseOutput', { id, paused })
-    },
-
     kill: (id: string, opts?: { keepHistory?: boolean }): Promise<void> =>
       ipcRenderer.invoke('pty:kill', { id, keepHistory: opts?.keepHistory ?? false }),
 
@@ -801,6 +800,8 @@ const api = {
       args: ReactErrorBoundaryReportArgs
     ): Promise<ReactErrorBoundaryReportResult> =>
       ipcRenderer.invoke('crashReports:recordRendererError', args),
+    recordBreadcrumb: (args: { name: string; data?: CrashReportBreadcrumbData }): void =>
+      ipcRenderer.send('crashReports:recordBreadcrumb', args),
     submit: (args: CrashReportSubmitArgs): Promise<CrashReportSubmitResult> =>
       ipcRenderer.invoke('crashReports:submit', args),
     copyLatestDiagnostics: (args?: { reportId?: string; notes?: string }) =>
@@ -2611,6 +2612,7 @@ const api = {
         worktreeId: string
         setup?: { runnerScriptPath: string; envVars: Record<string, string> }
         startup?: { command: string; env?: Record<string, string> }
+        defaultTabs?: WorktreeDefaultTabsLaunch
       }) => void
     ): (() => void) => {
       const listener = (
@@ -2620,6 +2622,7 @@ const api = {
           worktreeId: string
           setup?: { runnerScriptPath: string; envVars: Record<string, string> }
           startup?: { command: string; env?: Record<string, string> }
+          defaultTabs?: WorktreeDefaultTabsLaunch
         }
       ) => callback(data)
       ipcRenderer.on('ui:activateWorktree', listener)
@@ -3282,6 +3285,11 @@ const api = {
     delete: (args: { id: string }): Promise<void> => ipcRenderer.invoke('automations:delete', args),
     runNow: (args: { id: string }): Promise<AutomationRun> =>
       ipcRenderer.invoke('automations:runNow', args),
+    runPrecheck: (args: {
+      automationId: string
+      runId: string
+    }): Promise<AutomationPrecheckResult | null> =>
+      ipcRenderer.invoke('automations:runPrecheck', args),
     markDispatchResult: (result: AutomationDispatchResult): Promise<AutomationRun> =>
       ipcRenderer.invoke('automations:markDispatchResult', result),
     snapshotWorkspaceName: (args: { workspaceId: string; displayName: string }): Promise<number> =>
