@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import {
   View,
   Text,
@@ -30,6 +30,7 @@ import {
   startDiagnosticFetchTimeout,
   type DiagnosticFetchTimeout
 } from '../src/diagnostics/diagnostic-fetch-timeout'
+import { formatEndpoint, testHostReachability } from '../src/diagnostics/host-reachability'
 
 type DiagnosticStatus = 'idle' | 'running' | 'done'
 
@@ -120,13 +121,16 @@ export default function TroubleshootScreen() {
   const diagnosticRunRef = useRef(0)
   const activeInternetCheckRef = useRef<DiagnosticFetchTimeout | null>(null)
 
-  useEffect(() => {
-    return () => {
-      abortRef.current = true
-      diagnosticRunRef.current += 1
-      activeInternetCheckRef.current?.dispose()
-      activeInternetCheckRef.current = null
+  const setTroubleshootRootRef = useCallback((node: View | null): void => {
+    if (node !== null) {
+      return
     }
+    // Why: diagnostics can outlive the screen; cancel the active run when the
+    // route detaches without a passive cleanup-only Effect.
+    abortRef.current = true
+    diagnosticRunRef.current += 1
+    activeInternetCheckRef.current?.dispose()
+    activeInternetCheckRef.current = null
   }, [])
 
   const toggleSection = useCallback((id: string) => {
@@ -216,7 +220,10 @@ export default function TroubleshootScreen() {
   }, [])
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top + spacing.sm }]}>
+    <View
+      ref={setTroubleshootRootRef}
+      style={[styles.container, { paddingTop: insets.top + spacing.sm }]}
+    >
       <View style={styles.topRow}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <ChevronLeft size={22} color={colors.textSecondary} />
@@ -307,40 +314,6 @@ export default function TroubleshootScreen() {
       </ScrollView>
     </View>
   )
-}
-
-// Why: WebSocket reachability is tested by opening a connection and waiting for
-// the server to respond with any frame, or timing out after 4 seconds.
-// We don't complete the E2EE handshake — just verify the endpoint is listening.
-async function testHostReachability(endpoint: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const timeout = setTimeout(() => {
-      ws.close()
-      resolve(false)
-    }, 4000)
-
-    const ws = new WebSocket(endpoint)
-
-    ws.onopen = () => {
-      clearTimeout(timeout)
-      ws.close()
-      resolve(true)
-    }
-
-    ws.onerror = () => {
-      clearTimeout(timeout)
-      resolve(false)
-    }
-  })
-}
-
-function formatEndpoint(endpoint: string): string {
-  try {
-    const url = new URL(endpoint)
-    return url.host
-  } catch {
-    return endpoint
-  }
 }
 
 const styles = StyleSheet.create({

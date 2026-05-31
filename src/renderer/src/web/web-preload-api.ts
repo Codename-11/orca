@@ -432,6 +432,7 @@ function createWebPreloadApi(): Partial<PreloadApi> {
       getLatestReport: () => Promise.resolve(null),
       dismiss: () => Promise.resolve(null),
       recordRendererError: () => Promise.resolve({ ok: true, report: null, deduped: true }),
+      recordBreadcrumb: () => {},
       submit: () =>
         Promise.resolve({
           ok: false,
@@ -2035,7 +2036,6 @@ function createPtyApi(): NonNullable<Partial<PreloadApi>['pty']> {
     signal: () => {},
     kill: () => Promise.resolve(),
     ackColdRestore: () => {},
-    pauseOutput: () => {},
     hasChildProcesses: () => Promise.resolve(false),
     getForegroundProcess: () => Promise.resolve(null),
     getCwd: () => Promise.resolve('~'),

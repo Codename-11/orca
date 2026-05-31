@@ -230,6 +230,8 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     terminalAllowOsc52Clipboard: false,
     setupScriptLaunchMode: 'new-tab',
     terminalScrollbackBytes: 10_000_000,
+    httpProxyUrl: '',
+    httpProxyBypassRules: '',
     openLinksInApp: true,
     openInApplications: [],
     rightSidebarOpenByDefault: true,
@@ -397,6 +399,7 @@ export function getDefaultUIState(): PersistedUIState {
     hideSleepingWorkspaces: DEFAULT_HIDE_SLEEPING_WORKSPACES,
     showSleepingWorkspaces: DEFAULT_SHOW_SLEEPING_WORKSPACES,
     hideDefaultBranchWorkspace: false,
+    showDotfilesByWorktree: {},
     filterRepoIds: [],
     collapsedGroups: [],
     uiZoomLevel: 0,
@@ -436,6 +439,7 @@ export function getDefaultWorkspaceSession(): WorkspaceSessionState {
     activeBrowserTabIdByWorktree: {},
     activeFileIdByWorktree: {},
     activeTabTypeByWorktree: {},
-    browserUrlHistory: []
+    browserUrlHistory: [],
+    defaultTerminalTabsAppliedByWorktreeId: {}
   }
 }

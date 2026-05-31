@@ -33,7 +33,7 @@ import {
 import { useTerminalSaveDialog } from '@/components/terminal/useTerminalSaveDialog'
 import { appendUniqueOpenFileIds } from '@/components/terminal/unsaved-close-queue'
 import { getConnectionId } from '@/lib/connection-context'
-import { createUntitledMarkdownFile } from '@/lib/create-untitled-markdown'
+import { createUntitledMarkdownFileWithTemplateSelection } from '@/lib/create-untitled-markdown'
 import { detectLanguage } from '@/lib/language-detect'
 import { focusTerminalTabSurface } from '@/lib/focus-terminal-tab-surface'
 import { isOrcaCliAvailableOnPath } from '@/lib/agent-skill-cli-prerequisite'
@@ -645,12 +645,15 @@ export function FloatingTerminalPanel({
     }
     void (async () => {
       try {
-        const fileInfo = await createUntitledMarkdownFile(
+        const fileInfo = await createUntitledMarkdownFileWithTemplateSelection(
           markdownCwd,
           FLOATING_TERMINAL_WORKTREE_ID,
           getConnectionId(FLOATING_TERMINAL_WORKTREE_ID) ?? undefined,
           LOCAL_RUNTIME_SETTINGS
         )
+        if (!fileInfo) {
+          return
+        }
         openFile(fileInfo, {
           preview: false,
           targetGroupId: activeGroup?.id,
@@ -700,7 +703,7 @@ export function FloatingTerminalPanel({
         : (state.unifiedTabsByWorktree[FLOATING_TERMINAL_WORKTREE_ID] ?? [])
       const items = visibleIds
         .map((visibleId) => resolveGroupTabFromVisibleId(currentGroupTabs, visibleId))
-        .filter((item): item is Tab => item !== null)
+        .filter((item): item is Tab => item !== null && !item.isPinned)
       if (items.length === 0) {
         return
       }
@@ -1216,12 +1219,14 @@ export function FloatingTerminalPanel({
   }, [])
 
   return (
+    // Why: root notification cards use z-40; keep the floating workspace below
+    // them so alerts are never hidden behind an open terminal panel.
     <div
       ref={setPanelNode}
       data-floating-terminal-panel
       aria-hidden={!open}
       tabIndex={-1}
-      className={`fixed z-50 flex min-h-[280px] min-w-[420px] overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-[0_10px_24px_rgba(0,0,0,0.18)] outline-none ${open ? 'opacity-100' : 'invisible pointer-events-none opacity-0'}`}
+      className={`fixed z-30 flex min-h-[280px] min-w-[420px] overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-[0_10px_24px_rgba(0,0,0,0.18)] outline-none ${open ? 'opacity-100' : 'invisible pointer-events-none opacity-0'}`}
       style={{
         visibility: open ? 'visible' : 'hidden',
         left: bounds.left,

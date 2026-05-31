@@ -51,6 +51,7 @@ import { onOnboardingReopened } from './components/onboarding/show-onboarding-ev
 import { shouldShowOnboarding } from './components/onboarding/should-show-onboarding'
 import { SshPassphraseDialog } from './components/settings/SshPassphraseDialog'
 import DeleteWorktreeDialog from './components/sidebar/DeleteWorktreeDialog'
+import { MarkdownTemplatePicker } from './components/editor/MarkdownTemplatePicker'
 import {
   FloatingTerminalPanel,
   FloatingTerminalToggleButton
@@ -128,6 +129,7 @@ import {
 } from '../../shared/keybindings'
 import { isGitRepoKind } from '../../shared/repo-kind'
 import { showTerminalShortcutCaptureNotification } from '@/lib/terminal-shortcut-capture-notification'
+import { resolveMountedLazyModalIds, type LazyModalId } from './lazy-modal-mount-state'
 
 const isMac = navigator.userAgent.includes('Mac')
 const isWindows = !isMac && navigator.userAgent.includes('Windows')
@@ -260,7 +262,7 @@ function applyRemoteWorkspacePatchStatus(
 }
 
 function App(): React.JSX.Element {
-  useUnreadDockBadge()
+  const clearUnreadDockBadge = useUnreadDockBadge()
   useRadixBodyPointerEventsRecovery()
   useWebSessionTabsSync()
   const [floatingTerminalOpen, setFloatingTerminalOpen] = useState(false)
@@ -372,12 +374,13 @@ function App(): React.JSX.Element {
 
   const setAppRootNode = useCallback(
     (node: HTMLDivElement | null): void => {
-      // Why: return-focus frames are only valid while the App root is mounted.
+      // Why: these best-effort App chrome cleanups share the App root lifetime.
       if (!node) {
         cancelFloatingTerminalReturnFocusFrame()
+        clearUnreadDockBadge()
       }
     },
-    [cancelFloatingTerminalReturnFocusFrame]
+    [cancelFloatingTerminalReturnFocusFrame, clearUnreadDockBadge]
   )
 
   const rememberFloatingTerminalReturnFocus = useCallback((): void => {
@@ -413,18 +416,19 @@ function App(): React.JSX.Element {
 
   const setFloatingTerminalOpenWithFocus = useCallback(
     (nextOpen: SetStateAction<boolean>): void => {
-      setFloatingTerminalOpen((currentOpen) => {
-        const resolvedOpen = typeof nextOpen === 'function' ? nextOpen(currentOpen) : nextOpen
-        if (resolvedOpen && !currentOpen) {
-          useAppStore.getState().recordFeatureInteraction('floating-workspace')
-          rememberFloatingTerminalReturnFocus()
-        } else if (!resolvedOpen && currentOpen) {
-          restoreFloatingTerminalReturnFocus()
-        }
-        return resolvedOpen
-      })
+      const resolvedOpen =
+        typeof nextOpen === 'function' ? nextOpen(floatingTerminalOpen) : nextOpen
+      // Why: recordFeatureInteraction updates Zustand subscribers; doing it
+      // inside React's state updater logs a render-phase update warning.
+      if (resolvedOpen && !floatingTerminalOpen) {
+        useAppStore.getState().recordFeatureInteraction('floating-workspace')
+        rememberFloatingTerminalReturnFocus()
+      } else if (!resolvedOpen && floatingTerminalOpen) {
+        restoreFloatingTerminalReturnFocus()
+      }
+      setFloatingTerminalOpen(resolvedOpen)
     },
-    [rememberFloatingTerminalReturnFocus, restoreFloatingTerminalReturnFocus]
+    [floatingTerminalOpen, rememberFloatingTerminalReturnFocus, restoreFloatingTerminalReturnFocus]
   )
 
   useEffect(() => {
@@ -448,6 +452,7 @@ function App(): React.JSX.Element {
   const sortBy = useAppStore((s) => s.sortBy)
   const showSleepingWorkspaces = useAppStore((s) => s.showSleepingWorkspaces)
   const hideDefaultBranchWorkspace = useAppStore((s) => s.hideDefaultBranchWorkspace)
+  const showDotfilesByWorktree = useAppStore((s) => s.showDotfilesByWorktree)
   const filterRepoIds = useAppStore((s) => s.filterRepoIds)
   const acknowledgedAgentsByPaneKey = useAppStore((s) => s.acknowledgedAgentsByPaneKey)
   const persistedUIReady = useAppStore((s) => s.persistedUIReady)
@@ -471,7 +476,7 @@ function App(): React.JSX.Element {
   const canGoForwardWorktree = useAppStore(canGoForwardWorktreeHistory)
   const titlebarLeftControlsRef = useRef<HTMLDivElement | null>(null)
   const [collapsedSidebarHeaderWidth, setCollapsedSidebarHeaderWidth] = useState(0)
-  const [mountedLazyModalIds, setMountedLazyModalIds] = useState(() => new Set<string>())
+  const [mountedLazyModalIds, setMountedLazyModalIds] = useState<Set<LazyModalId>>(() => new Set())
   const [onboarding, setOnboarding] = useState<OnboardingState | null>(null)
   const featureTipsPromptedThisSessionRef = useRef(false)
   const featureTipsSuppressedByOnboardingThisSessionRef = useRef(false)
@@ -1016,6 +1021,7 @@ function App(): React.JSX.Element {
         hideSleepingWorkspaces: !showSleepingWorkspaces,
         showSleepingWorkspaces,
         hideDefaultBranchWorkspace,
+        showDotfilesByWorktree,
         filterRepoIds,
         // Why: rides the same debounced save so dashboard auto-acks (which fire
         // on focus/visibility) and the in-memory ack cleanup paths in
@@ -1037,6 +1043,7 @@ function App(): React.JSX.Element {
     sortBy,
     showSleepingWorkspaces,
     hideDefaultBranchWorkspace,
+    showDotfilesByWorktree,
     filterRepoIds,
     acknowledgedAgentsByPaneKey
   ])
@@ -1403,28 +1410,12 @@ function App(): React.JSX.Element {
     return () => observer.disconnect()
   }, [isFullScreen, settings?.showTitlebarAppName, showSidebar, workspaceActive, sidebarOpen])
 
-  useEffect(() => {
-    if (
-      activeModal !== 'quick-open' &&
-      activeModal !== 'worktree-palette' &&
-      activeModal !== 'new-workspace-composer' &&
-      activeModal !== 'workspace-cleanup' &&
-      activeModal !== 'feature-wall' &&
-      activeModal !== 'feature-tips'
-    ) {
-      return
-    }
-    setMountedLazyModalIds((currentIds) => {
-      if (currentIds.has(activeModal)) {
-        return currentIds
-      }
-      const nextIds = new Set(currentIds)
-      // Why: lazy-load these modals only after first use, then keep them mounted
-      // so repeat opens preserve their local state and avoid re-fetch flashes.
-      nextIds.add(activeModal)
-      return nextIds
-    })
-  }, [activeModal])
+  const resolvedMountedLazyModalIds = resolveMountedLazyModalIds(activeModal, mountedLazyModalIds)
+  if (resolvedMountedLazyModalIds !== mountedLazyModalIds) {
+    // Why: lazy-load these modals only after first use, then keep them mounted
+    // so repeat opens preserve their local state and avoid re-fetch flashes.
+    setMountedLazyModalIds(new Set(resolvedMountedLazyModalIds))
+  }
 
   // Why: extracted so both the full-width titlebar (settings/landing) and
   // the sidebar-width left header (workspace view) can share the same
@@ -1846,7 +1837,7 @@ function App(): React.JSX.Element {
           {/* Why: root overlays can render Radix <Tooltip>s; keep them inside
             the shared provider so lazy surfaces mount safely from any entry point. */}
           <Suspense fallback={null}>
-            {mountedLazyModalIds.has('new-workspace-composer') ? (
+            {resolvedMountedLazyModalIds.has('new-workspace-composer') ? (
               <RecoverableRenderErrorBoundary
                 boundaryId="modal.new-workspace-composer"
                 surface="modal"
@@ -1856,7 +1847,7 @@ function App(): React.JSX.Element {
                 <NewWorkspaceComposerModal />
               </RecoverableRenderErrorBoundary>
             ) : null}
-            {mountedLazyModalIds.has('workspace-cleanup') ? (
+            {resolvedMountedLazyModalIds.has('workspace-cleanup') ? (
               <RecoverableRenderErrorBoundary
                 boundaryId="modal.workspace-cleanup"
                 surface="modal"
@@ -1868,7 +1859,7 @@ function App(): React.JSX.Element {
             ) : null}
           </Suspense>
           <Suspense fallback={null}>
-            {mountedLazyModalIds.has('quick-open') ? (
+            {resolvedMountedLazyModalIds.has('quick-open') ? (
               <RecoverableRenderErrorBoundary
                 boundaryId="modal.quick-open"
                 surface="modal"
@@ -1878,7 +1869,7 @@ function App(): React.JSX.Element {
                 <QuickOpen />
               </RecoverableRenderErrorBoundary>
             ) : null}
-            {mountedLazyModalIds.has('worktree-palette') ? (
+            {resolvedMountedLazyModalIds.has('worktree-palette') ? (
               <RecoverableRenderErrorBoundary
                 boundaryId="modal.worktree-palette"
                 surface="modal"
@@ -1888,7 +1879,7 @@ function App(): React.JSX.Element {
                 <WorktreeJumpPalette />
               </RecoverableRenderErrorBoundary>
             ) : null}
-            {mountedLazyModalIds.has('feature-wall') ? (
+            {resolvedMountedLazyModalIds.has('feature-wall') ? (
               <RecoverableRenderErrorBoundary
                 boundaryId="modal.feature-wall"
                 surface="modal"
@@ -1898,7 +1889,7 @@ function App(): React.JSX.Element {
                 <FeatureWallModal />
               </RecoverableRenderErrorBoundary>
             ) : null}
-            {mountedLazyModalIds.has('feature-tips') ? (
+            {resolvedMountedLazyModalIds.has('feature-tips') ? (
               <RecoverableRenderErrorBoundary
                 boundaryId="modal.feature-tips"
                 surface="modal"
@@ -1978,6 +1969,14 @@ function App(): React.JSX.Element {
             compact
           >
             <DeleteWorktreeDialog />
+          </RecoverableRenderErrorBoundary>
+          <RecoverableRenderErrorBoundary
+            boundaryId="modal.markdown-template-picker"
+            surface="modal"
+            resetKey={activeModal}
+            compact
+          >
+            <MarkdownTemplatePicker />
           </RecoverableRenderErrorBoundary>
           <RecoverableRenderErrorBoundary
             boundaryId="modal.crash-report"

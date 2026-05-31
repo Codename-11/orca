@@ -49,6 +49,7 @@ function encodedProject(projectPath: string): string {
 }
 
 const GITLAB_RATE_LIMIT_CACHE_TTL_MS = 30_000
+const GITLAB_RATE_LIMIT_CACHE_MAX_ENTRIES = 64
 const gitLabRateLimitCache = new Map<string, GitLabRateLimitSnapshot>()
 
 /**
@@ -159,12 +160,45 @@ export function _resetGitLabRateLimitCache(): void {
   gitLabRateLimitCache.clear()
 }
 
+/** @internal — test-only */
+export function _getGitLabRateLimitCacheSize(): number {
+  return gitLabRateLimitCache.size
+}
+
+function pruneGitLabRateLimitCache(now = Date.now()): void {
+  for (const [cacheKey, snapshot] of gitLabRateLimitCache) {
+    if (now - snapshot.fetchedAt >= GITLAB_RATE_LIMIT_CACHE_TTL_MS) {
+      gitLabRateLimitCache.delete(cacheKey)
+    }
+  }
+  while (gitLabRateLimitCache.size > GITLAB_RATE_LIMIT_CACHE_MAX_ENTRIES) {
+    const oldestKey = gitLabRateLimitCache.keys().next().value
+    if (oldestKey === undefined) {
+      break
+    }
+    gitLabRateLimitCache.delete(oldestKey)
+  }
+}
+
+function rememberGitLabRateLimitSnapshot(
+  cacheKey: string,
+  snapshot: GitLabRateLimitSnapshot
+): void {
+  pruneGitLabRateLimitCache()
+  // Why: self-managed GitLab hostnames come from repo config; keep this
+  // process cache bounded even across many transient hosts.
+  gitLabRateLimitCache.delete(cacheKey)
+  gitLabRateLimitCache.set(cacheKey, snapshot)
+  pruneGitLabRateLimitCache()
+}
+
 export async function getRateLimit(options?: {
   force?: boolean
   host?: string | null
 }): Promise<GetGitLabRateLimitResult> {
   const host = options?.host?.trim() || null
   const cacheKey = host ?? 'default'
+  pruneGitLabRateLimitCache()
   const cached = gitLabRateLimitCache.get(cacheKey)
   if (!options?.force && cached && Date.now() - cached.fetchedAt < GITLAB_RATE_LIMIT_CACHE_TTL_MS) {
     return { ok: true, snapshot: cached }
@@ -178,7 +212,7 @@ export async function getRateLimit(options?: {
     const args = host ? ['--hostname', host, 'user'] : ['user']
     const { headers } = await glabApiWithHeaders(args)
     const snapshot = parseGitLabRateLimitSnapshot(headers, host)
-    gitLabRateLimitCache.set(cacheKey, snapshot)
+    rememberGitLabRateLimitSnapshot(cacheKey, snapshot)
     return { ok: true, snapshot }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -273,10 +307,13 @@ export async function getMergeRequestForBranch(
       )
       const data = JSON.parse(stdout) as (Parameters<typeof mapMRInfo>[0] & {
         head_pipeline?: { status?: string } | null
+        pipeline?: { status?: string } | null
       })[]
       if (Array.isArray(data) && data.length > 0) {
         const raw = data[0]
-        const pipelineStatus = derivePipelineStatus(raw.head_pipeline ?? null)
+        // Why: older GitLab list payloads expose `pipeline` instead of
+        // `head_pipeline`, matching the detail endpoint compatibility path.
+        const pipelineStatus = derivePipelineStatus(raw.head_pipeline ?? raw.pipeline ?? null)
         return mapMRInfo(raw, pipelineStatus)
       }
     }
@@ -640,14 +677,13 @@ export async function listTodos(
   }
   await acquire()
   try {
-    // Why: per_page=50 keeps the first-page round-trip small. Pagination
-    // is left for a follow-up — most users have <50 pending todos in
-    // practice and the UI shows the highest-priority ones first.
+    // Why: per_page=50 keeps this user-scoped cross-project view cheap. The UI
+    // shows the highest-priority todos first, so avoid walking every pending
+    // todo page from large GitLab accounts.
     const { stdout } = await glabExecFileAsync(
       [
         'api',
         ...(projectRef ? glabHostnameArgs(projectRef, connectionId) : []),
-        '--paginate',
         'todos?state=pending&per_page=50'
       ],
       glabRepoExecOptions(repoPath, connectionId)
@@ -667,9 +703,6 @@ export async function listTodos(
       updated_at?: string
       state?: string
     }
-    // Why: --paginate concatenates JSON arrays (one per page) into a
-    // single stream. glab's behavior is to emit them as one JSON array
-    // when the endpoint returns arrays — we trust that contract here.
     const data = JSON.parse(stdout) as RESTTodo[]
     return data.map<GitLabTodo>((t) => ({
       id: t.id ?? 0,

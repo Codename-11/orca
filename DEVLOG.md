@@ -6,6 +6,22 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-05-31 — Remediated upstream v1.4.36-rc.13 bot PR
+
+Resolved the agent-remediation merge for upstream `v1.4.36-rc.13` on `bot/upstream-sync-axiom-v1.4.36-rc.13.axiom.1` targeting `axiom/deploy`; no direct deploy-branch push was made. The conflict resolution keeps the fork semver at `1.4.36-rc.13.axiom.1`, preserves Axiom side-by-side app/updater identity, profile portability, and Forge provider/task-registry support, while accepting upstream AppImage CLI redirect, WSL packaged-resource launcher checks, proxy settings, integrations preflight status, and settings network UI changes. Protected deletion review found no deleted files, including no protected Axiom file removals.
+
+Verification:
+
+- `pnpm install --frozen-lockfile` → passed. Node engine warning only (`wanted node 24`, local `v25.6.0`).
+- `pnpm run typecheck` → passed. Node engine warning only (`wanted node 24`, local `v25.6.0`).
+- `pnpm exec vitest run --config config/vitest.config.ts src/shared/task-providers.test.ts src/main/axiom-release-hardening.test.ts src/main/updater-endpoints.test.ts src/main/app-build-identity.test.ts config/scripts/axiom-upstream-sync-release.test.mjs` → 50 tests passed.
+- `pnpm exec vitest run --config config/vitest.config.ts src/main/cli/packaged-cli-assets.test.ts src/main/cli/wsl-cli-installer.test.ts src/main/ipc/settings.test.ts src/renderer/src/components/settings/GeneralPane.test.ts src/renderer/src/components/settings/integrations-pane-status.test.ts` → 43 tests passed.
+- `pnpm exec oxlint config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml` → 0 warnings / 0 errors.
+- `pnpm exec oxfmt --check config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml config/axiom-merge-remediation-policy.json` → passed.
+- `git diff --check` → passed.
+
+---
+
 ## 2026-05-31 — Remediated upstream v1.4.36-rc.11 bot PR
 
 Resolved the agent-remediation merge for upstream `v1.4.36-rc.11` on `bot/upstream-sync-axiom-v1.4.36-rc.11.axiom.1` targeting `axiom/deploy`; no direct deploy-branch push was made. The conflict resolution keeps the fork semver at `1.4.36-rc.11.axiom.1`, preserves Axiom side-by-side app/updater identity, profile portability, and Forge provider/task-registry support, while accepting upstream's memoization for mobile task create target options without exposing Forge to Linear team picker options. Protected deletion review found only upstream memory-leak audit doc deletions outside the protected Axiom path list.

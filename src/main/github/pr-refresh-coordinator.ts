@@ -51,6 +51,30 @@ export function setPRRefreshOutcomeObserver(observer: PRRefreshOutcomeObserver |
   outcomeObserver = observer
 }
 
+function removeInvisibleVisibleRefreshes(): void {
+  for (const [key, entry] of queue) {
+    if (entry.reason === 'visible' && !isVisibleKey(key)) {
+      queue.delete(key)
+      errorBackoff.delete(key)
+      broadcast({
+        aliases: Array.from(entry.aliases.values()),
+        reason: 'visible',
+        status: 'skipped',
+        skippedReason: 'fresh'
+      })
+    }
+  }
+}
+
+export function clearVisiblePRRefreshWindow(windowId: number): void {
+  if (!visibleByWindow.delete(windowId)) {
+    return
+  }
+  // Why: visible follow-ups are owned by the renderer that reported them.
+  // If that WebContents is destroyed, no later visibility report may arrive.
+  removeInvisibleVisibleRefreshes()
+}
+
 function nextSequence(): number {
   sequence += 1
   return sequence
@@ -252,6 +276,9 @@ function scheduleVisibleFollowUp(
   windowId?: number
 ): void {
   if (!isVisibleKey(key)) {
+    // Why: manual/active refreshes can remove the queued visible retry after
+    // its owner window is gone, leaving the retry backoff without an owner.
+    errorBackoff.delete(key)
     return
   }
   if (outcome.kind === 'upstream-error') {
@@ -548,21 +575,18 @@ export function reportVisiblePRRefreshCandidates(
     return
   }
   visibleByWindow.set(windowId, { generation, keys: new Set(candidates.map(refreshKey)) })
-  for (const [key, entry] of queue) {
-    if (entry.reason === 'visible' && !isVisibleKey(key)) {
-      queue.delete(key)
-      errorBackoff.delete(key)
-      broadcast({
-        aliases: Array.from(entry.aliases.values()),
-        reason: 'visible',
-        status: 'skipped',
-        skippedReason: 'fresh'
-      })
-    }
-  }
+  removeInvisibleVisibleRefreshes()
   for (const candidate of candidates) {
     enqueuePRRefresh(candidate, 'visible', 40, windowId)
   }
+}
+
+export function _getVisiblePRRefreshWindowCountForTests(): number {
+  return visibleByWindow.size
+}
+
+export function _getPRRefreshErrorBackoffCountForTests(): number {
+  return errorBackoff.size
 }
 
 export async function refreshPRNow(candidate: GitHubPRRefreshCandidate): Promise<PRRefreshOutcome> {
