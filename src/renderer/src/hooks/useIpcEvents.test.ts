@@ -16,6 +16,11 @@ const FUTURE_PANE_KEY = makePaneKey('tab-future', FUTURE_LEAF_ID)
 const STALE_PANE_KEY = makePaneKey('tab-future', STALE_LEAF_ID)
 const ORPHAN_PANE_KEY = makePaneKey('tab-orphan', ORPHAN_LEAF_ID)
 const TAB_1_PANE_KEY = makePaneKey('tab-1', TAB_1_LEAF_ID)
+const WORKTREE_AGENT_STATUS_CONTEXT = {
+  tabId: undefined,
+  worktreeId: 'wt-1',
+  terminalHandle: undefined
+}
 
 function makeTarget(args: { hasXtermClass?: boolean; editorClosest?: boolean }): {
   classList: { contains: (token: string) => boolean }
@@ -2525,6 +2530,7 @@ describe('useIpcEvents agent status snapshot integration', () => {
       enqueueSshCredentialRequest: vi.fn(),
       removeSshCredentialRequest: vi.fn(),
       clearTabPtyId: vi.fn(),
+      updateTabTitle: vi.fn(),
       runtimePaneTitlesByTabId: {},
       terminalLayoutsByTabId: {},
       agentStatusByPaneKey: {},
@@ -2989,7 +2995,8 @@ describe('useIpcEvents agent status snapshot integration', () => {
       FUTURE_PANE_KEY,
       expect.objectContaining({ state: 'working', prompt: 'p', agentType: 'claude' }),
       'Future Tab',
-      { updatedAt: 1_700_000_000_000, stateStartedAt: 1_699_999_999_000 }
+      { updatedAt: 1_700_000_000_000, stateStartedAt: 1_699_999_999_000 },
+      WORKTREE_AGENT_STATUS_CONTEXT
     )
   })
 
@@ -3056,8 +3063,177 @@ describe('useIpcEvents agent status snapshot integration', () => {
         lastAssistantMessage: 'inactive completion'
       }),
       'Inactive Tab',
-      { updatedAt: 1_700_000_000_200, stateStartedAt: 1_699_999_999_100 }
+      { updatedAt: 1_700_000_000_200, stateStartedAt: 1_699_999_999_100 },
+      WORKTREE_AGENT_STATUS_CONTEXT
     )
+  })
+
+  it('does not retain a Cursor spinner terminal title when the hook reports done', async () => {
+    const setAgentStatus = vi.fn()
+    const onSetListenerRef: { current: ((data: AgentStatusSetData) => void) | null } = {
+      current: null
+    }
+
+    const storeState: StoreLike = buildStoreState({
+      setAgentStatus,
+      workspaceSessionReady: true,
+      settings: { terminalFontSize: 13, notifications: { enabled: false } },
+      tabsByWorktree: {
+        'wt-1': [
+          {
+            id: 'tab-future',
+            ptyId: 'pty-1',
+            worktreeId: 'wt-1',
+            title: '\u2839 Cursor Agent'
+          }
+        ]
+      },
+      terminalLayoutsByTabId: {
+        'tab-future': {
+          root: { type: 'leaf', leafId: FUTURE_LEAF_ID },
+          activeLeafId: FUTURE_LEAF_ID,
+          expandedLeafId: null,
+          titlesByLeafId: { [FUTURE_LEAF_ID]: '\u2839 Cursor Agent' }
+        }
+      }
+    })
+
+    stubReactSyncEffect()
+    vi.doMock('../store', () => ({
+      useAppStore: {
+        subscribe: vi.fn(() => () => {}),
+        getState: () => storeState
+      }
+    }))
+    stubAuxiliaryModules()
+    vi.stubGlobal(
+      'window',
+      buildWindowApi({
+        onSet: (cb) => {
+          onSetListenerRef.current = cb
+          return () => {}
+        }
+      })
+    )
+
+    const { useIpcEvents } = await import('./useIpcEvents')
+
+    useIpcEvents()
+    await Promise.resolve()
+
+    if (typeof onSetListenerRef.current !== 'function') {
+      throw new Error('Expected agentStatus.onSet listener to be registered')
+    }
+
+    onSetListenerRef.current({
+      paneKey: FUTURE_PANE_KEY,
+      state: 'done',
+      prompt: 'cursor prompt',
+      agentType: 'cursor',
+      lastAssistantMessage: 'cursor completion',
+      receivedAt: 1_700_000_000_200,
+      stateStartedAt: 1_699_999_999_100
+    })
+
+    expect(setAgentStatus).toHaveBeenCalledTimes(1)
+    expect(setAgentStatus).toHaveBeenCalledWith(
+      FUTURE_PANE_KEY,
+      expect.objectContaining({
+        state: 'done',
+        prompt: 'cursor prompt',
+        agentType: 'cursor',
+        lastAssistantMessage: 'cursor completion'
+      }),
+      'Cursor ready',
+      { updatedAt: 1_700_000_000_200, stateStartedAt: 1_699_999_999_100 },
+      WORKTREE_AGENT_STATUS_CONTEXT
+    )
+  })
+
+  it('does not retain a Codex spinner terminal title when the hook reports done', async () => {
+    const setAgentStatus = vi.fn()
+    const updateTabTitle = vi.fn()
+    const onSetListenerRef: { current: ((data: AgentStatusSetData) => void) | null } = {
+      current: null
+    }
+
+    const storeState: StoreLike = buildStoreState({
+      setAgentStatus,
+      updateTabTitle,
+      workspaceSessionReady: true,
+      settings: { terminalFontSize: 13, notifications: { enabled: false } },
+      tabsByWorktree: {
+        'wt-1': [
+          {
+            id: 'tab-future',
+            ptyId: 'pty-1',
+            worktreeId: 'wt-1',
+            title: '\u280b Codex'
+          }
+        ]
+      },
+      terminalLayoutsByTabId: {
+        'tab-future': {
+          root: { type: 'leaf', leafId: FUTURE_LEAF_ID },
+          activeLeafId: FUTURE_LEAF_ID,
+          expandedLeafId: null,
+          titlesByLeafId: { [FUTURE_LEAF_ID]: '\u280b Codex' }
+        }
+      }
+    })
+
+    stubReactSyncEffect()
+    vi.doMock('../store', () => ({
+      useAppStore: {
+        subscribe: vi.fn(() => () => {}),
+        getState: () => storeState
+      }
+    }))
+    stubAuxiliaryModules()
+    vi.stubGlobal(
+      'window',
+      buildWindowApi({
+        onSet: (cb) => {
+          onSetListenerRef.current = cb
+          return () => {}
+        }
+      })
+    )
+
+    const { useIpcEvents } = await import('./useIpcEvents')
+
+    useIpcEvents()
+    await Promise.resolve()
+
+    if (typeof onSetListenerRef.current !== 'function') {
+      throw new Error('Expected agentStatus.onSet listener to be registered')
+    }
+
+    onSetListenerRef.current({
+      paneKey: FUTURE_PANE_KEY,
+      state: 'done',
+      prompt: 'codex prompt',
+      agentType: 'codex',
+      lastAssistantMessage: 'codex completion',
+      receivedAt: 1_700_000_000_200,
+      stateStartedAt: 1_699_999_999_100
+    })
+
+    expect(setAgentStatus).toHaveBeenCalledTimes(1)
+    expect(setAgentStatus).toHaveBeenCalledWith(
+      FUTURE_PANE_KEY,
+      expect.objectContaining({
+        state: 'done',
+        prompt: 'codex prompt',
+        agentType: 'codex',
+        lastAssistantMessage: 'codex completion'
+      }),
+      'Codex ready',
+      { updatedAt: 1_700_000_000_200, stateStartedAt: 1_699_999_999_100 },
+      WORKTREE_AGENT_STATUS_CONTEXT
+    )
+    expect(updateTabTitle).toHaveBeenCalledTimes(1)
+    expect(updateTabTitle).toHaveBeenCalledWith('tab-future', 'Codex ready')
   })
 
   it('drops nested child done push events when the parent pane agent is still active', async () => {
@@ -3217,7 +3393,8 @@ describe('useIpcEvents agent status snapshot integration', () => {
         agentType: 'openclaude'
       }),
       'Terminal 2',
-      { updatedAt: 1_700_000_000_200, stateStartedAt: 1_699_999_999_100 }
+      { updatedAt: 1_700_000_000_200, stateStartedAt: 1_699_999_999_100 },
+      WORKTREE_AGENT_STATUS_CONTEXT
     )
   })
 
@@ -3291,7 +3468,8 @@ describe('useIpcEvents agent status snapshot integration', () => {
         lastAssistantMessage: 'inactive completion'
       }),
       'Inactive Tab',
-      { updatedAt: 1_700_000_000_200, stateStartedAt: 1_699_999_999_100 }
+      { updatedAt: 1_700_000_000_200, stateStartedAt: 1_699_999_999_100 },
+      WORKTREE_AGENT_STATUS_CONTEXT
     )
   })
 
@@ -3393,7 +3571,8 @@ describe('useIpcEvents agent status snapshot integration', () => {
       FUTURE_PANE_KEY,
       expect.objectContaining({ state: 'working', prompt: 'queued prompt', agentType: 'codex' }),
       'Future Tab',
-      { updatedAt: 1_700_000_000_100, stateStartedAt: 1_699_999_999_100 }
+      { updatedAt: 1_700_000_000_100, stateStartedAt: 1_699_999_999_100 },
+      WORKTREE_AGENT_STATUS_CONTEXT
     )
     expect(setAgentStatus).toHaveBeenNthCalledWith(
       2,
@@ -3405,7 +3584,8 @@ describe('useIpcEvents agent status snapshot integration', () => {
         lastAssistantMessage: 'queued completion'
       }),
       'Future Tab',
-      { updatedAt: 1_700_000_000_200, stateStartedAt: 1_699_999_999_100 }
+      { updatedAt: 1_700_000_000_200, stateStartedAt: 1_699_999_999_100 },
+      WORKTREE_AGENT_STATUS_CONTEXT
     )
   })
 
@@ -3469,7 +3649,8 @@ describe('useIpcEvents agent status snapshot integration', () => {
       FUTURE_PANE_KEY,
       expect.objectContaining({ state: 'working', prompt: 'remote p', agentType: 'codex' }),
       'SSH Tab',
-      { updatedAt: 1_700_000_000_000, stateStartedAt: 1_699_999_999_000 }
+      { updatedAt: 1_700_000_000_000, stateStartedAt: 1_699_999_999_000 },
+      WORKTREE_AGENT_STATUS_CONTEXT
     )
   })
 
@@ -3896,7 +4077,8 @@ describe('useIpcEvents agent status snapshot integration', () => {
       TAB_1_PANE_KEY,
       expect.objectContaining({ state: 'working' }),
       'Terminal 1',
-      { updatedAt: 1_700_000_000_100, stateStartedAt: 1_699_999_999_100 }
+      { updatedAt: 1_700_000_000_100, stateStartedAt: 1_699_999_999_100 },
+      WORKTREE_AGENT_STATUS_CONTEXT
     )
   })
 

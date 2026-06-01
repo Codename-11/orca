@@ -21,7 +21,9 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 function extractCandidateHosts(value: unknown): unknown[] {
-  if (Array.isArray(value)) return value
+  if (Array.isArray(value)) {
+    return value
+  }
   if (isObject(value) && Array.isArray((value as HostConnectionBackupEnvelope).hosts)) {
     return (value as { hosts: unknown[] }).hosts
   }
@@ -29,7 +31,9 @@ function extractCandidateHosts(value: unknown): unknown[] {
 }
 
 function looksLikeTokenlessStoredHost(value: unknown): boolean {
-  if (!isObject(value)) return false
+  if (!isObject(value)) {
+    return false
+  }
   return (
     typeof value.id === 'string' &&
     typeof value.name === 'string' &&
