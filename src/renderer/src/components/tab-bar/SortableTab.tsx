@@ -1,6 +1,7 @@
+/* eslint-disable max-lines */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
-import { X, Minimize2, Columns2, Rows2, Pin, PinOff } from 'lucide-react'
+import { X, Minimize2, Columns2, Rows2, Pin, PinOff, ExternalLink } from 'lucide-react'
 import { ShellIcon } from './shell-icons'
 import { AgentIcon } from '@/lib/agent-catalog'
 import { stripLeadingAgentTitleDecoration } from '@/lib/agent-title-decoration'
@@ -40,6 +41,7 @@ type SortableTabProps = {
   onSetTabColor: (tabId: string, color: string | null) => void
   onTogglePin: () => void
   onToggleExpand: (tabId: string) => void
+  onPopOut?: () => void
   onSplitGroup: (direction: 'left' | 'right' | 'up' | 'down', sourceVisibleTabId: string) => void
   dragData: TabDragItemData
   dropIndicator?: DropIndicator
@@ -75,6 +77,7 @@ export default function SortableTab({
   onSetTabColor,
   onTogglePin,
   onToggleExpand,
+  onPopOut,
   onSplitGroup,
   dragData,
   dropIndicator
@@ -451,6 +454,11 @@ export default function SortableTab({
           <DropdownMenuItem onSelect={() => onSplitGroup('right', tab.id)}>
             <Columns2 className="mr-1.5 size-3.5" />
             Split Right
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={onPopOut} disabled={!onPopOut}>
+            <ExternalLink className="mr-1.5 size-3.5" />
+            Pop Out Terminal
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={onTogglePin}>

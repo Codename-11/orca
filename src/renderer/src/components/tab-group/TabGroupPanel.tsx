@@ -19,6 +19,7 @@ import {
   type HoveredTabInsertion,
   type TabDropZone
 } from './useTabDragSplit'
+import { openDetachedTerminalTab } from '@/lib/detached-terminal-window'
 import { tabGroupBodyAnchorName } from './tab-group-body-anchor'
 
 const EditorPanel = lazy(() => import('../editor/EditorPanel'))
@@ -118,6 +119,9 @@ export default function TabGroupPanel({
       onSetCustomTitle={commands.setTabCustomTitle}
       onSetTabColor={commands.setTabColor}
       onTogglePaneExpand={commands.toggleTerminalPaneExpand}
+      onPopOutTerminalTab={(tabId, title) => {
+        void openDetachedTerminalTab({ tabId, worktreeId, title })
+      }}
       editorFiles={editorItems}
       browserTabs={browserItems}
       activeFileId={

@@ -40,6 +40,7 @@ import RetainedAgentsSyncGate from './components/dashboard/RetainedAgentsSyncGat
 import { ActivityTitlebarControls } from './components/activity/ActivityTitlebarControls'
 import Sidebar from './components/Sidebar'
 import Terminal from './components/Terminal'
+import DetachedTerminalWindowApp from './components/terminal-pane/DetachedTerminalWindowApp'
 import { shutdownBufferCaptures } from './components/terminal-pane/shutdown-buffer-captures'
 import RightSidebar from './components/right-sidebar'
 import { StatusBar } from './components/status-bar/StatusBar'
@@ -93,6 +94,7 @@ import {
   buildWorkspaceSessionPayload,
   shouldPersistWorkspaceSession
 } from './lib/workspace-session'
+import { getDetachedTerminalWindowContext } from './lib/detached-terminal-window'
 import { createSessionWriteSubscriber } from './lib/session-write-subscriber'
 import {
   getStartupErrorFallbackUI,
@@ -261,7 +263,7 @@ function applyRemoteWorkspacePatchStatus(
   })
 }
 
-function App(): React.JSX.Element {
+function WorkspaceApp(): React.JSX.Element {
   const clearUnreadDockBadge = useUnreadDockBadge()
   useRadixBodyPointerEventsRecovery()
   useWebSessionTabsSync()
@@ -2033,6 +2035,14 @@ function App(): React.JSX.Element {
       {isWindows && <WindowControls />}
     </div>
   )
+}
+
+function App(): React.JSX.Element {
+  const detachedTerminalContext = getDetachedTerminalWindowContext()
+  if (detachedTerminalContext) {
+    return <DetachedTerminalWindowApp context={detachedTerminalContext} />
+  }
+  return <WorkspaceApp />
 }
 
 export default App

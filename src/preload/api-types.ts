@@ -661,6 +661,15 @@ export type AppApi = {
   /** Opens a native directory picker and authorizes the selected directory
    *  for Floating Workspace markdown file creation. */
   pickFloatingWorkspaceDirectory: () => Promise<string | null>
+  /** Opens a clean native window rendering exactly one terminal tab. Closing
+   *  the window reattaches the tab to the main workspace instead of killing
+   *  the backing PTY session. */
+  openDetachedTerminalWindow: (args: {
+    tabId: string
+    worktreeId: string
+    worktreePath: string
+    title?: string
+  }) => Promise<{ windowId: string }>
 }
 
 export type PreloadApi = {
@@ -1995,6 +2004,9 @@ export type PreloadApi = {
     onToggleRightSidebar: (callback: () => void) => () => void
     onToggleWorktreePalette: (callback: () => void) => () => void
     onToggleFloatingTerminal: (callback: () => void) => () => void
+    onDetachedTerminalWindowClosed: (
+      callback: (data: { tabId: string; worktreeId: string; windowId: string }) => void
+    ) => () => void
     onTerminalShortcutCaptured: (
       callback: (data: { actionId: KeybindingActionId }) => void
     ) => () => void

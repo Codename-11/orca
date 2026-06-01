@@ -26,6 +26,89 @@ type RegisterAppHandlersOptions = {
   onBeforeRelaunch?: () => void
 }
 
+type DetachedTerminalWindowArgs = {
+  tabId: string
+  worktreeId: string
+  worktreePath: string
+  title?: string
+}
+
+const detachedTerminalWindowByKey = new Map<string, BrowserWindow>()
+
+function encodeDetachedTerminalContext(args: DetachedTerminalWindowArgs): Record<string, string> {
+  return {
+    orcaWindow: 'detached-terminal',
+    tabId: args.tabId,
+    worktreeId: args.worktreeId,
+    worktreePath: args.worktreePath,
+    ...(args.title ? { title: args.title } : {})
+  }
+}
+
+function loadDetachedTerminalWindow(window: BrowserWindow, args: DetachedTerminalWindowArgs): void {
+  const query = encodeDetachedTerminalContext(args)
+  if (is.dev && process.env.ELECTRON_RENDERER_URL) {
+    const url = new URL(process.env.ELECTRON_RENDERER_URL)
+    for (const [key, value] of Object.entries(query)) {
+      url.searchParams.set(key, value)
+    }
+    void window.loadURL(url.toString())
+    return
+  }
+  void window.loadFile(path.join(__dirname, '../renderer/index.html'), { query })
+}
+
+function broadcastDetachedTerminalClosed(args: DetachedTerminalWindowArgs, windowId: string): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (window.isDestroyed()) {
+      continue
+    }
+    window.webContents.send('ui:detachedTerminalWindowClosed', {
+      tabId: args.tabId,
+      worktreeId: args.worktreeId,
+      windowId
+    })
+  }
+}
+
+function openDetachedTerminalWindow(args: DetachedTerminalWindowArgs): { windowId: string } {
+  const key = `${args.worktreeId}:${args.tabId}`
+  const existingWindow = detachedTerminalWindowByKey.get(key)
+  if (existingWindow && !existingWindow.isDestroyed()) {
+    existingWindow.focus()
+    return { windowId: String(existingWindow.id) }
+  }
+
+  const window = new BrowserWindow({
+    width: 1040,
+    height: 720,
+    minWidth: 520,
+    minHeight: 320,
+    title: args.title ? `${args.title} — Orca Terminal` : 'Orca Terminal',
+    show: false,
+    autoHideMenuBar: true,
+    backgroundColor: '#0a0a0a',
+    webPreferences: {
+      preload: path.join(__dirname, '../preload/index.js'),
+      sandbox: true,
+      webviewTag: false
+    }
+  })
+  const windowId = String(window.id)
+  detachedTerminalWindowByKey.set(key, window)
+  window.once('ready-to-show', () => {
+    if (!window.isDestroyed()) {
+      window.show()
+    }
+  })
+  window.once('closed', () => {
+    detachedTerminalWindowByKey.delete(key)
+    broadcastDetachedTerminalClosed(args, windowId)
+  })
+  loadDetachedTerminalWindow(window, args)
+  return { windowId }
+}
+
 async function pickFloatingMarkdownDocument(
   event: IpcMainInvokeEvent
 ): Promise<MarkdownDocument | null> {
@@ -148,6 +231,10 @@ function readKeyboardInputSourceId(): Promise<string> {
 
 export function registerAppHandlers(store: Store, options: RegisterAppHandlersOptions = {}): void {
   ipcMain.handle('app:getFeatureWallAssetBaseUrl', (): string => getFeatureWallAssetBaseUrl())
+
+  ipcMain.handle('app:openDetachedTerminalWindow', (_event, args: DetachedTerminalWindowArgs) =>
+    openDetachedTerminalWindow(args)
+  )
 
   ipcMain.handle('app:getIdentity', (): AppIdentity => {
     const identity = getDevInstanceIdentity(is.dev)

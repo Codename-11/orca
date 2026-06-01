@@ -195,6 +195,12 @@ export function worktreeUsesRemoteConnection(
   return Boolean(repo?.connectionId)
 }
 
+export type DetachedTerminalTab = {
+  tabId: string
+  worktreeId: string
+  windowId: string
+}
+
 export type TerminalSlice = {
   tabsByWorktree: Record<string, TerminalTab[]>
   activeTabId: string | null
@@ -202,6 +208,10 @@ export type TerminalSlice = {
    *  the user returns to the same tab they left, not always tabs[0]. */
   activeTabIdByWorktree: Record<string, string | null>
   ptyIdsByTabId: Record<string, string[]>
+  /** Terminal tabs currently rendered in detached BrowserWindows. The tab stays
+   *  in tabsByWorktree so close/rejoin can move only the renderer surface and
+   *  preserve the backing PTY session. */
+  detachedTerminalTabsById: Record<string, DetachedTerminalTab>
   /** Live pane titles keyed by tabId then paneId. Unlike the legacy tab title,
    *  this preserves split-pane agent status per pane while TerminalPane is mounted. */
   runtimePaneTitlesByTabId: Record<string, Record<number, string>>
@@ -348,6 +358,8 @@ export type TerminalSlice = {
   setTabColor: (tabId: string, color: string | null) => void
   updateTabPtyId: (tabId: string, ptyId: string) => void
   clearTabPtyId: (tabId: string, ptyId?: string) => void
+  detachTerminalTab: (args: DetachedTerminalTab) => void
+  reattachTerminalTab: (tabId: string) => void
   shutdownWorktreeTerminals: (
     worktreeId: string,
     opts?: { keepIdentifiers?: boolean }
@@ -418,6 +430,7 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
   activeTabId: null,
   activeTabIdByWorktree: {},
   ptyIdsByTabId: {},
+  detachedTerminalTabsById: {},
   runtimePaneTitlesByTabId: {},
   unreadTerminalTabs: {},
   unreadTerminalPanes: {},
@@ -798,6 +811,8 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
       delete nextPendingSetupSplitByTabId[tabId]
       const nextPendingIssueCommandSplitByTabId = { ...s.pendingIssueCommandSplitByTabId }
       delete nextPendingIssueCommandSplitByTabId[tabId]
+      const nextDetachedTerminalTabsById = { ...s.detachedTerminalTabsById }
+      delete nextDetachedTerminalTabsById[tabId]
       const nextCacheTimer = { ...s.cacheTimerByKey }
       // Why: cache timer keys are `${tabId}:${leafId}` composites. Remove all
       // entries for the closing tab, regardless of how many panes it had.
@@ -866,6 +881,7 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
         pendingStartupByTabId: nextPendingStartupByTabId,
         pendingSetupSplitByTabId: nextPendingSetupSplitByTabId,
         pendingIssueCommandSplitByTabId: nextPendingIssueCommandSplitByTabId,
+        detachedTerminalTabsById: nextDetachedTerminalTabsById,
         cacheTimerByKey: nextCacheTimer,
         tabBarOrderByWorktree: nextTabBarOrderByWorktree,
         pendingSnapshotByPtyId: nextSnapshots,
@@ -1464,6 +1480,48 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
     ) {
       get().bumpWorktreeActivity(worktreeId)
     }
+  },
+
+  detachTerminalTab: ({ tabId, worktreeId, windowId }) => {
+    set((s) => {
+      const worktreeTabs = s.tabsByWorktree[worktreeId] ?? []
+      const tabExists = worktreeTabs.some((tab) => tab.id === tabId)
+      if (!tabExists) {
+        return {}
+      }
+      const remainingAttachedTabs = worktreeTabs.filter(
+        (tab) => tab.id !== tabId && !s.detachedTerminalTabsById[tab.id]
+      )
+      const nextActiveTabId = remainingAttachedTabs[0]?.id ?? null
+      const shouldMoveActiveTab =
+        s.activeTabId === tabId || s.activeTabIdByWorktree[worktreeId] === tabId
+      return {
+        detachedTerminalTabsById: {
+          ...s.detachedTerminalTabsById,
+          [tabId]: { tabId, worktreeId, windowId }
+        },
+        ...(shouldMoveActiveTab
+          ? {
+              activeTabId: s.activeTabId === tabId ? nextActiveTabId : s.activeTabId,
+              activeTabIdByWorktree: {
+                ...s.activeTabIdByWorktree,
+                [worktreeId]: nextActiveTabId
+              }
+            }
+          : {})
+      }
+    })
+  },
+
+  reattachTerminalTab: (tabId) => {
+    set((s) => {
+      if (!s.detachedTerminalTabsById[tabId]) {
+        return {}
+      }
+      const next = { ...s.detachedTerminalTabsById }
+      delete next[tabId]
+      return { detachedTerminalTabsById: next }
+    })
   },
 
   shutdownWorktreeTerminals: async (worktreeId, opts) => {

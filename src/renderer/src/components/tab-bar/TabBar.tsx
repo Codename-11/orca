@@ -84,6 +84,7 @@ type TabBarProps = {
   onSetCustomTitle: (tabId: string, title: string | null) => void
   onSetTabColor: (tabId: string, color: string | null) => void
   onTogglePaneExpand: (tabId: string) => void
+  onPopOutTerminalTab?: (tabId: string, title?: string) => void
   editorFiles?: (OpenFile & { tabId?: string })[]
   browserTabs?: (BrowserTabState & { tabId?: string })[]
   activeFileId?: string | null
@@ -173,6 +174,7 @@ function TabBarInner({
   onSetCustomTitle,
   onSetTabColor,
   onTogglePaneExpand,
+  onPopOutTerminalTab,
   editorFiles,
   browserTabs,
   activeFileId,
@@ -767,6 +769,7 @@ function TabBarInner({
                   onSetTabColor={onSetTabColor}
                   onTogglePin={() => togglePinned(item)}
                   onToggleExpand={onTogglePaneExpand}
+                  onPopOut={() => onPopOutTerminalTab?.(item.id, terminalTab.title)}
                   onSplitGroup={(direction, sourceVisibleTabId) =>
                     onCreateSplitGroup?.(direction, sourceVisibleTabId)
                   }

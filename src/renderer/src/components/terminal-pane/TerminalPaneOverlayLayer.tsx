@@ -141,14 +141,16 @@ const TerminalPaneOverlayLayer = memo(function TerminalPaneOverlayLayer({
   isWorktreeActive: boolean
   activityTerminalPortals?: ActivityTerminalPortalTarget[]
 }): React.JSX.Element | null {
-  const { terminalTabs, unifiedTabs, groups, activeGroupId } = useAppStore(
-    useShallow((state) => ({
-      terminalTabs: state.tabsByWorktree[worktreeId] ?? EMPTY_TERMINAL_TABS,
-      unifiedTabs: state.unifiedTabsByWorktree[worktreeId] ?? EMPTY_UNIFIED_TABS,
-      groups: state.groupsByWorktree[worktreeId] ?? EMPTY_GROUPS,
-      activeGroupId: state.activeGroupIdByWorktree[worktreeId]
-    }))
-  )
+  const { terminalTabs, unifiedTabs, groups, activeGroupId, detachedTerminalTabsById } =
+    useAppStore(
+      useShallow((state) => ({
+        terminalTabs: state.tabsByWorktree[worktreeId] ?? EMPTY_TERMINAL_TABS,
+        unifiedTabs: state.unifiedTabsByWorktree[worktreeId] ?? EMPTY_UNIFIED_TABS,
+        groups: state.groupsByWorktree[worktreeId] ?? EMPTY_GROUPS,
+        activeGroupId: state.activeGroupIdByWorktree[worktreeId],
+        detachedTerminalTabsById: state.detachedTerminalTabsById
+      }))
+    )
   const focusGroup = useAppStore((state) => state.focusGroup)
   const consumeSuppressedPtyExit = useAppStore((state) => state.consumeSuppressedPtyExit)
   const closeTab = useAppStore((state) => state.closeTab)
@@ -188,7 +190,7 @@ const TerminalPaneOverlayLayer = memo(function TerminalPaneOverlayLayer({
   const assignments = useMemo(() => {
     const entries = new Map<string, TerminalOverlayAssignment>()
     for (const tab of unifiedTabs) {
-      if (tab.contentType !== 'terminal') {
+      if (tab.contentType !== 'terminal' || detachedTerminalTabsById[tab.entityId] !== undefined) {
         continue
       }
       entries.set(tab.entityId, {
@@ -197,7 +199,7 @@ const TerminalPaneOverlayLayer = memo(function TerminalPaneOverlayLayer({
       })
     }
     return entries
-  }, [groupActiveTabById, unifiedTabs])
+  }, [detachedTerminalTabsById, groupActiveTabById, unifiedTabs])
 
   if (!worktreePath) {
     return null
@@ -205,32 +207,34 @@ const TerminalPaneOverlayLayer = memo(function TerminalPaneOverlayLayer({
 
   return (
     <>
-      {terminalTabs.map((terminalTab) => {
-        const assignment = assignments.get(terminalTab.id)
-        const isVisible = Boolean(isWorktreeActive && assignment && assignment.isActiveInGroup)
-        const isActive = Boolean(isVisible && assignment && assignment.groupId === activeGroupId)
-        const activityTerminalPortal = findActivityTerminalPortal(activityTerminalPortals, {
-          worktreeId,
-          tabId: terminalTab.id
-        })
-        return (
-          <TerminalOverlaySlot
-            key={terminalTab.id}
-            terminalTabId={terminalTab.id}
-            terminalGeneration={terminalTab.generation}
-            worktreeId={worktreeId}
-            worktreePath={worktreePath}
-            groupId={assignment?.groupId}
-            isVisible={isVisible}
-            isActive={isActive}
-            activityTerminalPortal={activityTerminalPortal}
-            onFocusOwningGroup={focusOwningGroup}
-            consumeSuppressedPtyExit={consumeSuppressedPtyExit}
-            closeTab={closeTab}
-            leaveWorktreeIfEmpty={leaveWorktreeIfEmpty}
-          />
-        )
-      })}
+      {terminalTabs
+        .filter((terminalTab) => detachedTerminalTabsById[terminalTab.id] === undefined)
+        .map((terminalTab) => {
+          const assignment = assignments.get(terminalTab.id)
+          const isVisible = Boolean(isWorktreeActive && assignment && assignment.isActiveInGroup)
+          const isActive = Boolean(isVisible && assignment && assignment.groupId === activeGroupId)
+          const activityTerminalPortal = findActivityTerminalPortal(activityTerminalPortals, {
+            worktreeId,
+            tabId: terminalTab.id
+          })
+          return (
+            <TerminalOverlaySlot
+              key={terminalTab.id}
+              terminalTabId={terminalTab.id}
+              terminalGeneration={terminalTab.generation}
+              worktreeId={worktreeId}
+              worktreePath={worktreePath}
+              groupId={assignment?.groupId}
+              isVisible={isVisible}
+              isActive={isActive}
+              activityTerminalPortal={activityTerminalPortal}
+              onFocusOwningGroup={focusOwningGroup}
+              consumeSuppressedPtyExit={consumeSuppressedPtyExit}
+              closeTab={closeTab}
+              leaveWorktreeIfEmpty={leaveWorktreeIfEmpty}
+            />
+          )
+        })}
     </>
   )
 })

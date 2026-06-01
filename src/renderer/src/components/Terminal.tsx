@@ -88,6 +88,7 @@ import {
 } from '../../../shared/keybindings'
 import { matchesRecentTabSwitcherChord } from '../../../shared/window-shortcut-policy'
 import { showTerminalShortcutCaptureNotification } from '@/lib/terminal-shortcut-capture-notification'
+import { openDetachedTerminalTab } from '@/lib/detached-terminal-window'
 import { openTabBarEntry, type TabCreateEntryArgs } from './tab-bar/tab-create-entry-action'
 
 const EditorPanel = lazy(() => import('./editor/EditorPanel'))
@@ -185,6 +186,7 @@ function Terminal(): React.JSX.Element | null {
   const renderedActiveWorktreeId = activeWorktreeId
   const activeView = useAppStore((s) => s.activeView)
   const tabsByWorktree = useAppStore((s) => s.tabsByWorktree)
+  const detachedTerminalTabsById = useAppStore((s) => s.detachedTerminalTabsById)
   const activeTabId = useAppStore((s) => s.activeTabId)
   const createTab = useAppStore((s) => s.createTab)
   const closeTab = useAppStore((s) => s.closeTab)
@@ -244,17 +246,20 @@ function Terminal(): React.JSX.Element | null {
   )
 
   const tabs = useMemo(
-    () => (renderedActiveWorktreeId ? (tabsByWorktree[renderedActiveWorktreeId] ?? []) : []),
-    [renderedActiveWorktreeId, tabsByWorktree]
+    () =>
+      renderedActiveWorktreeId
+        ? (tabsByWorktree[renderedActiveWorktreeId] ?? []).filter(
+            (tab) => detachedTerminalTabsById[tab.id] === undefined
+          )
+        : [],
+    [detachedTerminalTabsById, renderedActiveWorktreeId, tabsByWorktree]
   )
 
   // Why: the TabBar is rendered into the titlebar via a portal so tabs share
   // the same row as the "Orca" title. The target element is created by App.tsx.
-  // Uses useEffect because the DOM element doesn't exist during the render phase.
-  const [titlebarTabsTarget, setTitlebarTabsTarget] = useState<HTMLElement | null>(null)
-  useEffect(() => {
-    setTitlebarTabsTarget(document.getElementById('titlebar-tabs'))
-  }, [])
+  const [titlebarTabsTarget] = useState<HTMLElement | null>(() =>
+    document.getElementById('titlebar-tabs')
+  )
 
   useEffect(() => {
     if (!activeWorktreeId) {
@@ -1197,6 +1202,16 @@ function Terminal(): React.JSX.Element | null {
     [setActiveTab]
   )
 
+  const handlePopOutTerminalTab = useCallback(
+    (tabId: string, title?: string) => {
+      if (!activeWorktreeId) {
+        return
+      }
+      void openDetachedTerminalTab({ tabId, worktreeId: activeWorktreeId, title })
+    },
+    [activeWorktreeId]
+  )
+
   const handleActivateBrowserTab = useCallback(
     (tabId: string) => {
       if (activeWorktreeId && isWebRuntimeSessionActive(activeRuntimeEnvironmentId)) {
@@ -1461,6 +1476,14 @@ function Terminal(): React.JSX.Element | null {
     terminalShortcutPolicy
   ])
 
+  // Listen for detached terminal window closes. A detached window close is a
+  // rejoin action by default; it must not close or kill the backing PTY.
+  useEffect(() => {
+    return window.api.ui.onDetachedTerminalWindowClosed(({ tabId }) => {
+      useAppStore.getState().reattachTerminalTab(tabId)
+    })
+  }, [])
+
   // Warn on window close if there are unsaved editor files
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent): void => {
@@ -1606,6 +1629,7 @@ function Terminal(): React.JSX.Element | null {
             onSetTabColor={setTabColor}
             expandedPaneByTabId={expandedPaneByTabId}
             onTogglePaneExpand={handleTogglePaneExpand}
+            onPopOutTerminalTab={handlePopOutTerminalTab}
             editorFiles={worktreeFiles}
             browserTabs={worktreeBrowserTabs}
             activeFileId={activeFileId}
@@ -1723,43 +1747,47 @@ function Terminal(): React.JSX.Element | null {
                     aria-hidden={!isVisible}
                   >
                     <CodexRestartChip worktreeId={worktree.id} />
-                    {(tabsByWorktree[worktree.id] ?? []).map((tab) => {
-                      const activityTerminalPortal = findActivityTerminalPortal(
-                        activityTerminalPortals,
-                        { worktreeId: worktree.id, tabId: tab.id }
-                      )
-                      const isActivityPortalTab = activityTerminalPortal !== null
-                      const isActiveTerminalTab =
-                        isVisible && tab.id === activeTabId && activeTabType === 'terminal'
-                      const terminalPane = (
-                        <TerminalPane
-                          key={`${tab.id}-${tab.generation ?? 0}`}
-                          tabId={tab.id}
-                          worktreeId={worktree.id}
-                          cwd={worktree.path}
-                          isActive={isActiveTerminalTab || activityTerminalPortal?.active === true}
-                          // Why: the activity page hosts this existing pane via
-                          // portal while the workspace surface remains hidden.
-                          // Keeping `isVisible` true for the portaled tab lets
-                          // xterm fit and stream foreground output in-place.
-                          isVisible={isActiveTerminalTab || isActivityPortalTab}
-                          // Why: when portaled to Activity for a specific agent
-                          // pane, isolate that leaf so split siblings stay
-                          // hidden. Workspace renders pass null → no override.
-                          isolatedPaneKey={activityTerminalPortal?.paneKey ?? null}
-                          onPtyExit={(ptyId) => handlePtyExit(tab.id, ptyId)}
-                          onCloseTab={() => handleCloseTab(tab.id)}
-                        />
-                      )
-                      if (activityTerminalPortal) {
-                        return createPortal(
-                          terminalPane,
-                          activityTerminalPortal.target,
-                          `activity-terminal-${tab.id}`
+                    {(tabsByWorktree[worktree.id] ?? [])
+                      .filter((tab) => detachedTerminalTabsById[tab.id] === undefined)
+                      .map((tab) => {
+                        const activityTerminalPortal = findActivityTerminalPortal(
+                          activityTerminalPortals,
+                          { worktreeId: worktree.id, tabId: tab.id }
                         )
-                      }
-                      return terminalPane
-                    })}
+                        const isActivityPortalTab = activityTerminalPortal !== null
+                        const isActiveTerminalTab =
+                          isVisible && tab.id === activeTabId && activeTabType === 'terminal'
+                        const terminalPane = (
+                          <TerminalPane
+                            key={`${tab.id}-${tab.generation ?? 0}`}
+                            tabId={tab.id}
+                            worktreeId={worktree.id}
+                            cwd={worktree.path}
+                            isActive={
+                              isActiveTerminalTab || activityTerminalPortal?.active === true
+                            }
+                            // Why: the activity page hosts this existing pane via
+                            // portal while the workspace surface remains hidden.
+                            // Keeping `isVisible` true for the portaled tab lets
+                            // xterm fit and stream foreground output in-place.
+                            isVisible={isActiveTerminalTab || isActivityPortalTab}
+                            // Why: when portaled to Activity for a specific agent
+                            // pane, isolate that leaf so split siblings stay
+                            // hidden. Workspace renders pass null → no override.
+                            isolatedPaneKey={activityTerminalPortal?.paneKey ?? null}
+                            onPtyExit={(ptyId) => handlePtyExit(tab.id, ptyId)}
+                            onCloseTab={() => handleCloseTab(tab.id)}
+                          />
+                        )
+                        if (activityTerminalPortal) {
+                          return createPortal(
+                            terminalPane,
+                            activityTerminalPortal.target,
+                            `activity-terminal-${tab.id}`
+                          )
+                        }
+                        return terminalPane
+                      })}
                   </div>
                 )
               })}

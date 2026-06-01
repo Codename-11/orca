@@ -434,7 +434,13 @@ const api = {
     pickFloatingMarkdownDocument: (): Promise<MarkdownDocument | null> =>
       ipcRenderer.invoke('app:pickFloatingMarkdownDocument'),
     pickFloatingWorkspaceDirectory: (): Promise<string | null> =>
-      ipcRenderer.invoke('app:pickFloatingWorkspaceDirectory')
+      ipcRenderer.invoke('app:pickFloatingWorkspaceDirectory'),
+    openDetachedTerminalWindow: (args: {
+      tabId: string
+      worktreeId: string
+      worktreePath: string
+      title?: string
+    }): Promise<{ windowId: string }> => ipcRenderer.invoke('app:openDetachedTerminalWindow', args)
   },
 
   wsl: {
@@ -2436,6 +2442,16 @@ const api = {
       const listener = (_event: Electron.IpcRendererEvent) => callback()
       ipcRenderer.on('ui:toggleFloatingTerminal', listener)
       return () => ipcRenderer.removeListener('ui:toggleFloatingTerminal', listener)
+    },
+    onDetachedTerminalWindowClosed: (
+      callback: (data: { tabId: string; worktreeId: string; windowId: string }) => void
+    ): (() => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        data: { tabId: string; worktreeId: string; windowId: string }
+      ) => callback(data)
+      ipcRenderer.on('ui:detachedTerminalWindowClosed', listener)
+      return () => ipcRenderer.removeListener('ui:detachedTerminalWindowClosed', listener)
     },
     onTerminalShortcutCaptured: (
       callback: (data: { actionId: KeybindingActionId }) => void

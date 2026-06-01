@@ -6,6 +6,22 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-06-01 — Added terminal tab pop-out/rejoin windows
+
+Implemented terminal-only detached windows for Orca workspace tabs. Terminal tab menus now expose **Pop Out Terminal**, the main workspace hides detached terminal tabs without killing their PTYs, and detached window close broadcasts a rejoin event so the tab returns to the main window by default. The main process reuses an existing detached window per terminal tab, routes PTY data/exit/serializer/clear-buffer events to every renderer window, and the detached renderer boots into a clean terminal-only surface from query-string context. Added detached tab state and focused store coverage for detach, close cleanup, reattach, and active-tab focus fallback.
+
+Verification:
+
+- `pnpm vitest run --config config/vitest.config.ts src/renderer/src/store/slices/terminals-detached.test.ts` → 4 tests passed.
+- `pnpm vitest run --config config/vitest.config.ts src/renderer/src/web/web-preload-api.test.ts src/main/ipc/pty.test.ts src/renderer/src/components/tab-group/useTabGroupWorkspaceModel.focus.test.ts src/renderer/src/store/slices/terminals-detached.test.ts` → 155 tests passed.
+- `pnpm run typecheck` → passed. Node engine warning only (`wanted node 24`, local `v25.6.0`).
+- `pnpm exec oxlint src/main/ipc/app.ts src/main/ipc/pty.ts src/main/ipc/pty.test.ts src/preload/api-types.ts src/preload/index.ts src/renderer/src/App.tsx src/renderer/src/components/Terminal.tsx src/renderer/src/components/tab-bar/TabBar.tsx src/renderer/src/components/tab-bar/SortableTab.tsx src/renderer/src/components/tab-group/TabGroupPanel.tsx src/renderer/src/components/tab-group/useTabGroupWorkspaceModel.ts src/renderer/src/components/terminal-pane/DetachedTerminalWindowApp.tsx src/renderer/src/components/terminal-pane/TerminalPaneOverlayLayer.tsx src/renderer/src/lib/detached-terminal-window.ts src/renderer/src/store/slices/terminals.ts src/renderer/src/store/slices/terminals-detached.test.ts` → 0 warnings / 0 errors.
+- `pnpm exec oxlint src/renderer/src/web/web-preload-api.ts` → 0 warnings / 0 errors.
+- `pnpm exec oxfmt --check src/renderer/src/web/web-preload-api.ts` → passed.
+- `pnpm test` → 1296 files passed / 13,212 tests passed / 53 skipped. Node engine warning only (`wanted node 24`, local `v25.6.0`).
+
+---
+
 ## 2026-06-01 — Fixed Axiom release workflow node-gyp install path
 
 After merging the `v1.4.36` remediation PR, the post-merge Axiom Upstream Sync Release resume run failed during Linux dependency install because pnpm's bundled `node-gyp` exposed `gyp_main.py` without execute permission while rebuilding `node-pty`. Added the same external `node-gyp@11.5.0` override already used by `pr.yml` before the release workflow's sync-job install step so the release resume path uses the working CI native-build setup.

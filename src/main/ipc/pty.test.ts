@@ -17,6 +17,7 @@ const {
   writeFileSyncMock,
   chmodSyncMock,
   getPathMock,
+  browserWindowGetAllWindowsMock,
   spawnMock,
   openCodeBuildPtyEnvMock,
   openCodeClearPtyMock,
@@ -47,6 +48,7 @@ const {
   writeFileSyncMock: vi.fn(),
   chmodSyncMock: vi.fn(),
   getPathMock: vi.fn(),
+  browserWindowGetAllWindowsMock: vi.fn(() => []),
   spawnMock: vi.fn(),
   openCodeBuildPtyEnvMock: vi.fn(),
   isPwshAvailableMock: vi.fn(),
@@ -70,6 +72,9 @@ vi.mock('electron', () => ({
   app: {
     isPackaged: true,
     getPath: getPathMock
+  },
+  BrowserWindow: {
+    getAllWindows: browserWindowGetAllWindowsMock
   },
   nativeTheme: {
     shouldUseDarkColors: true
@@ -223,6 +228,8 @@ describe('registerPtyHandlers', () => {
     writeFileSyncMock.mockReset()
     chmodSyncMock.mockReset()
     getPathMock.mockReset()
+    browserWindowGetAllWindowsMock.mockReset()
+    browserWindowGetAllWindowsMock.mockReturnValue([])
     spawnMock.mockReset()
     openCodeBuildPtyEnvMock.mockReset()
     openCodeClearPtyMock.mockReset()

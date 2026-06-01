@@ -5,7 +5,7 @@ boundary. Splitting it by line count would scatter tightly coupled terminal
 process behavior across files without a cleaner ownership seam. */
 import { join, delimiter } from 'path'
 import { randomUUID } from 'crypto'
-import { type BrowserWindow, type WebContents, ipcMain, app } from 'electron'
+import { BrowserWindow, type WebContents, ipcMain, app } from 'electron'
 export { getBashShellReadyRcfileContent } from '../providers/local-pty-shell-ready'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
 import type { Store } from '../persistence'
@@ -839,6 +839,26 @@ let localExitUnsub: (() => void) | null = null
 let didFinishLoadHandler: (() => void) | null = null
 let didFinishLoadWebContents: WebContents | null = null
 
+function sendPtyEventToRendererWindows(
+  fallbackWindow: BrowserWindow,
+  channel: string,
+  payload: unknown
+): void {
+  const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed())
+  const targets = windows.length > 0 ? windows : [fallbackWindow]
+  for (const window of targets) {
+    if (window.isDestroyed()) {
+      continue
+    }
+    window.webContents.send(channel, payload)
+  }
+}
+
+function makeDataSender(mainWindow: BrowserWindow): (payload: unknown) => void {
+  return (payload) => sendPtyEventToRendererWindows(mainWindow, 'pty:data', payload)
+}
+
+// ─── IPC Registration
 // Why: the "Restart daemon" path needs to re-bind provider→renderer listeners
 // against the freshly-created adapter after replaceDaemonProvider swaps the
 // module-level `localProvider` pointer. Without this, old subscribers stay
@@ -1036,6 +1056,8 @@ export function registerPtyHandlers(
     return payload
   }
 
+  const sendPtyData = makeDataSender(mainWindow)
+
   function appendPendingPtyData(
     existing: PendingPtyData | undefined,
     data: string,
@@ -1101,7 +1123,7 @@ export function registerPtyHandlers(
         }
         pendingData.set(id, nextPending)
       }
-      mainWindow.webContents.send('pty:data', makePtyDataPayload(id, chunk, pending.startSeq))
+      sendPtyData(makePtyDataPayload(id, chunk, pending.startSeq))
       writes++
     }
     return writes
@@ -1209,7 +1231,7 @@ export function registerPtyHandlers(
         clearFlushTimerIfIdle()
         // Why: agent TUIs redraw small prompt regions after every keystroke.
         // Waiting for the throughput batch timer adds visible input latency.
-        mainWindow.webContents.send('pty:data', {
+        sendPtyData({
           id: payload.id,
           data: nextData,
           ...(typeof pending.startSeq === 'number'
@@ -1236,10 +1258,7 @@ export function registerPtyHandlers(
         // tears down the terminal on pty:exit before the batch timer fires.
         const remaining = pendingData.get(payload.id)
         if (remaining) {
-          mainWindow.webContents.send(
-            'pty:data',
-            makePtyDataPayload(payload.id, remaining.data, remaining.startSeq)
-          )
+          sendPtyData(makePtyDataPayload(payload.id, remaining.data, remaining.startSeq))
           pendingData.delete(payload.id)
         }
         lastInputAtByPty.delete(payload.id)
@@ -1247,7 +1266,7 @@ export function registerPtyHandlers(
         if (lastRendererInputPtyId === payload.id) {
           lastRendererInputPtyId = null
         }
-        mainWindow.webContents.send('pty:exit', payload)
+        sendPtyEventToRendererWindows(mainWindow, 'pty:exit', payload)
       }
     })
   }
@@ -1337,7 +1356,7 @@ export function registerPtyHandlers(
       if (opts) {
         payload.opts = opts
       }
-      mainWindow.webContents.send('pty:serializeBuffer:request', payload)
+      sendPtyEventToRendererWindows(mainWindow, 'pty:serializeBuffer:request', payload)
     })
   }
 
@@ -1580,7 +1599,7 @@ export function registerPtyHandlers(
       // Why: desktop xterm owns local scrollback, while daemon/SSH providers
       // own their own retained buffers. Clear both surfaces so mobile
       // resubscribe snapshots do not resurrect cleared history.
-      mainWindow.webContents.send('pty:clearBuffer:request', { ptyId })
+      sendPtyEventToRendererWindows(mainWindow, 'pty:clearBuffer:request', { ptyId })
       try {
         await getProviderForPty(ptyId).clearBuffer(ptyId)
       } catch {

@@ -32,6 +32,7 @@ const EMPTY_GROUPS: readonly TabGroup[] = []
 const EMPTY_UNIFIED_TABS: readonly Tab[] = []
 const EMPTY_BROWSER_TABS: readonly BrowserTabState[] = []
 const EMPTY_TERMINAL_TABS: readonly TerminalTab[] = []
+const EMPTY_DETACHED_TERMINAL_TABS_BY_ID: Record<string, unknown> = {}
 
 type TerminalTabItem = TerminalTab & { unifiedTabId: string }
 
@@ -52,6 +53,8 @@ export function useTabGroupWorkspaceModel({
       groups: state.groupsByWorktree[worktreeId] ?? EMPTY_GROUPS,
       unifiedTabs: state.unifiedTabsByWorktree[worktreeId] ?? EMPTY_UNIFIED_TABS,
       terminalTabs: state.tabsByWorktree[worktreeId] ?? EMPTY_TERMINAL_TABS,
+      detachedTerminalTabsById:
+        state.detachedTerminalTabsById ?? EMPTY_DETACHED_TERMINAL_TABS_BY_ID,
       openFiles: state.openFiles,
       browserTabs: state.browserTabsByWorktree[worktreeId] ?? EMPTY_BROWSER_TABS,
       expandedPaneByTabId: state.expandedPaneByTabId,
@@ -93,8 +96,14 @@ export function useTabGroupWorkspaceModel({
     [groupId, worktreeState.groups]
   )
   const groupTabs = useMemo(
-    () => worktreeState.unifiedTabs.filter((item) => item.groupId === groupId),
-    [groupId, worktreeState.unifiedTabs]
+    () =>
+      worktreeState.unifiedTabs.filter(
+        (item) =>
+          item.groupId === groupId &&
+          (item.contentType !== 'terminal' ||
+            worktreeState.detachedTerminalTabsById[item.entityId] === undefined)
+      ),
+    [groupId, worktreeState.detachedTerminalTabsById, worktreeState.unifiedTabs]
   )
   const activeItemId = group?.activeTabId ?? null
   const activeTab = groupTabs.find((item) => item.id === activeItemId) ?? null

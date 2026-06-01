@@ -406,6 +406,8 @@ function createWebPreloadApi(): Partial<PreloadApi> {
       setUnreadDockBadgeCount: () => Promise.resolve(),
       getFloatingTerminalCwd: () => Promise.resolve(''),
       getFloatingMarkdownDirectory: () => Promise.resolve(''),
+      openDetachedTerminalWindow: () =>
+        Promise.reject(new Error('Detached terminal windows are unavailable in the web client.')),
       pickFloatingMarkdownDocument: () => Promise.resolve(null),
       pickFloatingWorkspaceDirectory: () => Promise.resolve(null)
     },
@@ -1713,6 +1715,7 @@ function createWebUiApi(): NonNullable<Partial<PreloadApi>['ui']> {
     onToggleWorktreePalette: () => noopUnsubscribe,
     onToggleFloatingTerminal: () => noopUnsubscribe,
     onTerminalShortcutCaptured: () => noopUnsubscribe,
+    onDetachedTerminalWindowClosed: () => noopUnsubscribe,
     onOpenQuickOpen: () => noopUnsubscribe,
     onOpenTasks: () => noopUnsubscribe,
     onOpenNewWorkspace: () => noopUnsubscribe,
