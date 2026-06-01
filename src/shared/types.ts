@@ -134,7 +134,7 @@ export type ProjectGroup = {
 export type NestedRepoScanOptions = {
   maxDepth?: number
   maxRepos?: number
-  timeoutMs?: number
+  timeoutMs?: number | null
 }
 
 export type NestedRepoCandidate = {
@@ -149,8 +149,11 @@ export type NestedRepoScanResult = {
   repos: NestedRepoCandidate[]
   truncated: boolean
   timedOut: boolean
+  stopped: boolean
   durationMs: number
   maxDepth: number
+  maxRepos: number
+  timeoutMs: number | null
 }
 
 export type ProjectGroupImportMode = 'group' | 'separate'
@@ -879,12 +882,14 @@ export type PRCheckStep = {
 }
 
 export type PRCheckJob = {
+  id: number | null
   name: string
   status: string | null
   conclusion: string | null
   startedAt: string | null
   completedAt: string | null
   url: string | null
+  logTail: string | null
   steps: PRCheckStep[]
 }
 
@@ -2450,8 +2455,6 @@ export type WorktreeCardProperty =
 
 export type AgentActivityDisplayMode = 'compact' | 'full'
 
-export type WorkspaceBoardColumnLayout = 'full' | 'fit'
-
 export type StatusBarItem =
   | 'claude'
   | 'codex'
@@ -2512,7 +2515,6 @@ export type PersistedUIState = {
   agentActivityDisplayMode?: AgentActivityDisplayMode
   workspaceStatuses?: WorkspaceStatusDefinition[]
   workspaceBoardOpacity?: number
-  workspaceBoardColumnLayout?: WorkspaceBoardColumnLayout
   workspaceBoardColumnWidth?: number
   /** One-shot migration flag for a short-lived build that persisted the
    *  default workspace statuses in reverse workflow order. Once stamped,
