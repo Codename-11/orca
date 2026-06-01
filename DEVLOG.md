@@ -8,7 +8,7 @@ merges into `axiom/deploy`.
 
 ## 2026-06-01 — Remediated upstream v1.4.36 bot PR
 
-Resolved the agent-remediation merge for upstream `v1.4.36` on `bot/upstream-sync-axiom-v1.4.36-axiom.1` targeting `axiom/deploy`; no direct deploy-branch push was made. The conflict resolution keeps the fork semver at `1.4.36-axiom.1`, preserves Axiom side-by-side app/updater identity, profile portability, and Forge provider/task-registry support, while accepting upstream mobile/provider and runtime changes. `mobile/app/index.tsx` keeps Forge status in the mobile home provider probe, `mobile/app/h/[hostId]/tasks.tsx` keeps Forge-specific labels/context/filter/create behavior while adopting upstream stricter block formatting, and `package.json` uses the intended fork version. Protected deletion review found no deleted files and no protected Axiom file removals. After the first push, Mobile Checks exposed upstream mobile lint drift in new task-settings/import/export helpers; added a scoped CI-only follow-up that converts one-line conditionals to block form and removes an unnecessary regex slash escape without changing behavior.
+Resolved the agent-remediation merge for upstream `v1.4.36` on `bot/upstream-sync-axiom-v1.4.36-axiom.1` targeting `axiom/deploy`; no direct deploy-branch push was made. The conflict resolution keeps the fork semver at `1.4.36-axiom.1`, preserves Axiom side-by-side app/updater identity, profile portability, and Forge provider/task-registry support, while accepting upstream mobile/provider and runtime changes. `mobile/app/index.tsx` keeps Forge status in the mobile home provider probe, `mobile/app/h/[hostId]/tasks.tsx` keeps Forge-specific labels/context/filter/create behavior while adopting upstream stricter block formatting, and `package.json` uses the intended fork version. Protected deletion review found no deleted files and no protected Axiom file removals. After the first push, Mobile Checks exposed upstream mobile lint drift in new task-settings/import/export helpers; added a scoped CI-only follow-up that converts one-line conditionals to block form and removes an unnecessary regex slash escape without changing behavior. After the next PR Checks failure, updated `useIpcEvents` expectations for the upstream `setAgentStatus` context argument so the full root test suite matches the new agent-status routing contract.
 
 Verification:
 
@@ -21,6 +21,11 @@ Verification:
 - `pnpm --dir mobile test` → 53 files passed / 238 tests passed.
 - `pnpm --dir mobile lint` → 0 warnings / 0 errors.
 - `pnpm --dir mobile format:check` → passed.
+- `pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/hooks/useIpcEvents.test.ts` → 37 tests passed.
+- `pnpm run build:cli` → passed; local `/usr/local/bin/orca-dev` symlink creation was skipped for lack of sudo, after CLI verification succeeded.
+- `pnpm test` → 1294 files passed / 13,243 tests passed / 53 skipped after rebuilding the local CLI output.
+- `pnpm exec oxlint src/renderer/src/hooks/useIpcEvents.test.ts` → 0 warnings / 0 errors.
+- `pnpm exec oxfmt --check src/renderer/src/hooks/useIpcEvents.test.ts` → passed.
 - `git diff --check` → passed.
 
 Note: the local merge commit used `HUSKY=0` because the upstream merge stages hundreds of files and the lint-staged `react-doctor` hook reports upstream warnings outside the required fork-invariant gate list. The required remediation gates above passed.
