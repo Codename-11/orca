@@ -6,6 +6,18 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-06-01 — Fixed Axiom release workflow node-gyp install path
+
+After merging the `v1.4.36` remediation PR, the post-merge Axiom Upstream Sync Release resume run failed during Linux dependency install because pnpm's bundled `node-gyp` exposed `gyp_main.py` without execute permission while rebuilding `node-pty`. Added the same external `node-gyp@11.5.0` override already used by `pr.yml` before the release workflow's sync-job install step so the release resume path uses the working CI native-build setup.
+
+Verification:
+
+- `node -e "const fs=require('fs'); const YAML=require('yaml'); YAML.parse(fs.readFileSync('.github/workflows/axiom-upstream-sync-release.yml','utf8')); console.log('workflow yaml parsed')"` → parsed.
+- `pnpm exec oxfmt --check .github/workflows/axiom-upstream-sync-release.yml` → passed.
+- `git diff --check` → passed.
+
+---
+
 ## 2026-06-01 — Remediated upstream v1.4.36 bot PR
 
 Resolved the agent-remediation merge for upstream `v1.4.36` on `bot/upstream-sync-axiom-v1.4.36-axiom.1` targeting `axiom/deploy`; no direct deploy-branch push was made. The conflict resolution keeps the fork semver at `1.4.36-axiom.1`, preserves Axiom side-by-side app/updater identity, profile portability, and Forge provider/task-registry support, while accepting upstream mobile/provider and runtime changes. `mobile/app/index.tsx` keeps Forge status in the mobile home provider probe, `mobile/app/h/[hostId]/tasks.tsx` keeps Forge-specific labels/context/filter/create behavior while adopting upstream stricter block formatting, and `package.json` uses the intended fork version. Protected deletion review found no deleted files and no protected Axiom file removals. After the first push, Mobile Checks exposed upstream mobile lint drift in new task-settings/import/export helpers; added a scoped CI-only follow-up that converts one-line conditionals to block form and removes an unnecessary regex slash escape without changing behavior. After the next PR Checks failure, updated `useIpcEvents` expectations for the upstream `setAgentStatus` context argument so the full root test suite matches the new agent-status routing contract.
