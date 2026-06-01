@@ -112,6 +112,12 @@ import {
 } from './synthetic-title-spinner'
 import { shouldSendSyntheticTitleFrame } from './synthetic-title-visibility'
 import { isCrashReportReason } from '../shared/crash-reporting'
+import {
+  getSyntheticAgentTitleProfile,
+  shouldDriveSyntheticAgentTitleFromHook,
+  type SyntheticAgentTitleProfile
+} from '../shared/synthetic-agent-title'
+import type { AgentStatusState } from '../shared/agent-status-types'
 import { KeybindingService } from './keybindings/keybinding-service'
 import { applyElectronProxySettings } from './network/proxy-settings'
 
@@ -401,7 +407,7 @@ function prepareCodexRuntimeHomeForLaunch(target?: CodexAccountSelectionTarget):
     )
   }
   if (target?.runtime !== 'wsl') {
-    return codexRuntimeHome!.refreshCurrentHostLaunchHome() ?? runtimeHomePath
+    return codexRuntimeHome!.refreshCurrentHostActiveHome() ?? runtimeHomePath
   }
   return runtimeHomePath
 }
@@ -608,9 +614,11 @@ function openMainWindow(): BrowserWindow {
       }
       maybeAutoRenameBranchOnFirstWorkFromHook({ paneKey, tabId, worktreeId, payload, isReplay })
       const orchestration = runtime?.getAgentStatusOrchestrationContextForPaneKey(paneKey)
+      const terminalHandle = runtime?.getAgentStatusTerminalHandleForPaneKey(paneKey)
       mainWindow?.webContents.send('agentStatus:set', {
         ...payload,
         paneKey,
+        ...(terminalHandle ? { terminalHandle } : {}),
         tabId,
         worktreeId,
         connectionId,
@@ -619,16 +627,10 @@ function openMainWindow(): BrowserWindow {
         ...(orchestration ? { orchestration } : {})
       })
       recordAgentStateCrashBreadcrumb(payload.agentType ?? 'unknown', payload.state)
-      // Why: cursor-agent's OSC title stays "Cursor Agent" for the whole turn,
-      // and opencode's stays bare "OpenCode" — neither carries a working/idle
-      // signal the title heuristic can read. Synthesize an OSC title update
-      // from the hook state and inject it into the pane's data stream so the
-      // existing renderer-side title tracker (which drives the sidebar
-      // spinner, unread badge, and worktree status dot for every other agent)
-      // lights up for these panes too. Braille prefix → working keyword path;
-      // "action required" → permission; bare label → idle.
-      const profile = SYNTHETIC_TITLE_PROFILES[payload.agentType ?? '']
-      if (profile) {
+      // Why: some native OSC titles miss terminal idle/permission frames.
+      // Inject hook-derived frames so the renderer title tracker updates too.
+      const profile = getSyntheticAgentTitleProfile(payload.agentType)
+      if (profile && shouldDriveSyntheticAgentTitleFromHook(payload.agentType, payload.state)) {
         driveSyntheticTitleFromHook(paneKey, payload.state, profile)
       }
     }
@@ -767,41 +769,9 @@ function shutdownWatchersOnce(): Promise<void> {
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 const SPINNER_INTERVAL_MS = 80
 
-// Why: per-agent labels for the synthesized titles. The detector classifies
-// these labels via `containsAgentName` + spinner/keyword rules, so the chosen
-// strings must round-trip through detectAgentStatusFromTitle to the right
-// status. See agent-status.test.ts for the pinned classifications.
-type SyntheticTitleProfile = {
-  workingLabel: string
-  permissionLabel: string
-  idleLabel: string
-}
-const SYNTHETIC_TITLE_PROFILES: Record<string, SyntheticTitleProfile> = {
-  cursor: {
-    workingLabel: 'Cursor Agent',
-    permissionLabel: 'Cursor - action required',
-    idleLabel: 'Cursor ready'
-  },
-  opencode: {
-    workingLabel: 'OpenCode',
-    permissionLabel: 'OpenCode - action required',
-    idleLabel: 'OpenCode ready'
-  },
-  droid: {
-    workingLabel: 'Droid',
-    permissionLabel: 'Droid - action required',
-    idleLabel: 'Droid ready'
-  },
-  hermes: {
-    workingLabel: 'Hermes',
-    permissionLabel: 'Hermes - action required',
-    idleLabel: 'Hermes ready'
-  }
-}
-
 const syntheticTitleSpinnerByPaneKey = new Map<
   string,
-  SyntheticTitleSpinnerEntry<SyntheticTitleProfile>
+  SyntheticTitleSpinnerEntry<SyntheticAgentTitleProfile>
 >()
 let syntheticTitleSpinnerTimer: ReturnType<typeof setInterval> | null = null
 
@@ -1019,8 +989,8 @@ function resumeSyntheticTitleSpinnerTimer(): void {
 
 function driveSyntheticTitleFromHook(
   paneKey: string,
-  state: string,
-  profile: SyntheticTitleProfile
+  state: AgentStatusState,
+  profile: SyntheticAgentTitleProfile
 ): void {
   const ptyId = getPtyIdForPaneKey(paneKey)
   if (!ptyId) {
