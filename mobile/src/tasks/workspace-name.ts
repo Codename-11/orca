@@ -10,7 +10,7 @@ export function slugifyForWorkspaceName(input: string): string {
     input
       .trim()
       .toLowerCase()
-      .replace(/[\/]+/g, '-')
+      .replace(/[/\\]+/g, '-')
       .replace(/\s+/g, '-')
       .replace(/[^a-z0-9._-]+/g, '-')
       .replace(/-+/g, '-')

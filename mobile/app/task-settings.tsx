@@ -76,26 +76,36 @@ export default function TaskSettingsScreen() {
   useEffect(() => {
     let cancelled = false
     for (const host of hosts) {
-      if (settingsByHost[host.id] || loadingByHost[host.id]) continue
+      if (settingsByHost[host.id] || loadingByHost[host.id]) {
+        continue
+      }
       const entry = hostClients.find((candidate) => candidate.hostId === host.id)
-      if (!entry || entry.state !== 'connected') continue
+      if (!entry || entry.state !== 'connected') {
+        continue
+      }
 
       setLoadingByHost((current) => ({ ...current, [host.id]: true }))
       void loadTaskSettings(entry.client)
         .then((settings) => {
-          if (cancelled) return
+          if (cancelled) {
+            return
+          }
           setSettingsByHost((current) => ({ ...current, [host.id]: settings }))
           setErrorByHost((current) => ({ ...current, [host.id]: '' }))
         })
         .catch((error) => {
-          if (cancelled) return
+          if (cancelled) {
+            return
+          }
           setErrorByHost((current) => ({
             ...current,
             [host.id]: error instanceof Error ? error.message : 'Failed to load task sources'
           }))
         })
         .finally(() => {
-          if (cancelled) return
+          if (cancelled) {
+            return
+          }
           setLoadingByHost((current) => ({ ...current, [host.id]: false }))
         })
     }
@@ -106,7 +116,9 @@ export default function TaskSettingsScreen() {
 
   async function persistHostSettings(hostId: string, next: HostTaskSettings) {
     const entry = hostClients.find((candidate) => candidate.hostId === hostId)
-    if (!entry || entry.state !== 'connected') return
+    if (!entry || entry.state !== 'connected') {
+      return
+    }
 
     const previous = settingsByHost[hostId]
     setSettingsByHost((current) => ({ ...current, [hostId]: next }))
@@ -144,7 +156,9 @@ export default function TaskSettingsScreen() {
 
   function makeDefault(hostId: string, provider: TaskProvider) {
     const current = settingsByHost[hostId] ?? normalizeSettings(undefined)
-    if (!current.visibleTaskProviders.includes(provider)) return
+    if (!current.visibleTaskProviders.includes(provider)) {
+      return
+    }
     void persistHostSettings(hostId, { ...current, defaultTaskSource: provider })
   }
 
