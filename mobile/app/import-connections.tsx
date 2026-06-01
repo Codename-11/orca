@@ -14,7 +14,9 @@ import { loadHosts, saveHost } from '../src/transport/host-store'
 
 function formatImportSummary(importedCount: number, skippedDuplicateCount: number): string {
   const imported = `${importedCount} connection${importedCount === 1 ? '' : 's'} imported`
-  if (skippedDuplicateCount === 0) return imported
+  if (skippedDuplicateCount === 0) {
+    return imported
+  }
   return `${imported}; ${skippedDuplicateCount} duplicate${skippedDuplicateCount === 1 ? '' : 's'} skipped`
 }
 
@@ -25,7 +27,9 @@ export default function ImportConnectionsScreen() {
   const [status, setStatus] = useState<string | null>(null)
 
   async function importBackup() {
-    if (busy) return
+    if (busy) {
+      return
+    }
     setBusy(true)
     setStatus(null)
     try {
@@ -34,7 +38,9 @@ export default function ImportConnectionsScreen() {
         multiple: false,
         type: ['application/json', 'text/json', 'text/plain', '*/*']
       })
-      if (result.canceled) return
+      if (result.canceled) {
+        return
+      }
       const asset = result.assets[0]
       if (!asset?.uri) {
         throw new Error('No file was selected.')

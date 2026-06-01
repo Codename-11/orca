@@ -3194,14 +3194,19 @@ export default function MobileTasksScreen() {
       }
       setTasksSupportState({ kind: 'supported', client })
       setError('')
-      const [settingsResponse, uiResponse, preflightResponse, linearStatusResponse, forgeStatusResponse] =
-        await Promise.all([
-          client.sendRequest('settings.get'),
-          client.sendRequest('ui.get'),
-          client.sendRequest('preflight.check'),
-          client.sendRequest('linear.status'),
-          client.sendRequest('forge.status')
-        ])
+      const [
+        settingsResponse,
+        uiResponse,
+        preflightResponse,
+        linearStatusResponse,
+        forgeStatusResponse
+      ] = await Promise.all([
+        client.sendRequest('settings.get'),
+        client.sendRequest('ui.get'),
+        client.sendRequest('preflight.check'),
+        client.sendRequest('linear.status'),
+        client.sendRequest('forge.status')
+      ])
       if (stale) {
         return
       }
