@@ -111,6 +111,16 @@ jobs:
       - name: Enable pnpm
         run: corepack enable
 
+      # Why: pnpm's bundled node-gyp can expose gyp_main.py without execute
+      # permission on Linux, breaking native module installs such as node-pty.
+      # Match pr.yml's pinned external node-gyp workaround before the release
+      # job installs dependencies.
+      - name: Use external node-gyp to avoid pnpm's bundled copy (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          npm install -g node-gyp@11.5.0
+          echo "npm_config_node_gyp=$(npm root -g)/node-gyp/bin/node-gyp.js" >> "$GITHUB_ENV"
+
       - name: Configure git author
         run: |
           git config user.name "github-actions[bot]"
