@@ -16,10 +16,8 @@ const FUTURE_PANE_KEY = makePaneKey('tab-future', FUTURE_LEAF_ID)
 const STALE_PANE_KEY = makePaneKey('tab-future', STALE_LEAF_ID)
 const ORPHAN_PANE_KEY = makePaneKey('tab-orphan', ORPHAN_LEAF_ID)
 const TAB_1_PANE_KEY = makePaneKey('tab-1', TAB_1_LEAF_ID)
-const WORKTREE_AGENT_STATUS_CONTEXT = {
-  tabId: undefined,
-  worktreeId: 'wt-1',
-  terminalHandle: undefined
+function expectWorktreeRouting(worktreeId: string): unknown {
+  return expect.objectContaining({ tabId: undefined, worktreeId, terminalHandle: undefined })
 }
 
 function makeTarget(args: { hasXtermClass?: boolean; editorClosest?: boolean }): {
@@ -2996,7 +2994,7 @@ describe('useIpcEvents agent status snapshot integration', () => {
       expect.objectContaining({ state: 'working', prompt: 'p', agentType: 'claude' }),
       'Future Tab',
       { updatedAt: 1_700_000_000_000, stateStartedAt: 1_699_999_999_000 },
-      WORKTREE_AGENT_STATUS_CONTEXT
+      expectWorktreeRouting('wt-1')
     )
   })
 
@@ -3064,7 +3062,7 @@ describe('useIpcEvents agent status snapshot integration', () => {
       }),
       'Inactive Tab',
       { updatedAt: 1_700_000_000_200, stateStartedAt: 1_699_999_999_100 },
-      WORKTREE_AGENT_STATUS_CONTEXT
+      expectWorktreeRouting('wt-1')
     )
   })
 
@@ -3146,7 +3144,7 @@ describe('useIpcEvents agent status snapshot integration', () => {
       }),
       'Cursor ready',
       { updatedAt: 1_700_000_000_200, stateStartedAt: 1_699_999_999_100 },
-      WORKTREE_AGENT_STATUS_CONTEXT
+      expectWorktreeRouting('wt-1')
     )
   })
 
@@ -3230,7 +3228,7 @@ describe('useIpcEvents agent status snapshot integration', () => {
       }),
       'Codex ready',
       { updatedAt: 1_700_000_000_200, stateStartedAt: 1_699_999_999_100 },
-      WORKTREE_AGENT_STATUS_CONTEXT
+      expectWorktreeRouting('wt-1')
     )
     expect(updateTabTitle).toHaveBeenCalledTimes(1)
     expect(updateTabTitle).toHaveBeenCalledWith('tab-future', 'Codex ready')
@@ -3394,7 +3392,7 @@ describe('useIpcEvents agent status snapshot integration', () => {
       }),
       'Terminal 2',
       { updatedAt: 1_700_000_000_200, stateStartedAt: 1_699_999_999_100 },
-      WORKTREE_AGENT_STATUS_CONTEXT
+      expectWorktreeRouting('wt-1')
     )
   })
 
@@ -3469,7 +3467,7 @@ describe('useIpcEvents agent status snapshot integration', () => {
       }),
       'Inactive Tab',
       { updatedAt: 1_700_000_000_200, stateStartedAt: 1_699_999_999_100 },
-      WORKTREE_AGENT_STATUS_CONTEXT
+      expectWorktreeRouting('wt-1')
     )
   })
 
@@ -3572,7 +3570,7 @@ describe('useIpcEvents agent status snapshot integration', () => {
       expect.objectContaining({ state: 'working', prompt: 'queued prompt', agentType: 'codex' }),
       'Future Tab',
       { updatedAt: 1_700_000_000_100, stateStartedAt: 1_699_999_999_100 },
-      WORKTREE_AGENT_STATUS_CONTEXT
+      expectWorktreeRouting('wt-1')
     )
     expect(setAgentStatus).toHaveBeenNthCalledWith(
       2,
@@ -3585,7 +3583,7 @@ describe('useIpcEvents agent status snapshot integration', () => {
       }),
       'Future Tab',
       { updatedAt: 1_700_000_000_200, stateStartedAt: 1_699_999_999_100 },
-      WORKTREE_AGENT_STATUS_CONTEXT
+      expectWorktreeRouting('wt-1')
     )
   })
 
@@ -3650,7 +3648,7 @@ describe('useIpcEvents agent status snapshot integration', () => {
       expect.objectContaining({ state: 'working', prompt: 'remote p', agentType: 'codex' }),
       'SSH Tab',
       { updatedAt: 1_700_000_000_000, stateStartedAt: 1_699_999_999_000 },
-      WORKTREE_AGENT_STATUS_CONTEXT
+      expectWorktreeRouting('wt-1')
     )
   })
 
@@ -4078,7 +4076,7 @@ describe('useIpcEvents agent status snapshot integration', () => {
       expect.objectContaining({ state: 'working' }),
       'Terminal 1',
       { updatedAt: 1_700_000_000_100, stateStartedAt: 1_699_999_999_100 },
-      WORKTREE_AGENT_STATUS_CONTEXT
+      expectWorktreeRouting('wt-1')
     )
   })
 
