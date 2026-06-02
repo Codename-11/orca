@@ -745,6 +745,12 @@ export function useIpcEvents(): void {
     )
 
     unsubs.push(
+      window.api.ui.onOpenSetupGuide?.(() => {
+        useAppStore.getState().openModal('setup-guide', { telemetrySource: 'help_menu' })
+      }) ?? (() => {})
+    )
+
+    unsubs.push(
       window.api.ui.onOpenFeatureTour(() => {
         useAppStore.getState().openModal('feature-wall', { source: 'help_menu' })
       })
@@ -967,7 +973,8 @@ export function useIpcEvents(): void {
           tabId,
           leafId,
           splitFromLeafId,
-          splitDirection
+          splitDirection,
+          splitTelemetrySource
         }) => {
           try {
             if (isRuntimeEnvironmentActive()) {
@@ -1044,10 +1051,12 @@ export function useIpcEvents(): void {
                 // paneKey. Reusing the existing tab preserves native split-pane
                 // behavior instead of letting createTab mint a collision tab.
                 store.updateTabPtyId(tab.id, ptyId)
+                const existingLayout = store.terminalLayoutsByTabId?.[tab.id]
+                const sourcePtyId = existingLayout?.ptyIdsByLeafId?.[splitFromLeafId]
                 store.setTabLayout(
                   tab.id,
                   addSplitLeafToLayout(
-                    store.terminalLayoutsByTabId?.[tab.id],
+                    existingLayout,
                     splitFromLeafId,
                     leafId,
                     ptyId,
@@ -1063,6 +1072,8 @@ export function useIpcEvents(): void {
                       paneRuntimeId: -1,
                       direction: splitDirection ?? 'horizontal',
                       sourceLeafId: splitFromLeafId,
+                      sourcePtyId,
+                      telemetrySource: splitTelemetrySource,
                       newLeafId: leafId,
                       ptyId
                     }
@@ -1208,8 +1219,14 @@ export function useIpcEvents(): void {
     )
 
     unsubs.push(
-      window.api.ui.onSplitTerminal(({ tabId, paneRuntimeId, direction, command }) => {
-        const detail: SplitTerminalPaneDetail = { tabId, paneRuntimeId, direction, command }
+      window.api.ui.onSplitTerminal(({ tabId, paneRuntimeId, direction, command, telemetrySource }) => {
+        const detail: SplitTerminalPaneDetail = {
+          tabId,
+          paneRuntimeId,
+          direction,
+          command,
+          telemetrySource
+        }
         window.dispatchEvent(new CustomEvent(SPLIT_TERMINAL_PANE_EVENT, { detail }))
       })
     )

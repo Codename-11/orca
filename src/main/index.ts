@@ -45,6 +45,7 @@ import {
 import { checkForUpdatesFromMenu, isQuittingForUpdate } from './updater'
 import {
   configureDevUserDataPath,
+  configureOrcaUserDataPathEnv,
   enableMainProcessGpuFeatures,
   installDevParentDisconnectQuit,
   installDevParentSignalQuit,
@@ -235,9 +236,7 @@ if (app.isPackaged && process.platform !== 'win32') {
   })
 }
 configureDevUserDataPath(is.dev)
-// Why: CLI-shared Codex helpers cannot import Electron. Seed the resolved
-// app userData path once Electron has applied dev/e2e overrides.
-process.env.ORCA_USER_DATA_PATH ??= app.getPath('userData')
+configureOrcaUserDataPathEnv()
 const startupDiagnosticsEnabled = isStartupDiagnosticsEnabled()
 if (startupDiagnosticsEnabled) {
   logStartupDiagnostic('before-single-instance-lock', {
@@ -642,6 +641,12 @@ function sendOpenFeatureTour(targetWindow?: BrowserWindow | null): void {
   const webContents =
     targetWindow && !targetWindow.isDestroyed() ? targetWindow.webContents : mainWindow?.webContents
   webContents?.send('ui:openFeatureTour')
+}
+
+function sendOpenSetupGuide(targetWindow?: BrowserWindow | null): void {
+  const webContents =
+    targetWindow && !targetWindow.isDestroyed() ? targetWindow.webContents : mainWindow?.webContents
+  webContents?.send('ui:openSetupGuide')
 }
 
 function sendOpenCrashReport(targetWindow?: BrowserWindow | null): void {
@@ -1182,6 +1187,11 @@ app.whenReady().then(async () => {
     onOpenSettings: () => {
       recordCrashBreadcrumb('settings_opened')
       mainWindow?.webContents.send('ui:openSettings')
+    },
+    onOpenSetupGuide: (targetWindow) => {
+      recordCrashBreadcrumb('setup_guide_opened')
+      const targetBrowserWindow = targetWindow instanceof BrowserWindow ? targetWindow : null
+      sendOpenSetupGuide(targetBrowserWindow)
     },
     onOpenCrashReport: (targetWindow) => {
       recordCrashBreadcrumb('crash_report_opened')

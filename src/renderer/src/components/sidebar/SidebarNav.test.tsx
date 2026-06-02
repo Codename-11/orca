@@ -4,6 +4,7 @@ import { getDefaultSettings } from '../../../../shared/constants'
 import {
   shouldShowAgentsButton,
   shouldShowMobileButton,
+  shouldShowSetupGuideEntry,
   SidebarTaskProviderShortcuts
 } from './SidebarNav'
 
@@ -49,6 +50,12 @@ describe('SidebarNav', () => {
 
   it('hides the Mobile entry when the sidebar setting is off', () => {
     expect(shouldShowMobileButton({ showMobileButton: false })).toBe(false)
+  })
+
+  it('shows the setup guide entry only before completion and before explicit hide', () => {
+    expect(shouldShowSetupGuideEntry(false, false)).toBe(true)
+    expect(shouldShowSetupGuideEntry(true, false)).toBe(false)
+    expect(shouldShowSetupGuideEntry(false, true)).toBe(false)
   })
 })
 
