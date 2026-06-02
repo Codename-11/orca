@@ -23,6 +23,14 @@ const WSL_COMMAND_NAME = 'orca-ide'
 const LEGACY_WSL_COMMAND_NAME = 'orca'
 const WSL_COMMAND_TIMEOUT_MS = 10_000
 
+function normalizeManagedScriptContent(content: string): string {
+  return content.replace(/\n+$/u, '\n')
+}
+
+function managedScriptMatches(content: string, expected: string, managed: boolean): boolean {
+  return content === expected || (managed && normalizeManagedScriptContent(content) === expected)
+}
+
 type WslCliInstallerOptions = {
   platform?: NodeJS.Platform
   distro?: string | null
@@ -51,61 +59,50 @@ export class WslCliInstaller {
 
     try {
       const content = await this.readCommandFile(ready.distro, ready.commandPath)
-      if (content === null) {
+    if (content === null) {
+      return this.buildStatus({
+        distro: ready.distro,
+        commandPath: ready.commandPath,
+        launcherPath: ready.launcherPath,
+        state: 'not_installed',
+        currentTarget: null,
+        pathConfigured: ready.pathConfigured,
+        detail: `Register ${ready.commandPath} to use Orca from WSL.`
+      })
+    }
+
+    if (content === 'not_file') {
+      return this.buildStatus({
+        distro: ready.distro,
+        commandPath: ready.commandPath,
+        launcherPath: ready.launcherPath,
+        state: 'conflict',
+        currentTarget: null,
+        pathConfigured: ready.pathConfigured,
+        detail: `${ready.commandPath} exists but is not an Orca launcher script.`
+      })
+    }
+
+    const expected = buildWslLauncher(ready.launcherPath, ready.bridgePath)
+    const managed = content.includes(MANAGED_MARKER)
+    const currentTarget = managed ? parseManagedLauncherTarget(content) : null
+    if (managedScriptMatches(content, expected, managed)) {
+      const bridgeContent = await this.readCommandFile(ready.distro, ready.bridgePath)
+      const expectedBridge = buildWslBridgeScript()
+      const bridgeManaged =
+        typeof bridgeContent === 'string' && bridgeContent.includes(BRIDGE_MANAGED_MARKER)
+      if (
+        typeof bridgeContent === 'string' &&
+        managedScriptMatches(bridgeContent, expectedBridge, bridgeManaged)
+      ) {
         return this.buildStatus({
           distro: ready.distro,
           commandPath: ready.commandPath,
           launcherPath: ready.launcherPath,
-          state: 'not_installed',
-          currentTarget: null,
-          pathConfigured: ready.pathConfigured,
-          detail: `Register ${ready.commandPath} to use Orca from WSL.`
-        })
-      }
-
-      if (content === 'not_file') {
-        return this.buildStatus({
-          distro: ready.distro,
-          commandPath: ready.commandPath,
-          launcherPath: ready.launcherPath,
-          state: 'conflict',
-          currentTarget: null,
-          pathConfigured: ready.pathConfigured,
-          detail: `${ready.commandPath} exists but is not an Orca launcher script.`
-        })
-      }
-
-      const expected = buildWslLauncher(ready.launcherPath, ready.bridgePath)
-      const managed = content.includes(MANAGED_MARKER)
-      const currentTarget = managed ? parseManagedLauncherTarget(content) : null
-      if (content === expected) {
-        const bridgeContent = await this.readCommandFile(ready.distro, ready.bridgePath)
-        const expectedBridge = buildWslBridgeScript()
-        if (bridgeContent === expectedBridge) {
-          return this.buildStatus({
-            distro: ready.distro,
-            commandPath: ready.commandPath,
-            launcherPath: ready.launcherPath,
-            state: 'installed',
-            currentTarget,
-            pathConfigured: ready.pathConfigured,
-            detail: `Registered in ${ready.distro} at ${ready.commandPath}.`
-          })
-        }
-
-        const bridgeManaged =
-          typeof bridgeContent === 'string' && bridgeContent.includes(BRIDGE_MANAGED_MARKER)
-        return this.buildStatus({
-          distro: ready.distro,
-          commandPath: ready.commandPath,
-          launcherPath: ready.launcherPath,
-          state: bridgeContent === null || bridgeManaged ? 'stale' : 'conflict',
+          state: 'installed',
           currentTarget,
           pathConfigured: ready.pathConfigured,
-          detail:
-            bridgeContent === null || bridgeManaged
-              ? `${ready.commandPath} is missing its PowerShell bridge.`
-              : `${ready.bridgePath} exists but is not managed by Orca.`
+          detail: `Registered in ${ready.distro} at ${ready.commandPath}.`
         })
       }
 
@@ -113,18 +110,31 @@ export class WslCliInstaller {
         distro: ready.distro,
         commandPath: ready.commandPath,
         launcherPath: ready.launcherPath,
-        state: managed ? 'stale' : 'conflict',
+        state: bridgeContent === null || bridgeManaged ? 'stale' : 'conflict',
         currentTarget,
         pathConfigured: ready.pathConfigured,
-        detail: managed
-          ? `${ready.commandPath} points to a different Orca launcher.`
-          : `${ready.commandPath} exists but is not managed by Orca.`
+        detail:
+          bridgeContent === null || bridgeManaged
+            ? `${ready.commandPath} is missing its PowerShell bridge.`
+            : `${ready.bridgePath} exists but is not managed by Orca.`
       })
+    }
+
+    return this.buildStatus({
+      distro: ready.distro,
+      commandPath: ready.commandPath,
+      launcherPath: ready.launcherPath,
+      state: managed ? 'stale' : 'conflict',
+      currentTarget,
+      pathConfigured: ready.pathConfigured,
+      detail: managed
+        ? `${ready.commandPath} points to a different Orca launcher.`
+        : `${ready.commandPath} exists but is not managed by Orca.`
+    })
     } catch {
       return this.wslProbeUnsupported(ready.distro)
     }
   }
-
   async install(): Promise<CliInstallStatus> {
     const status = await this.getStatus()
     if (!status.supported || !status.commandPath || !status.launcherPath) {

@@ -9,6 +9,7 @@ describe('task provider UI registry', () => {
       'GitHub',
       'GitLab',
       'Linear',
+      'Jira',
       'Forge'
     ])
   })
