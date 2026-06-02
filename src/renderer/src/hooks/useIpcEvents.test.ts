@@ -210,6 +210,11 @@ describe('useIpcEvents browser tab create routing', () => {
           }) => void)
         | null
     } = { current: null }
+    const activateViewListenerRef: {
+      current:
+        | ((data: { worktreeId?: string | null; browserPageId?: string | null }) => void)
+        | null
+    } = { current: null }
     const state = {
       setUpdateStatus: vi.fn(),
       fetchRepos: vi.fn(),
@@ -241,10 +246,14 @@ describe('useIpcEvents browser tab create routing', () => {
       settings: { terminalFontSize: 13 },
       activeBrowserTabIdByWorktree: { 'wt-1': 'workspace-active' },
       browserTabsByWorktree: {
-        'wt-1': [{ id: 'workspace-active', activePageId: 'page-active', pageIds: ['page-active'] }]
+        'wt-1': [{ id: 'workspace-active', activePageId: 'page-active', pageIds: ['page-active'] }],
+        'wt-2': [
+          { id: 'workspace-detached', activePageId: 'page-detached', pageIds: ['page-detached'] }
+        ]
       },
       browserPagesByWorkspace: {
-        'workspace-active': [{ id: 'page-active', worktreeId: 'wt-1' }]
+        'workspace-active': [{ id: 'page-active', worktreeId: 'wt-1' }],
+        'workspace-detached': [{ id: 'page-detached', worktreeId: 'wt-2' }]
       },
       unifiedTabsByWorktree: {
         'wt-1': [
@@ -376,7 +385,10 @@ describe('useIpcEvents browser tab create routing', () => {
           onGuestLoadFailed: () => () => {},
           onOpenLinkInOrcaTab: () => () => {},
           onNavigationUpdate: () => () => {},
-          onActivateView: () => () => {},
+          onActivateView: (listener: NonNullable<typeof activateViewListenerRef.current>) => {
+            activateViewListenerRef.current = listener
+            return () => {}
+          },
           onPaneFocus: () => () => {}
         },
         rateLimits: {
@@ -423,6 +435,16 @@ describe('useIpcEvents browser tab create routing', () => {
     })
     expect(dispatchEvent).toHaveBeenCalled()
     expect(releaseBrowserAutomationVisibility).not.toHaveBeenCalled()
+
+    acquireBrowserAutomationVisibility.mockClear()
+    dispatchEvent.mockClear()
+
+    activateViewListenerRef.current?.({ browserPageId: 'page-detached' })
+
+    expect(acquireBrowserAutomationVisibility).toHaveBeenCalledWith('page-detached')
+    expect(dispatchEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: { worktreeId: 'wt-2' } })
+    )
   })
 })
 

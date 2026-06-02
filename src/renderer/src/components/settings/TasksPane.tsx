@@ -16,6 +16,7 @@ type TasksPaneProps = {
   updateSettings: (updates: Partial<GlobalSettings>) => void
 }
 
+
 export function TasksPane({ settings, updateSettings }: TasksPaneProps): React.JSX.Element {
   const visibleProviders = normalizeVisibleTaskProviders(settings.visibleTaskProviders)
 
@@ -51,6 +52,8 @@ export function TasksPane({ settings, updateSettings }: TasksPaneProps): React.J
             'github',
             'gitlab',
             'linear',
+            'jira',
+            'atlassian',
             'forge',
             'display',
             'hide'

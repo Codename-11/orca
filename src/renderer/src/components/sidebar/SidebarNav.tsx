@@ -218,6 +218,7 @@ const SidebarNav = React.memo(function SidebarNav() {
             canBrowseTasks={canBrowseTasks}
             openTaskPage={openTaskPage}
           />
+
         </button>
       ) : null}
       <button

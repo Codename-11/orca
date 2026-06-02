@@ -1,4 +1,4 @@
-/* eslint-disable max-lines -- WSL installer coverage shares fixture-heavy launcher, bridge, stale-state, and timeout helpers. */
+/* eslint-disable max-lines -- WSL installer coverage shares launcher, bridge, stale-state, timeout, and probe-failure fixtures. */
 import type { CliInstallStatus } from '../../shared/cli-install-types'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -180,6 +180,30 @@ describe('WslCliInstaller', () => {
     })
   })
 
+  it('accepts current managed WSL scripts with an extra heredoc trailing newline', async () => {
+    const launcher = `${_internals.buildWslLauncher(
+      'C:\\Orca\\orca.cmd',
+      '/home/alice/.local/share/orca/orca-wsl-bridge.ps1'
+    )}\n`
+    const wsl = createWslRunner(launcher)
+    const installer = new WslCliInstaller({
+      platform: 'win32',
+      distro: 'Ubuntu',
+      hostInstaller: { getStatus: async () => makeHostStatus('C:\\Orca\\orca.cmd') },
+      wslRunner: async (distro, command) => {
+        if (command.includes('cat /home/alice/.local/share/orca/orca-wsl-bridge.ps1')) {
+          return `${_internals.buildWslBridgeScript()}\n`
+        }
+        return wsl.runner(distro, command)
+      }
+    })
+
+    await expect(installer.getStatus()).resolves.toMatchObject({
+      state: 'installed',
+      currentTarget: 'C:\\Orca\\orca.cmd'
+    })
+  })
+
   it('refuses to replace an unmanaged WSL command', async () => {
     const wsl = createWslRunner('#!/usr/bin/env bash\necho elsewhere\n')
     const installer = new WslCliInstaller({
@@ -297,7 +321,7 @@ describe('WslCliInstaller', () => {
     })
   })
 
-  it('settles as unsupported when wsl.exe never reports completion', async () => {
+  it('settles when wsl.exe never reports completion', async () => {
     vi.useFakeTimers()
     const killMock = vi.fn()
     execFileMock.mockImplementation(() => ({ kill: killMock }))
@@ -309,19 +333,17 @@ describe('WslCliInstaller', () => {
 
     const promise = installer.getStatus()
     let settled = false
-    void promise.finally(() => {
-      settled = true
-    })
+    void promise
+      .catch(() => undefined)
+      .finally(() => {
+        settled = true
+      })
 
     await vi.advanceTimersByTimeAsync(10_000)
     await Promise.resolve()
 
     expect(settled).toBe(true)
-    await expect(promise).resolves.toMatchObject({
-      state: 'unsupported',
-      supported: false,
-      detail: expect.stringContaining('Unable to inspect WSL CLI registration in Ubuntu')
-    })
+    await expect(promise).rejects.toThrow('WSL command timed out')
     expect(killMock).toHaveBeenCalled()
   })
 

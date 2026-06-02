@@ -16,7 +16,7 @@ import { ClaudeUsageStore, initClaudeUsagePath } from './claude-usage/store'
 import { CodexUsageStore, initCodexUsagePath } from './codex-usage/store'
 import { OpenCodeUsageStore, initOpenCodeUsagePath } from './opencode-usage/store'
 import { killAllPty } from './ipc/pty'
-import { initDaemonPtyProvider, disconnectDaemon } from './daemon/daemon-init'
+import { initDaemonPtyProvider, disconnectDaemon, shutdownDaemon } from './daemon/daemon-init'
 import { closeAllWatchers } from './ipc/filesystem-watcher'
 import { registerCoreHandlers } from './ipc/register-core-handlers'
 import { initObservability, shutdownObservability } from './observability'
@@ -47,8 +47,10 @@ import {
   configureDevUserDataPath,
   enableMainProcessGpuFeatures,
   installDevParentDisconnectQuit,
+  installDevParentSignalQuit,
   installDevParentWatchdog,
   installUncaughtPipeErrorGuard,
+  isDevParentShutdownRequested,
   patchPackagedProcessPath,
   shouldInstallManagedHooks
 } from './startup/configure-process'
@@ -85,6 +87,7 @@ import { agentHookServer } from './agent-hooks/server'
 import { maybeAutoRenameBranchOnFirstWork } from './agent-hooks/first-work-branch-rename'
 import { setMigrationUnsupportedPtyListener } from './agent-hooks/migration-unsupported-pty-state'
 import {
+  clearProviderPtyState,
   getPtyIdForPaneKey,
   registerPaneKeyTeardownListener,
   getLocalPtyProvider,
@@ -347,6 +350,7 @@ if (hasSingleInstanceLock) {
   const shouldCoupleToDevParent = is.dev && !isServeMode
   installDevParentDisconnectQuit(shouldCoupleToDevParent)
   installDevParentWatchdog(shouldCoupleToDevParent)
+  installDevParentSignalQuit(shouldCoupleToDevParent)
   // Why: must run after configureDevUserDataPath (which redirects userData to
   // orca-dev in dev mode) but before app.setName('Orca') inside whenReady
   // (which would change the resolved path on case-sensitive filesystems).
@@ -1126,7 +1130,8 @@ app.whenReady().then(async () => {
     // to swap the in-process provider for the daemon-routed one. Capturing the
     // provider reference eagerly here would freeze the pre-daemon LocalPtyProvider
     // and defeat the teardown helper's prefix sweep (design §4.3 wire-up).
-    getLocalProvider: () => getLocalPtyProvider()
+    getLocalProvider: () => getLocalPtyProvider(),
+    onPtyStopped: clearProviderPtyState
   })
   runtime = runtimeService
   automations = new AutomationService(store, { claudeUsage, codexUsage })
@@ -1430,7 +1435,10 @@ app.on('will-quit', (e) => {
     // inside `shutdownTelemetry()` are caught by the client itself — we
     // catch again here defensively so a flush failure cannot cancel the
     // quit chain.
-    Promise.allSettled([disconnectDaemon(), rpcStopAndClear, watcherShutdown])
+    // Why: normal quits preserve the detached daemon for warm reattach, but a
+    // dev parent dying means the temp/dev profile has no owner left to reattach.
+    const daemonTeardown = isDevParentShutdownRequested() ? shutdownDaemon() : disconnectDaemon()
+    Promise.allSettled([daemonTeardown, rpcStopAndClear, watcherShutdown])
       .then(() => shutdownTelemetry())
       .then(() => shutdownObservability())
       .catch(() => {

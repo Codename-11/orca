@@ -1,6 +1,7 @@
 import { Github, Gitlab } from 'lucide-react'
 import type { TaskProvider } from '../../../../shared/types'
 import { ForgeIcon } from '@/components/icons/ForgeIcon'
+import { JiraIcon } from '@/components/icons/JiraIcon'
 import { LinearIcon } from '@/components/icons/LinearIcon'
 
 export type TaskProviderSettingsPane = 'tasks' | 'integrations'
@@ -67,6 +68,22 @@ export const TASK_PROVIDER_UI_OPTIONS: readonly TaskProviderUiOption[] = [
     settingsKeywords: ['linear', 'workspace', 'team', 'api key'],
     onboardingTitle: 'Connect Linear',
     onboardingDescription: 'Connect Linear to browse, create, and update issues from Orca.',
+    onboardingActionLabel: 'Open Integrations',
+    capabilities: {
+      supportsCreate: true,
+      supportsDetailDrawer: true,
+      supportsAgentFilters: false
+    }
+  },
+  {
+    id: 'jira',
+    label: 'Jira',
+    description: 'Show Jira in the Tasks source picker and sidebar shortcuts.',
+    Icon: ({ className }) => <JiraIcon className={className} />,
+    settingsPane: 'integrations',
+    settingsKeywords: ['jira', 'atlassian', 'site', 'api token'],
+    onboardingTitle: 'Connect Jira',
+    onboardingDescription: 'Connect Jira to browse, create, and update issues from Orca.',
     onboardingActionLabel: 'Open Integrations',
     capabilities: {
       supportsCreate: true,
