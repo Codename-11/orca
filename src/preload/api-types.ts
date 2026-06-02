@@ -9,6 +9,7 @@ import type {
 } from '../shared/hosted-review'
 import type { NativeFileDropPayload } from '../shared/native-file-drop'
 import type { AppIdentity } from '../shared/app-identity'
+import type { TerminalPaneSplitSource } from '../shared/feature-education-telemetry'
 import type {
   BaseRefDefaultResult,
   BaseRefSearchResult,
@@ -1365,7 +1366,7 @@ export type PreloadApi = {
       filter?: 'assigned' | 'created' | 'all' | 'completed'
       limit?: number
       workspaceId?: LinearWorkspaceSelection
-    }) => Promise<LinearIssue[]>
+    }) => Promise<LinearCollectionResult<LinearIssue>>
     createIssue: (args: {
       teamId: string
       title: string
@@ -1398,32 +1399,42 @@ export type PreloadApi = {
       query?: string
       limit?: number
       workspaceId?: LinearWorkspaceSelection
+      force?: boolean
     }) => Promise<LinearCollectionResult<LinearProjectSummary>>
-    getProject: (args: { id: string; workspaceId: string }) => Promise<LinearProjectDetail | null>
+    getProject: (args: {
+      id: string
+      workspaceId: string
+      force?: boolean
+    }) => Promise<LinearProjectDetail | null>
     listProjectIssues: (args: {
       projectId: string
       limit?: number
       workspaceId: string
+      force?: boolean
     }) => Promise<LinearCollectionResult<LinearIssue>>
     listCustomViews: (args: {
       model: LinearCustomViewModel
       limit?: number
       workspaceId?: LinearWorkspaceSelection
+      force?: boolean
     }) => Promise<LinearCollectionResult<LinearCustomViewSummary>>
     getCustomView: (args: {
       viewId: string
       model: LinearCustomViewModel
       workspaceId: string
+      force?: boolean
     }) => Promise<LinearCustomViewSummary | null>
     listCustomViewIssues: (args: {
       viewId: string
       limit?: number
       workspaceId: string
+      force?: boolean
     }) => Promise<LinearCollectionResult<LinearIssue>>
     listCustomViewProjects: (args: {
       viewId: string
       limit?: number
       workspaceId: string
+      force?: boolean
     }) => Promise<LinearCollectionResult<LinearProjectSummary>>
     teamStates: (args: { teamId: string; workspaceId?: string }) => Promise<LinearWorkflowState[]>
     teamLabels: (args: { teamId: string; workspaceId?: string }) => Promise<LinearLabel[]>
@@ -2057,6 +2068,7 @@ export type PreloadApi = {
     set: (args: Partial<PersistedUIState>) => Promise<void>
     recordFeatureInteraction: (id: FeatureInteractionId) => Promise<PersistedUIState>
     onOpenSettings: (callback: () => void) => () => void
+    onOpenSetupGuide: (callback: () => void) => () => void
     onOpenFeatureTour: (callback: () => void) => () => void
     onOpenCrashReport: (callback: () => void) => () => void
     onToggleLeftSidebar: (callback: () => void) => () => void
@@ -2128,6 +2140,7 @@ export type PreloadApi = {
         leafId?: string
         splitFromLeafId?: string
         splitDirection?: 'horizontal' | 'vertical'
+        splitTelemetrySource?: TerminalPaneSplitSource
       }) => void
     ) => () => void
     onRequestTerminalCreate: (
@@ -2153,6 +2166,7 @@ export type PreloadApi = {
         paneRuntimeId: number
         direction: 'horizontal' | 'vertical'
         command?: string
+        telemetrySource?: TerminalPaneSplitSource
       }) => void
     ) => () => void
     onRenameTerminal: (

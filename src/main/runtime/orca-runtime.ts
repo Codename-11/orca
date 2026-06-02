@@ -71,7 +71,9 @@ import type {
   WorkspaceCreateTelemetrySource
 } from '../../shared/types'
 import type { FeatureInteractionId } from '../../shared/feature-interactions'
+import type { TerminalPaneSplitSource } from '../../shared/feature-education-telemetry'
 import { FOLDER_WORKSPACE_INSTANCE_SEPARATOR, splitWorktreeId } from '../../shared/worktree-id'
+import { clampLinearPlainIssueListLimit } from '../../shared/linear-issue-list-limits'
 import { isFolderRepo } from '../../shared/repo-kind'
 import { getNextProjectGroupOrder } from '../../shared/project-groups'
 import { DEFAULT_WORKSPACE_STATUS_ID } from '../../shared/workspace-statuses'
@@ -735,6 +737,7 @@ type RuntimeNotifier = {
       leafId?: string
       splitFromLeafId?: string
       splitDirection?: 'horizontal' | 'vertical'
+      splitTelemetrySource?: TerminalPaneSplitSource
     }
   ):
     | Promise<{ tabId: string; title?: string | null }>
@@ -743,7 +746,11 @@ type RuntimeNotifier = {
   splitTerminal(
     tabId: string,
     paneRuntimeId: number,
-    opts: { direction: 'horizontal' | 'vertical'; command?: string }
+    opts: {
+      direction: 'horizontal' | 'vertical'
+      command?: string
+      telemetrySource?: TerminalPaneSplitSource
+    }
   ): void
   renameTerminal(tabId: string, title: string | null): void
   focusTerminal(tabId: string, worktreeId: string, leafId?: string | null): void
@@ -10112,12 +10119,13 @@ export class OrcaRuntimeService {
 
   async splitTerminal(
     handle: string,
-    opts: {
-      direction?: 'horizontal' | 'vertical'
-      command?: string
-      env?: Record<string, string>
-      activate?: boolean
-    } = {}
+	    opts: {
+	      direction?: 'horizontal' | 'vertical'
+	      command?: string
+	      env?: Record<string, string>
+	      activate?: boolean
+	      telemetrySource?: TerminalPaneSplitSource
+	    } = {}
   ): Promise<RuntimeTerminalSplit> {
     const livePty = this.getLivePtyForHandle(handle)
     if (livePty) {
@@ -10136,10 +10144,11 @@ export class OrcaRuntimeService {
       }
     }
 
-    this.notifier?.splitTerminal(leaf.tabId, leaf.paneRuntimeId, {
-      direction,
-      command: opts.command
-    })
+	    this.notifier?.splitTerminal(leaf.tabId, leaf.paneRuntimeId, {
+	      direction,
+	      command: opts.command,
+	      telemetrySource: opts.telemetrySource
+	    })
 
     const newHandle = await this.waitForNewLeafInTab(leaf.tabId, leafKeysBefore)
     return { handle: newHandle, tabId: leaf.tabId, paneRuntimeId: leaf.paneRuntimeId }
@@ -10147,12 +10156,13 @@ export class OrcaRuntimeService {
 
   private async splitPtyBackedTerminal(
     pty: RuntimePtyWorktreeRecord,
-    opts: {
-      direction?: 'horizontal' | 'vertical'
-      command?: string
-      env?: Record<string, string>
-      activate?: boolean
-    } = {}
+	    opts: {
+	      direction?: 'horizontal' | 'vertical'
+	      command?: string
+	      env?: Record<string, string>
+	      activate?: boolean
+	      telemetrySource?: TerminalPaneSplitSource
+	    } = {}
   ): Promise<RuntimeTerminalSplit> {
     if (!this.ptyController?.spawn) {
       throw new Error('runtime_unavailable')
@@ -10200,10 +10210,11 @@ export class OrcaRuntimeService {
         title: null,
         activate: opts.activate !== false,
         tabId: parentTabId,
-        leafId,
-        splitFromLeafId: parsedPaneKey.leafId,
-        splitDirection: direction
-      })
+	        leafId,
+	        splitFromLeafId: parsedPaneKey.leafId,
+	        splitDirection: direction,
+	        splitTelemetrySource: opts.telemetrySource
+	      })
     } catch (error) {
       this.ptyController.kill?.(result.id)
       throw error
@@ -12449,7 +12460,7 @@ export class OrcaRuntimeService {
     limit = 20,
     workspaceId?: LinearWorkspaceSelection
   ): ReturnType<typeof listLinearIssues> {
-    return listLinearIssues(filter, Math.min(Math.max(1, limit), 50), workspaceId)
+    return listLinearIssues(filter, clampLinearPlainIssueListLimit(limit), workspaceId)
   }
 
   linearCreateIssue(
@@ -12507,53 +12518,68 @@ export class OrcaRuntimeService {
   linearListProjects(
     query?: string,
     limit = 20,
-    workspaceId?: LinearWorkspaceSelection
+    workspaceId?: LinearWorkspaceSelection,
+    force?: boolean
   ): ReturnType<typeof listLinearProjects> {
-    return listLinearProjects(query, Math.min(Math.max(1, limit), 50), workspaceId)
+    return listLinearProjects(query, Math.min(Math.max(1, limit), 50), workspaceId, force)
   }
 
-  linearGetProject(id: string, workspaceId: string): ReturnType<typeof getLinearProject> {
-    return getLinearProject(id, workspaceId)
+  linearGetProject(
+    id: string,
+    workspaceId: string,
+    force?: boolean
+  ): ReturnType<typeof getLinearProject> {
+    return getLinearProject(id, workspaceId, force)
   }
 
   linearListProjectIssues(
     projectId: string,
     limit = 20,
-    workspaceId: string
+    workspaceId: string,
+    force?: boolean
   ): ReturnType<typeof listLinearProjectIssues> {
-    return listLinearProjectIssues(projectId, Math.min(Math.max(1, limit), 50), workspaceId)
+    return listLinearProjectIssues(projectId, Math.min(Math.max(1, limit), 50), workspaceId, force)
   }
 
   linearListCustomViews(
     model: LinearCustomViewModel,
     limit = 20,
-    workspaceId?: LinearWorkspaceSelection
+    workspaceId?: LinearWorkspaceSelection,
+    force?: boolean
   ): ReturnType<typeof listLinearCustomViews> {
-    return listLinearCustomViews(model, Math.min(Math.max(1, limit), 50), workspaceId)
+    return listLinearCustomViews(model, Math.min(Math.max(1, limit), 50), workspaceId, force)
   }
 
   linearGetCustomView(
     viewId: string,
     model: LinearCustomViewModel,
-    workspaceId: string
+    workspaceId: string,
+    force?: boolean
   ): ReturnType<typeof getLinearCustomView> {
-    return getLinearCustomView(viewId, model, workspaceId)
+    return getLinearCustomView(viewId, model, workspaceId, force)
   }
 
   linearListCustomViewIssues(
     viewId: string,
     limit = 20,
-    workspaceId: string
+    workspaceId: string,
+    force?: boolean
   ): ReturnType<typeof listLinearCustomViewIssues> {
-    return listLinearCustomViewIssues(viewId, Math.min(Math.max(1, limit), 50), workspaceId)
+    return listLinearCustomViewIssues(viewId, Math.min(Math.max(1, limit), 50), workspaceId, force)
   }
 
   linearListCustomViewProjects(
     viewId: string,
     limit = 20,
-    workspaceId: string
+    workspaceId: string,
+    force?: boolean
   ): ReturnType<typeof listLinearCustomViewProjects> {
-    return listLinearCustomViewProjects(viewId, Math.min(Math.max(1, limit), 50), workspaceId)
+    return listLinearCustomViewProjects(
+      viewId,
+      Math.min(Math.max(1, limit), 50),
+      workspaceId,
+      force
+    )
   }
 
   linearTeamStates(teamId: string, workspaceId?: string): ReturnType<typeof getLinearTeamStates> {

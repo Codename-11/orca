@@ -215,7 +215,12 @@ import type {
   TaskProvider,
   TaskViewPresetId
 } from '../../../shared/types'
+import {
+  LINEAR_PLAIN_ISSUE_LIST_MAX,
+  clampLinearPlainIssueListLimit
+} from '../../../shared/linear-issue-list-limits'
 import { shouldSuppressEnterSubmit } from '@/lib/new-workspace-enter-guard'
+import { useContextualTour } from '@/components/contextual-tours/use-contextual-tour'
 import { getScreenSubmitShortcutLabel, isScreenSubmitShortcut } from '@/lib/screen-submit-shortcut'
 import {
   useRepoAssignees,
@@ -3108,12 +3113,14 @@ export default function TaskPage(): React.JSX.Element {
   const linearCacheSnapshot = useAppStore(
     useShallow((s) => ({
       issueCache: s.linearIssueCache,
-      searchCache: s.linearSearchCache
+      searchCache: s.linearSearchCache,
+      listCache: s.linearListCache
     }))
   )
   const cachedSelectedLinearIssue = findTaskPageLinearIssue(
     linearCacheSnapshot.issueCache,
     linearCacheSnapshot.searchCache,
+    linearCacheSnapshot.listCache,
     selectedLinearIssueId
   )
   const selectedLinearIssue = selectedLinearIssueId
@@ -3205,6 +3212,8 @@ export default function TaskPage(): React.JSX.Element {
   // Linear tab state
   const [linearMode, setLinearMode] = useState<LinearMode>('issues')
   const [linearIssues, setLinearIssues] = useState<LinearIssue[]>([])
+  const [linearIssueLimit, setLinearIssueLimit] = useState(LINEAR_ITEM_LIMIT)
+  const [linearIssuesHasMore, setLinearIssuesHasMore] = useState(false)
   const [linearLoading, setLinearLoading] = useState(false)
   const [linearError, setLinearError] = useState<string | null>(null)
   const [linearSearchInput, setLinearSearchInput] = useState('')
@@ -3781,6 +3790,19 @@ export default function TaskPage(): React.JSX.Element {
     : selectedLinearCustomView?.model === 'issue'
       ? `View: ${selectedLinearCustomView.name}`
       : null
+  const canLoadMorePlainLinearIssues =
+    !activeLinearIssueContextLabel &&
+    appliedLinearSearch.trim().length === 0 &&
+    linearIssuesHasMore &&
+    linearIssueLimit < LINEAR_PLAIN_ISSUE_LIST_MAX
+  const handleLoadMoreLinearIssues = useCallback(() => {
+    setLinearIssueLimit((limit) =>
+      Math.min(
+        clampLinearPlainIssueListLimit(limit) + LINEAR_ITEM_LIMIT,
+        LINEAR_PLAIN_ISSUE_LIST_MAX
+      )
+    )
+  }, [])
 
   const displayedLinearIssues = useMemo(
     () =>
@@ -3789,10 +3811,16 @@ export default function TaskPage(): React.JSX.Element {
           findTaskPageLinearIssue(
             linearCacheSnapshot.issueCache,
             linearCacheSnapshot.searchCache,
+            linearCacheSnapshot.listCache,
             issue.id
           ) ?? issue
       ),
-    [activeLinearIssues, linearCacheSnapshot.issueCache, linearCacheSnapshot.searchCache]
+    [
+      activeLinearIssues,
+      linearCacheSnapshot.issueCache,
+      linearCacheSnapshot.listCache,
+      linearCacheSnapshot.searchCache
+    ]
   )
 
   const linearIssueTeams = useMemo(() => {
@@ -4172,6 +4200,17 @@ export default function TaskPage(): React.JSX.Element {
   }, [newLinearStates.data, newLinearIssueStateId])
 
   const [linearConnectOpen, setLinearConnectOpen] = useState(false)
+  useContextualTour(
+    'tasks',
+    !dialogWorkItem &&
+      !gitlabDialogItem &&
+      !selectedLinearIssue &&
+      !newIssueOpen &&
+      !newLinearIssueOpen &&
+      !linearConnectOpen &&
+    activeModal === 'none',
+    'tasks_open'
+  )
 
   const activeGithubTaskKind = getGitHubTaskKind(activeTaskPreset, appliedTaskSearch)
   const selectedGitHubRepoExternalLink = useMemo(() => {
@@ -5786,6 +5825,18 @@ export default function TaskPage(): React.JSX.Element {
     setTaskResumeState({ linearQuery: appliedLinearSearch.trim() })
   }, [appliedLinearSearch, setTaskResumeState, taskResumeApplied])
 
+  useEffect(() => {
+    setLinearIssueLimit(LINEAR_ITEM_LIMIT)
+  }, [
+    activeLinearPreset,
+    appliedLinearSearch,
+    linearMode,
+    selectedLinearCustomView?.id,
+    selectedLinearProject?.id,
+    selectedLinearWorkspaceId,
+    taskSource
+  ])
+
   // Why: fetch Linear issues when the tab is active and the account is
   // connected. An empty search falls back to `listLinearIssues` (assigned
   // issues) so the default view shows the user's own work.
@@ -5807,19 +5858,29 @@ export default function TaskPage(): React.JSX.Element {
     setLinearError(null)
 
     const trimmed = appliedLinearSearch.trim()
+    const effectiveLinearIssueLimit = clampLinearPlainIssueListLimit(linearIssueLimit)
     const readArgs =
       trimmed.length > 0
         ? ({ kind: 'search', query: trimmed, limit: LINEAR_ITEM_LIMIT } as const)
-        : ({ kind: 'list', filter: activeLinearPreset, limit: LINEAR_ITEM_LIMIT } as const)
-    const cachedIssues = getCachedLinearIssues(readArgs)
-    if (cachedIssues) {
-      setLinearIssues(cachedIssues)
+        : ({ kind: 'list', filter: activeLinearPreset, limit: effectiveLinearIssueLimit } as const)
+    const cachedResult = getCachedLinearIssues(readArgs)
+    if (readArgs.kind === 'search') {
+      setLinearIssuesHasMore(false)
+      if (cachedResult) {
+        setLinearIssues(cachedResult as LinearIssue[])
+      }
+    } else if (cachedResult) {
+      const collection = cachedResult as LinearCollectionResult<LinearIssue>
+      setLinearIssues(collection.items)
+      setLinearIssuesHasMore(
+        Boolean(collection.hasMore) && effectiveLinearIssueLimit < LINEAR_PLAIN_ISSUE_LIST_MAX
+      )
     }
 
     const requestSignature =
       trimmed.length > 0
-        ? `${selectedLinearWorkspaceId ?? 'default'}::search::${trimmed}`
-        : `${selectedLinearWorkspaceId ?? 'default'}::list::${activeLinearPreset}`
+        ? `${selectedLinearWorkspaceId ?? 'default'}::search::${trimmed}::${LINEAR_ITEM_LIMIT}`
+        : `${selectedLinearWorkspaceId ?? 'default'}::list::${activeLinearPreset}::${effectiveLinearIssueLimit}`
     const previousRequest = lastLinearRequestRef.current
     const forceRefresh =
       linearRefreshNonce > 0 &&
@@ -5828,7 +5889,7 @@ export default function TaskPage(): React.JSX.Element {
     lastLinearRequestRef.current = { nonce: linearRefreshNonce, signature: requestSignature }
     const shouldProbeOnLanding =
       !forceRefresh &&
-      cachedIssues !== null &&
+      cachedResult !== null &&
       !landingLinearRefreshKeysRef.current.has(requestSignature)
     if (shouldProbeOnLanding) {
       landingLinearRefreshKeysRef.current = new Set([
@@ -5839,33 +5900,55 @@ export default function TaskPage(): React.JSX.Element {
 
     // Why: cached rows should remain visible on navigation. Only an explicit
     // refresh or a true cache miss needs the blocking loading state.
-    setLinearLoading(forceRefresh || cachedIssues === null)
+    setLinearLoading(forceRefresh || cachedResult === null)
 
     const request =
       readArgs.kind === 'search'
         ? searchLinearIssues(readArgs.query, LINEAR_ITEM_LIMIT, {
             force: forceRefresh || shouldProbeOnLanding
           })
-        : listLinearIssues(readArgs.filter, LINEAR_ITEM_LIMIT, {
+        : listLinearIssues(readArgs.filter, effectiveLinearIssueLimit, {
             force: forceRefresh || shouldProbeOnLanding
           })
 
     void request
-      .then((issues) => {
-        if (cancelled) {
+      .then((result) => {
+        if (
+          cancelled ||
+          lastLinearRequestRef.current?.signature !== requestSignature ||
+          lastLinearRequestRef.current?.nonce !== linearRefreshNonce
+        ) {
           return
         }
-        if (shouldProbeOnLanding) {
-          setLinearIssues((current) =>
-            reconcileTaskPageLinearIssuesAfterLandingRefresh(current, issues)
-          )
+        if (readArgs.kind === 'search') {
+          const issues = result as LinearIssue[]
+          setLinearIssuesHasMore(false)
+          if (shouldProbeOnLanding) {
+            setLinearIssues((current) =>
+              reconcileTaskPageLinearIssuesAfterLandingRefresh(current, issues)
+            )
+          } else {
+            setLinearIssues(issues)
+          }
         } else {
-          setLinearIssues(issues)
+          const collection = result as LinearCollectionResult<LinearIssue>
+          setLinearIssuesHasMore(
+            Boolean(collection.hasMore) && effectiveLinearIssueLimit < LINEAR_PLAIN_ISSUE_LIST_MAX
+          )
+          setLinearIssues((current) =>
+            shouldProbeOnLanding
+              ? reconcileTaskPageLinearIssuesAfterLandingRefresh(current, collection.items)
+              : collection.items
+          )
         }
         setLinearLoading(false)
       })
       .catch((err) => {
-        if (cancelled) {
+        if (
+          cancelled ||
+          lastLinearRequestRef.current?.signature !== requestSignature ||
+          lastLinearRequestRef.current?.nonce !== linearRefreshNonce
+        ) {
           return
         }
         setLinearError(err instanceof Error ? err.message : 'Failed to load Linear issues.')
@@ -5885,6 +5968,7 @@ export default function TaskPage(): React.JSX.Element {
     selectedLinearWorkspaceId,
     appliedLinearSearch,
     activeLinearPreset,
+    linearIssueLimit,
     linearRefreshNonce,
     taskResumeApplied,
     getCachedLinearIssues
@@ -6487,7 +6571,10 @@ export default function TaskPage(): React.JSX.Element {
             <section className="flex flex-col gap-3">
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <div
+                    className="flex min-w-0 flex-wrap items-center gap-2"
+                    data-contextual-tour-target="tasks-source-filters"
+                  >
                     {/* Why: Close is anchored left in the same row as the
                         source icons so the top chrome is one compact band.
                         Left-aligned keeps it clear of the app sidebar on the
@@ -6717,7 +6804,10 @@ export default function TaskPage(): React.JSX.Element {
                 ) : null}
 
                 {taskSource === 'github' && githubMode === 'items' ? (
-                  <div className="min-w-0 rounded-md rounded-b-none border border-border/50 bg-muted/50 p-3 shadow-sm">
+                  <div
+                    className="min-w-0 rounded-md rounded-b-none border border-border/50 bg-muted/50 p-3 shadow-sm"
+                    data-contextual-tour-target="tasks-search-presets"
+                  >
                     <div className="mb-3 flex flex-wrap gap-2">
                       {getGitHubTaskKindPresets(activeGithubTaskKind).map((option) => {
                         const active = activeTaskPreset === option.id
@@ -6787,7 +6877,10 @@ export default function TaskPage(): React.JSX.Element {
                           </button>
                         ) : null}
                       </div>
-                      <div className="flex shrink-0 items-center gap-2">
+                      <div
+                        className="flex shrink-0 items-center gap-2"
+                        data-contextual-tour-target="tasks-actions"
+                      >
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Button
@@ -7215,7 +7308,10 @@ export default function TaskPage(): React.JSX.Element {
                     </div>
                   </div>
                 ) : taskSource === 'linear' && linearStatus.connected ? (
-                  <div className="min-w-0 rounded-md rounded-b-none border border-border/50 bg-muted/50 p-3 shadow-sm">
+                  <div
+                    className="min-w-0 rounded-md rounded-b-none border border-border/50 bg-muted/50 p-3 shadow-sm"
+                    data-contextual-tour-target="tasks-search-presets"
+                  >
                     <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
                       <div
                         className="flex items-center gap-1 text-xs"
@@ -7242,7 +7338,10 @@ export default function TaskPage(): React.JSX.Element {
                           )
                         })}
                       </div>
-                      <div className="flex shrink-0 items-center gap-2">
+                      <div
+                        className="flex shrink-0 items-center gap-2"
+                        data-contextual-tour-target="tasks-actions"
+                      >
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Button
@@ -7629,7 +7728,10 @@ export default function TaskPage(): React.JSX.Element {
                         />
                       </div>
                     </div>
-                    <div className="min-w-0 rounded-md rounded-b-none border border-border/50 bg-muted/50 p-3 shadow-sm">
+                    <div
+                      className="min-w-0 rounded-md rounded-b-none border border-border/50 bg-muted/50 p-3 shadow-sm"
+                      data-contextual-tour-target="tasks-search-presets"
+                    >
                       <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
                         <div className="flex min-w-0 flex-wrap items-center gap-2">
                           <div className="flex flex-wrap gap-2">
@@ -7661,7 +7763,10 @@ export default function TaskPage(): React.JSX.Element {
                               : null}
                           </div>
                         </div>
-                        <div className="flex shrink-0 items-center gap-2">
+                        <div
+                          className="flex shrink-0 items-center gap-2"
+                          data-contextual-tour-target="tasks-actions"
+                        >
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button
@@ -8054,6 +8159,7 @@ export default function TaskPage(): React.JSX.Element {
                                     type="button"
                                     variant={attachedWorkspace ? 'default' : 'outline'}
                                     size="xs"
+                                    data-contextual-tour-target="tasks-start-workspace"
                                     onClick={(event) => {
                                       event.stopPropagation()
                                       handleOpenOrUseGitHubWorkItem(item)
@@ -8107,6 +8213,7 @@ export default function TaskPage(): React.JSX.Element {
                             ) : (
                               <button
                                 type="button"
+                                data-contextual-tour-target="tasks-start-workspace"
                                 onClick={(event) => {
                                   event.stopPropagation()
                                   handleOpenOrUseGitHubWorkItem(item)
@@ -8352,6 +8459,7 @@ export default function TaskPage(): React.JSX.Element {
                             <Button
                               variant="ghost"
                               size="icon-xs"
+                              data-contextual-tour-target="tasks-start-workspace"
                               onClick={(event) => {
                                 event.stopPropagation()
                                 handleUseGitLabItem(item)
@@ -9457,6 +9565,7 @@ export default function TaskPage(): React.JSX.Element {
                                     <Button
                                       variant="ghost"
                                       size="icon-xs"
+                                      data-contextual-tour-target="tasks-start-workspace"
                                       onClick={(event) => {
                                         event.stopPropagation()
                                         handleUseLinearItem(issue)
@@ -9680,6 +9789,7 @@ export default function TaskPage(): React.JSX.Element {
                                 <Button
                                   variant="ghost"
                                   size="icon-xs"
+                                  data-contextual-tour-target="tasks-start-workspace"
                                   onClick={(event) => {
                                     event.stopPropagation()
                                     handleUseLinearItem(issue)
@@ -9732,7 +9842,15 @@ export default function TaskPage(): React.JSX.Element {
                   count={linearCustomViewIssuesResult.items.length}
                   label="view issues"
                 />
-              ) : null}
+              ) : (
+                <LinearCollectionNotice
+                  hasMore={canLoadMorePlainLinearIssues}
+                  count={linearIssues.length}
+                  label="issues"
+                  onLoadMore={handleLoadMoreLinearIssues}
+                  loading={linearLoading}
+                />
+              )}
             </div>
           )}
         </div>

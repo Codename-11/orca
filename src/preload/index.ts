@@ -8,6 +8,7 @@ import { glApi } from './gitlab'
 import type { AppIdentity } from '../shared/app-identity'
 import type { CliInstallStatus } from '../shared/cli-install-types'
 import type { AgentHookInstallStatus } from '../shared/agent-hook-types'
+import type { TerminalPaneSplitSource } from '../shared/feature-education-telemetry'
 import type {
   BaseRefSearchResult,
   BaseRefDefaultResult,
@@ -1206,7 +1207,7 @@ const api = {
       filter?: 'assigned' | 'created' | 'all' | 'completed'
       limit?: number
       workspaceId?: string
-    }): Promise<unknown[]> => ipcRenderer.invoke('linear:listIssues', args),
+    }): Promise<unknown> => ipcRenderer.invoke('linear:listIssues', args),
 
     createIssue: (args: {
       teamId: string
@@ -1251,39 +1252,45 @@ const api = {
       query?: string
       limit?: number
       workspaceId?: string
+      force?: boolean
     }): Promise<unknown> => ipcRenderer.invoke('linear:listProjects', args),
 
-    getProject: (args: { id: string; workspaceId: string }): Promise<unknown> =>
+    getProject: (args: { id: string; workspaceId: string; force?: boolean }): Promise<unknown> =>
       ipcRenderer.invoke('linear:getProject', args),
 
     listProjectIssues: (args: {
       projectId: string
       limit?: number
       workspaceId: string
+      force?: boolean
     }): Promise<unknown> => ipcRenderer.invoke('linear:listProjectIssues', args),
 
     listCustomViews: (args: {
       model: string
       limit?: number
       workspaceId?: string
+      force?: boolean
     }): Promise<unknown> => ipcRenderer.invoke('linear:listCustomViews', args),
 
     getCustomView: (args: {
       viewId: string
       model: string
       workspaceId: string
+      force?: boolean
     }): Promise<unknown> => ipcRenderer.invoke('linear:getCustomView', args),
 
     listCustomViewIssues: (args: {
       viewId: string
       limit?: number
       workspaceId: string
+      force?: boolean
     }): Promise<unknown> => ipcRenderer.invoke('linear:listCustomViewIssues', args),
 
     listCustomViewProjects: (args: {
       viewId: string
       limit?: number
       workspaceId: string
+      force?: boolean
     }): Promise<unknown> => ipcRenderer.invoke('linear:listCustomViewProjects', args),
 
     teamStates: (args: { teamId: string; workspaceId?: string }): Promise<unknown[]> =>
@@ -2497,6 +2504,11 @@ const api = {
       ipcRenderer.on('ui:openSettings', listener)
       return () => ipcRenderer.removeListener('ui:openSettings', listener)
     },
+    onOpenSetupGuide: (callback: () => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent) => callback()
+      ipcRenderer.on('ui:openSetupGuide', listener)
+      return () => ipcRenderer.removeListener('ui:openSetupGuide', listener)
+    },
     onOpenFeatureTour: (callback: () => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent) => callback()
       ipcRenderer.on('ui:openFeatureTour', listener)
@@ -2743,6 +2755,7 @@ const api = {
         leafId?: string
         splitFromLeafId?: string
         splitDirection?: 'horizontal' | 'vertical'
+        splitTelemetrySource?: TerminalPaneSplitSource
       }) => void
     ): (() => void) => {
       const listener = (
@@ -2758,6 +2771,7 @@ const api = {
           leafId?: string
           splitFromLeafId?: string
           splitDirection?: 'horizontal' | 'vertical'
+          splitTelemetrySource?: TerminalPaneSplitSource
         }
       ) => callback(data)
       ipcRenderer.on('ui:createTerminal', listener)
@@ -2803,6 +2817,7 @@ const api = {
         paneRuntimeId: number
         direction: 'horizontal' | 'vertical'
         command?: string
+        telemetrySource?: TerminalPaneSplitSource
       }) => void
     ): (() => void) => {
       const listener = (
@@ -2812,6 +2827,7 @@ const api = {
           paneRuntimeId: number
           direction: 'horizontal' | 'vertical'
           command?: string
+          telemetrySource?: TerminalPaneSplitSource
         }
       ) => callback(data)
       ipcRenderer.on('ui:splitTerminal', listener)
