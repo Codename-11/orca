@@ -343,7 +343,12 @@ describe('WslCliInstaller', () => {
     await Promise.resolve()
 
     expect(settled).toBe(true)
-    await expect(promise).rejects.toThrow('WSL command timed out')
+    await expect(promise).resolves.toMatchObject({
+      state: 'unsupported',
+      supported: false,
+      unsupportedReason: 'launcher_missing',
+      detail: expect.stringContaining('Unable to inspect WSL CLI registration in Ubuntu')
+    })
     expect(killMock).toHaveBeenCalled()
   })
 
