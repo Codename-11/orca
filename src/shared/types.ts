@@ -23,6 +23,7 @@ import type {
   RepoSourceControlAiOverrides,
   SourceControlAiSettings
 } from './source-control-ai-types'
+import type { AgentKind, LaunchSource, RequestKind } from './telemetry-events'
 
 // Re-exported for backward compat with renderer call sites that import
 // `WorkspaceCreateTelemetrySource` from '../../../shared/types'.
@@ -84,6 +85,10 @@ export type Repo = {
   displayName: string
   badgeColor: string
   repoIcon?: RepoIcon | null
+  /** Set when the repo is a fork: the upstream/parent owner/repo. Drives the
+   *  default avatar (upstream owner, not the personal fork) and the fork
+   *  indicator. Absent = not a fork, or fork status not yet resolved. */
+  upstream?: GitHubRepositoryIdentity | null
   addedAt: number
   kind?: RepoKind
   gitUsername?: string
@@ -261,6 +266,9 @@ export type Worktree = {
    *  seed a replacement terminal if the user later reopens the worktree after
    *  closing every visible surface. */
   createdWithAgent?: TuiAgent
+  /** True while an auto-named workspace is waiting for the first agent message
+   *  to drive the branch/title rename. */
+  pendingFirstAgentMessageRename?: boolean
   sparseDirectories?: string[]
   sparseBaseRef?: string
   /** ID of the saved preset this worktree was created from, if any. Cleared
@@ -315,6 +323,8 @@ export type WorktreeMeta = {
   createdAt?: number
   /** See {@link Worktree.createdWithAgent}. Persisted to orca-data.json. */
   createdWithAgent?: TuiAgent
+  /** See {@link Worktree.pendingFirstAgentMessageRename}. */
+  pendingFirstAgentMessageRename?: boolean
   sparseDirectories?: string[]
   sparseBaseRef?: string
   sparsePresetId?: string
@@ -652,6 +662,8 @@ export type PersistedOpenFile = {
   language: string
   isPreview?: boolean
   runtimeEnvironmentId?: string | null
+  /** Unsaved editor buffer captured for hot exit; presence restores the tab dirty. */
+  dirtyDraftContent?: string
 }
 
 export type WorkspaceSessionState = {
@@ -709,6 +721,9 @@ export type WorkspaceSessionState = {
    *  considered. Persisted so closing all tabs and re-opening the workspace
    *  does not recreate the template. */
   defaultTerminalTabsAppliedByWorktreeId?: Record<string, true>
+  /** Worktrees the user explicitly slept. Inactive terminal state alone does
+   *  not imply sleep; a worktree only sleeps through the user sleep action. */
+  sleptWorktreeIds?: Record<string, true>
 }
 
 export type WorkspaceSessionPatch = Partial<WorkspaceSessionState>
@@ -1553,11 +1568,23 @@ export type WorktreeSetupLaunch = {
 export type WorktreeStartupLaunch = {
   command: string
   env?: Record<string, string>
+  telemetry?: { agent_kind: AgentKind; launch_source: LaunchSource; request_kind: RequestKind }
 }
 
 export type WorktreeDefaultTabsLaunch = {
   tabs: OrcaDefaultTabTemplate[]
   runCommands: boolean
+}
+
+export type WorktreeCreateTimingPhase = {
+  phase: string
+  startedAtMs: number
+  durationMs: number
+}
+
+export type WorktreeCreateTiming = {
+  totalDurationMs: number
+  phases: WorktreeCreateTimingPhase[]
 }
 
 export type CreateSparseCheckoutRequest = {
@@ -1604,6 +1631,9 @@ export type CreateWorktreeArgs = {
   manualOrder?: number
   /** Agent selected in the create surface. Omitted for blank-shell creates. */
   createdWithAgent?: TuiAgent
+  /** Set when the renderer knows this auto-generated branch should be renamed
+   *  from the first agent message. */
+  pendingFirstAgentMessageRename?: boolean
   /** Telemetry-only: which UI surface initiated this create. Threaded from
    *  the renderer entry point so main can emit `workspace_created` with the
    *  correct `source`. `unknown` is a valid wire value — an unrecognized
@@ -1613,6 +1643,9 @@ export type CreateWorktreeArgs = {
    *  pre-date this prop default to `unknown` at the IPC boundary instead
    *  of failing typecheck. */
   telemetrySource?: WorkspaceSource
+  /** Optional startup command for callers that want the backend to spawn the
+   *  first terminal as soon as the worktree is registered. */
+  startup?: WorktreeStartupLaunch
 }
 
 export type CreateWorktreeResult = {
@@ -1629,6 +1662,11 @@ export type CreateWorktreeResult = {
   warning?: string
   initialBaseStatus?: WorktreeBaseStatusEvent
   localBaseRefRefresh?: LocalBaseRefRefreshResult
+  startupTerminal?: {
+    spawned: boolean
+    surface?: 'visible' | 'background'
+  }
+  timing?: WorktreeCreateTiming
 }
 
 export type PreservedWorktreeBranch = {
@@ -2045,6 +2083,9 @@ export type GlobalSettings = {
   httpProxyUrl?: string
   /** Optional semicolon/comma/newline-separated bypass rules for httpProxyUrl. */
   httpProxyBypassRules?: string
+  /** Why: corporate TLS-intercepting proxies can break Electron HTTP/2 downloads;
+   *  this opt-in compatibility mode applies Chromium's process-wide HTTP/1.1 switch. */
+  electronHttp1CompatibilityMode?: boolean
   /** Why: opening arbitrary links inside Orca uses an isolated guest browser surface.
    *  The setting stays opt-in so existing workflows continue to use the system browser
    *  until the user explicitly wants worktree-scoped in-app browsing. */
@@ -2366,6 +2407,7 @@ export type NotificationEventSource = 'agent-task-complete' | 'terminal-bell' | 
 
 export type NotificationDispatchRequest = {
   source: NotificationEventSource
+  notificationId?: string
   /** Why: useful for fast native failures, but macOS can still drop notifications after 'show'. */
   requireDisplayConfirmation?: boolean
   worktreeId?: string
@@ -2395,6 +2437,10 @@ export type NotificationDispatchResult = {
     | 'cooldown'
     | 'not-supported'
     | 'not-displayed'
+}
+
+export type NotificationDismissResult = {
+  dismissed: number
 }
 
 export type NotificationSoundResult = {
