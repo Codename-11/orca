@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import { getDefaultSettings } from '../../../../shared/constants'
 import {
+  getSetupGuideSidebarEntryReady,
   shouldShowAgentsButton,
   shouldShowMobileButton,
   shouldShowSetupGuideEntry,
@@ -52,10 +53,25 @@ describe('SidebarNav', () => {
     expect(shouldShowMobileButton({ showMobileButton: false })).toBe(false)
   })
 
-  it('shows the setup guide entry only before completion and before explicit hide', () => {
-    expect(shouldShowSetupGuideEntry(false, false)).toBe(true)
-    expect(shouldShowSetupGuideEntry(true, false)).toBe(false)
-    expect(shouldShowSetupGuideEntry(false, true)).toBe(false)
+  it('shows the setup guide entry only after readiness, before completion, and before explicit hide', () => {
+    expect(
+      shouldShowSetupGuideEntry({ ready: false, setupComplete: false, dismissed: false })
+    ).toBe(false)
+    expect(shouldShowSetupGuideEntry({ ready: true, setupComplete: false, dismissed: false })).toBe(
+      true
+    )
+    expect(shouldShowSetupGuideEntry({ ready: true, setupComplete: true, dismissed: false })).toBe(
+      false
+    )
+    expect(shouldShowSetupGuideEntry({ ready: true, setupComplete: false, dismissed: true })).toBe(
+      false
+    )
+  })
+
+  it('requires both persisted UI and setup progress readiness before showing setup guide entry', () => {
+    expect(getSetupGuideSidebarEntryReady(false, true)).toBe(false)
+    expect(getSetupGuideSidebarEntryReady(true, false)).toBe(false)
+    expect(getSetupGuideSidebarEntryReady(true, true)).toBe(true)
   })
 })
 

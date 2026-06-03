@@ -125,6 +125,7 @@ import type {
   GetRateLimitResult,
   NotificationDispatchRequest,
   NotificationDispatchResult,
+  NotificationDismissResult,
   NotificationPermissionStatusResult,
   NotificationSoundResult,
   OnboardingState,
@@ -282,6 +283,7 @@ import type {
   ClaudeUsageScanState,
   ClaudeUsageScope,
   ClaudeUsageSessionRow,
+  ClaudeUsageSnapshot,
   ClaudeUsageSummary
 } from '../shared/claude-usage-types'
 import type { RateLimitRuntimeTarget, RateLimitState } from '../shared/rate-limit-types'
@@ -318,6 +320,7 @@ import type {
   CodexUsageScanState,
   CodexUsageScope,
   CodexUsageSessionRow,
+  CodexUsageSnapshot,
   CodexUsageSummary
 } from '../shared/codex-usage-types'
 import type {
@@ -328,6 +331,7 @@ import type {
   OpenCodeUsageScanState,
   OpenCodeUsageScope,
   OpenCodeUsageSessionRow,
+  OpenCodeUsageSnapshot,
   OpenCodeUsageSummary
 } from '../shared/opencode-usage-types'
 import type { TelemetryConsentState } from '../shared/telemetry-consent-types'
@@ -575,6 +579,11 @@ export type ClaudeUsageApi = {
   getScanState: () => Promise<ClaudeUsageScanState>
   setEnabled: (args: { enabled: boolean }) => Promise<ClaudeUsageScanState>
   refresh: (args?: { force?: boolean }) => Promise<ClaudeUsageScanState>
+  getSnapshot: (args: {
+    scope: ClaudeUsageScope
+    range: ClaudeUsageRange
+    limit?: number
+  }) => Promise<ClaudeUsageSnapshot>
   getSummary: (args: {
     scope: ClaudeUsageScope
     range: ClaudeUsageRange
@@ -599,6 +608,11 @@ export type CodexUsageApi = {
   getScanState: () => Promise<CodexUsageScanState>
   setEnabled: (args: { enabled: boolean }) => Promise<CodexUsageScanState>
   refresh: (args?: { force?: boolean }) => Promise<CodexUsageScanState>
+  getSnapshot: (args: {
+    scope: CodexUsageScope
+    range: CodexUsageRange
+    limit?: number
+  }) => Promise<CodexUsageSnapshot>
   getSummary: (args: {
     scope: CodexUsageScope
     range: CodexUsageRange
@@ -623,6 +637,11 @@ export type OpenCodeUsageApi = {
   getScanState: () => Promise<OpenCodeUsageScanState>
   setEnabled: (args: { enabled: boolean }) => Promise<OpenCodeUsageScanState>
   refresh: (args?: { force?: boolean }) => Promise<OpenCodeUsageScanState>
+  getSnapshot: (args: {
+    scope: OpenCodeUsageScope
+    range: OpenCodeUsageRange
+    limit?: number
+  }) => Promise<OpenCodeUsageSnapshot>
   getSummary: (args: {
     scope: OpenCodeUsageScope
     range: OpenCodeUsageRange
@@ -702,6 +721,7 @@ export type PreloadApi = {
           | 'displayName'
           | 'badgeColor'
           | 'repoIcon'
+          | 'upstream'
           | 'hookSettings'
           | 'worktreeBaseRef'
           | 'worktreeBasePath'
@@ -954,6 +974,10 @@ export type PreloadApi = {
   gh: {
     viewer: () => Promise<GitHubViewer | null>
     repoSlug: (args: {
+      repoPath: string
+      repoId?: string
+    }) => Promise<{ owner: string; repo: string } | null>
+    repoUpstream: (args: {
       repoPath: string
       repoId?: string
     }) => Promise<{ owner: string; repo: string } | null>
@@ -1655,6 +1679,7 @@ export type PreloadApi = {
   preflight: PreflightApi
   notifications: {
     dispatch: (args: NotificationDispatchRequest) => Promise<NotificationDispatchResult>
+    dismiss: (ids: string[]) => Promise<NotificationDismissResult>
     openSystemSettings: () => Promise<void>
     getPermissionStatus: () => Promise<NotificationPermissionStatusResult>
     requestPermission: () => Promise<NotificationPermissionStatusResult>
@@ -1815,6 +1840,7 @@ export type PreloadApi = {
       filePath: string
       connectionId?: string
     }) => Promise<{ size: number; isDirectory: boolean; mtime: number }>
+    pathExists: (args: { filePath: string; connectionId?: string }) => Promise<boolean>
     listFiles: (args: {
       rootPath: string
       connectionId?: string
