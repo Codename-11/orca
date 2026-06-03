@@ -92,7 +92,7 @@ function createStartupDiagnosticsBanner(chunkName: string): string {
   }
   const writeLine = (message) => {
     try {
-      const line = message.endsWith('\\n') ? message : message + '\\n'
+      const line = message.endsWith('\n') ? message : message + '\n'
       if (typeof writeSync === 'function') {
         writeSync(2, line)
         if (typeof diagnosticFileDescriptor === 'number') {
