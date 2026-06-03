@@ -53,7 +53,7 @@ const ORCA_APP_USER_MODEL_ID_LITERAL = optionalBuildString(
   process.env.ORCA_APP_USER_MODEL_ID ?? process.env.ORCA_APP_ID
 )
 
-function createStartupDiagnosticsBanner(chunkName: string): string {
+export function createStartupDiagnosticsBanner(chunkName: string): string {
   return `
 ;(() => {
   const env = typeof process !== 'undefined' ? process.env : undefined
@@ -92,7 +92,8 @@ function createStartupDiagnosticsBanner(chunkName: string): string {
   }
   const writeLine = (message) => {
     try {
-      const line = message.endsWith('\n') ? message : message + '\n'
+      const newline = String.fromCharCode(10)
+      const line = message.endsWith(newline) ? message : message + newline
       if (typeof writeSync === 'function') {
         writeSync(2, line)
         if (typeof diagnosticFileDescriptor === 'number') {
