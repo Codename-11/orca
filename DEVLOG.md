@@ -6,6 +6,21 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-06-03 — Fixed Windows startup diagnostics bundle syntax
+
+Diagnosed the latest Windows Axiom Orca installer failing before the main process opened with `SyntaxError: Invalid or unexpected token` at `resources/app.asar/out/main/index.js:39`. The generated startup-diagnostics banner was cooking `\\n` inside a template literal into a real newline inside a single-quoted JavaScript string, so the packaged main bundle emitted `message.endsWith('` followed by a raw line break. Replaced the generated newline literal with `String.fromCharCode(10)` and added a regression test that parses the banner with `node:vm` before release builds can package it.
+
+Verification:
+
+- `pnpm exec vitest run --config config/vitest.config.ts src/main/startup/startup-diagnostics-bootstrap.test.ts` → 1 test passed.
+- `pnpm run build:electron-vite` → passed.
+- `node --check out/main/index.js && node --check out/main/daemon-entry.js && node --check out/main/computer-sidecar.js && node --check out/main/stt-worker.js` → passed.
+- `pnpm exec oxlint electron.vite.config.ts src/main/startup/startup-diagnostics-bootstrap.test.ts` → 0 warnings / 0 errors.
+- `pnpm exec oxfmt --check electron.vite.config.ts src/main/startup/startup-diagnostics-bootstrap.test.ts` → passed.
+- `git diff --check` → passed.
+
+---
+
 ## 2026-06-03 — Curated Axiom fork automation noise
 
 Reduced non-actionable GitHub Actions churn from the fork maintenance lane. The live Hermes upstream dispatch watcher now runs stable-release-only and release-only, so upstream `main` SHA drift no longer creates `Axiom Upstream Main Mirror` repository_dispatch runs every watcher tick. Fork `main` is kept current by a new local script-only Hermes cron, `Orca Main Mirror Direct Sync`, which fast-forwards `origin/main` directly from `stablyai/orca/main` every 30 minutes and stays silent unless the direct mirror fails. The repo variable `AXIOM_AUTO_MAIN_MIRROR` was set to `false` as a belt-and-suspenders guard for stray upstream-main dispatches, while `AXIOM_AUTO_RELEASES` remains `true` for stable release automation.
