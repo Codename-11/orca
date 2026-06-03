@@ -6,6 +6,24 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-06-03 — Curated Axiom fork automation noise
+
+Reduced non-actionable GitHub Actions churn from the fork maintenance lane. The live Hermes upstream dispatch watcher now runs stable-release-only and release-only, so upstream `main` SHA drift no longer creates `Axiom Upstream Main Mirror` repository_dispatch runs every watcher tick. Fork `main` is kept current by a new local script-only Hermes cron, `Orca Main Mirror Direct Sync`, which fast-forwards `origin/main` directly from `stablyai/orca/main` every 30 minutes and stays silent unless the direct mirror fails. The repo variable `AXIOM_AUTO_MAIN_MIRROR` was set to `false` as a belt-and-suspenders guard for stray upstream-main dispatches, while `AXIOM_AUTO_RELEASES` remains `true` for stable release automation.
+
+Also removed scheduled triggers from upstream-owned fork workflows that are not Axiom release signals: `Cut Release` no longer cron-cuts upstream RCs from the fork, `E2E` no longer runs twice-daily default-branch scheduled QA, and `Computer-use e2e` no longer emits the hosted-runner scheduled smoke. Manual/PR/workflow-call entry points remain available.
+
+Verification:
+
+- `/home/bailey/.hermes/scripts/orca-main-mirror-direct-sync.sh && echo MIRROR_SCRIPT_OK && git rev-parse origin/main upstream/main` → passed; both refs resolved to `afd92f2dcc6bf054e352a13ec5f8ff0fb1179c0f`.
+- `/home/bailey/.hermes/scripts/orca-upstream-watcher.sh --dry-run --json` → passed; release tag `v1.4.43`, no dispatches.
+- Workflow YAML parse for release-cut/e2e/computer-e2e plus Axiom sync workflows → passed.
+- `pnpm exec oxfmt --check .github/workflows/release-cut.yml .github/workflows/e2e.yml .github/workflows/computer-e2e.yml DEVLOG.md` → passed.
+- `pnpm exec oxlint .github/workflows/release-cut.yml .github/workflows/e2e.yml .github/workflows/computer-e2e.yml config/scripts/hermes-repository-dispatch-watcher.mjs config/scripts/hermes-repository-dispatch-watcher.test.mjs` → 0 warnings / 0 errors.
+- `pnpm exec vitest run --config config/vitest.config.ts config/scripts/hermes-repository-dispatch-watcher.test.mjs config/scripts/axiom-upstream-sync-release.test.mjs` → 31 tests passed.
+- `git diff --check` → passed.
+
+---
+
 ## 2026-06-03 — Remediated upstream v1.4.43 bot PR
 
 Resolved the agent-remediation merge for upstream `v1.4.43` on `bot/upstream-sync-axiom-v1.4.43-axiom.1` targeting `axiom/deploy`; no direct deploy-branch push was made. The conflict resolution keeps the fork semver at `1.4.43-axiom.1`, preserves Axiom env-driven updater/feed and side-by-side installer identity in `electron.vite.config.ts`, accepts upstream macOS startup diagnostics bootstrap, keeps profile-portable task-provider validation for GitHub/GitLab/Linear/Jira/Forge, keeps the Axiom shared provider UI registry (including Forge) while accepting upstream Jira task-page changes, and combines the Axiom update-card release URL fallback with upstream HTTP/1.1 compatibility handling. Protected deletion review found only upstream deletions outside `config/axiom-merge-remediation-policy.json` protected paths (`src/renderer/src/components/settings/SettingsSetupGuideCard.tsx`, `src/shared/linear-issue-list-limits.ts`).
@@ -57,7 +75,6 @@ CI-only follow-up fixes after the first push:
 - `pnpm --dir mobile test` → 53 files passed / 244 tests passed.
 - `pnpm --dir mobile lint` → 0 warnings / 0 errors after refreshing local mobile dependencies to the lockfile (`oxlint` 1.67.0).
 - `pnpm --dir mobile format:check` → passed.
-
 
 Verification:
 

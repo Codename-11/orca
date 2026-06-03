@@ -19,8 +19,8 @@ on:
       - 'tests/e2e/computer-windows.e2e.ts'
       - 'tests/e2e/helpers/computer-driver.ts'
   workflow_dispatch:
-  schedule:
-    - cron: '0 6 * * *'
+  # Axiom fork policy: no scheduled hosted-runner computer-use smoke. Keep PR
+  # and manual dispatch paths for changes that touch computer-use code.
 
 jobs:
   scheduled-gate:

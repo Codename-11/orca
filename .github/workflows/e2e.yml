@@ -13,10 +13,8 @@ on:
         description: Ref to check out (defaults to the workflow ref)
         required: false
         type: string
-  schedule:
-    # Why: GitHub cron uses UTC; these slots map to 10am and 3pm
-    # America/Phoenix for the default-branch E2E run.
-    - cron: '0 17,22 * * *'
+  # Axiom fork policy: scheduled upstream QA runs are opt-in/manual here. PRs
+  # and release workflows still call this when it is actionable.
 
 jobs:
   build:
