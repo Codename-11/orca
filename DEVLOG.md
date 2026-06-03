@@ -20,6 +20,16 @@ Verification:
 - `pnpm exec oxfmt --check config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml config/axiom-merge-remediation-policy.json` → passed.
 - `git diff --check` → passed.
 
+CI-only follow-up fixes after the first push:
+
+- Added mobile `zod` path mappings so mobile-only CI can typecheck imported root shared modules without a root `node_modules` install.
+- Raised scoped root/mobile `max-lines` thresholds for upstream's large mobile home/tasks routes; no `max-lines` disables were added.
+- `pnpm exec oxlint --format github` → 4 pre-existing `ChecksPanel.tsx` warnings / 0 errors.
+- `cd mobile && npx tsc --noEmit` → passed.
+- `pnpm --dir mobile test` → 53 files passed / 244 tests passed.
+- `pnpm --dir mobile lint` → 0 warnings / 0 errors after refreshing local mobile dependencies to the lockfile (`oxlint` 1.67.0).
+- `pnpm --dir mobile format:check` → passed.
+
 ---
 
 ## 2026-06-01 — Fixed Axiom release workflow node-gyp install path
