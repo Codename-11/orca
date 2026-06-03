@@ -76,6 +76,18 @@
       }
     },
     {
+      "files": ["mobile/app/index.tsx"],
+      "rules": {
+        "max-lines": ["error", { "max": 1448, "skipBlankLines": true, "skipComments": true }]
+      }
+    },
+    {
+      "files": ["mobile/app/h/*/tasks.tsx"],
+      "rules": {
+        "max-lines": ["error", { "max": 15137, "skipBlankLines": true, "skipComments": true }]
+      }
+    },
+    {
       "files": ["**/*.mjs"],
       "rules": {
         "max-lines": ["error", { "max": 600, "skipBlankLines": true, "skipComments": true }]

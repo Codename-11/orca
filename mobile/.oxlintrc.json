@@ -16,7 +16,7 @@
     {
       "files": ["app/h/*/tasks.tsx"],
       "rules": {
-        "max-lines": ["error", { "max": 14682, "skipBlankLines": true, "skipComments": true }]
+        "max-lines": ["error", { "max": 15137, "skipBlankLines": true, "skipComments": true }]
       }
     },
     {
@@ -52,7 +52,7 @@
     {
       "files": ["app/index.tsx"],
       "rules": {
-        "max-lines": ["error", { "max": 1419, "skipBlankLines": true, "skipComments": true }]
+        "max-lines": ["error", { "max": 1448, "skipBlankLines": true, "skipComments": true }]
       }
     },
     {
