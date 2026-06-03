@@ -6,6 +6,32 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-06-03 — Remediated upstream v1.4.42 bot PR
+
+Resolved the agent-remediation merge for upstream `v1.4.42` on `bot/upstream-sync-axiom-v1.4.42-axiom.1` targeting `axiom/deploy`; no direct deploy-branch push was made. The conflict resolution keeps the fork semver at `1.4.42-axiom.1`, preserves Axiom env-driven updater/feed and side-by-side installer identity in `electron.vite.config.ts`, keeps profile-portable task-provider validation for Jira + Forge in persisted UI settings, keeps Forge/provider registry behavior while accepting upstream Jira and task-page changes, and combines the Axiom update-card release URL fallback with upstream HTTP/1.1 compatibility handling. Protected deletion review found only upstream deletions outside `config/axiom-merge-remediation-policy.json` protected paths.
+
+Verification:
+
+- `pnpm install --frozen-lockfile` → passed. Node engine warning only (`wanted node 24`, local `v25.6.0`).
+- `pnpm run typecheck` → passed. Node engine warning only (`wanted node 24`, local `v25.6.0`).
+- `pnpm exec vitest run --config config/vitest.config.ts src/shared/task-providers.test.ts src/main/axiom-release-hardening.test.ts src/main/updater-endpoints.test.ts src/main/app-build-identity.test.ts config/scripts/axiom-upstream-sync-release.test.mjs` → 50 tests passed.
+- `pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/rpc/methods/client-ui.test.ts src/renderer/src/components/UpdateCard.test.ts src/renderer/src/components/task-providers/provider-ui-registry.test.tsx` → 55 tests passed.
+- `pnpm exec oxlint config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml` → 0 warnings / 0 errors.
+- `pnpm exec oxfmt --check config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml config/axiom-merge-remediation-policy.json` → passed.
+- `git diff --check` → passed.
+
+CI-only follow-up fixes after the first push:
+
+- Added mobile `zod` path mappings so mobile-only CI can typecheck imported root shared modules without a root `node_modules` install.
+- Raised scoped root/mobile `max-lines` thresholds for upstream's large mobile home/tasks routes; no `max-lines` disables were added.
+- `pnpm exec oxlint --format github` → 4 pre-existing `ChecksPanel.tsx` warnings / 0 errors.
+- `cd mobile && npx tsc --noEmit` → passed.
+- `pnpm --dir mobile test` → 53 files passed / 244 tests passed.
+- `pnpm --dir mobile lint` → 0 warnings / 0 errors after refreshing local mobile dependencies to the lockfile (`oxlint` 1.67.0).
+- `pnpm --dir mobile format:check` → passed.
+
+---
+
 ## 2026-06-01 — Fixed Axiom release workflow node-gyp install path
 
 After merging the `v1.4.36` remediation PR, the post-merge Axiom Upstream Sync Release resume run failed during Linux dependency install because pnpm's bundled `node-gyp` exposed `gyp_main.py` without execute permission while rebuilding `node-pty`. Added the same external `node-gyp@11.5.0` override already used by `pr.yml` before the release workflow's sync-job install step so the release resume path uses the working CI native-build setup.

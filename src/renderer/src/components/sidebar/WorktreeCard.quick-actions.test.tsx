@@ -171,6 +171,20 @@ describe('WorktreeCard quick actions', () => {
     expect(markup).toContain('data-worktree-card-meta-row=""')
   })
 
+  it('renders the pending first-agent rename title button', () => {
+    const markup = renderToStaticMarkup(
+      <WorktreeCard
+        worktree={makeWorktree({ pendingFirstAgentMessageRename: true })}
+        repo={makeRepo()}
+        isActive={false}
+      />
+    )
+
+    expect(markup).toContain('aria-label="Will be renamed from first agent message"')
+    expect(markup).toContain('rename pending')
+    expect(markup).toContain('Will be renamed from first agent message')
+  })
+
   it('renders the repeated branch metadata row in detailed cards', () => {
     worktreeCardProperties = []
 
@@ -189,7 +203,7 @@ describe('WorktreeCard quick actions', () => {
     expect(markup).toContain('tabindex="0"')
   })
 
-  it('does not reserve an empty metadata row for detached git worktrees', () => {
+  it('renders detached HEAD identity in detailed card metadata', () => {
     worktreeCardProperties = []
 
     const markup = renderToStaticMarkup(
@@ -202,7 +216,9 @@ describe('WorktreeCard quick actions', () => {
     )
 
     expect(markup).toContain('orca')
-    expect(markup).not.toContain('data-worktree-card-meta-row=""')
+    expect(markup).toContain('data-worktree-card-meta-row=""')
+    expect(markup).toContain('Detached HEAD @ abc123')
+    expect(markup).toContain('Detached HEAD at abc123. You are viewing a commit, not a branch.')
     expect(markup).toContain('tabindex="0"')
   })
 
