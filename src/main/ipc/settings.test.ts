@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 const {
+  applyAppIconMock,
   applyElectronProxySettingsMock,
   browserWindowGetAllWindowsMock,
   handleMock,
@@ -8,6 +9,7 @@ const {
   showSaveDialogMock,
   showOpenDialogMock
 } = vi.hoisted(() => ({
+  applyAppIconMock: vi.fn(),
   applyElectronProxySettingsMock: vi.fn(),
   browserWindowGetAllWindowsMock: vi.fn(),
   handleMock: vi.fn(),
@@ -30,6 +32,10 @@ vi.mock('../ghostty/index', () => ({
 
 vi.mock('../network/proxy-settings', () => ({
   applyElectronProxySettings: applyElectronProxySettingsMock
+}))
+
+vi.mock('../app-icon', () => ({
+  applyAppIcon: applyAppIconMock
 }))
 
 import { registerSettingsHandlers } from './settings'
@@ -56,6 +62,7 @@ const store = {
 describe('registerSettingsHandlers', () => {
   beforeEach(() => {
     handleMock.mockClear()
+    applyAppIconMock.mockClear()
     applyElectronProxySettingsMock.mockClear()
     applyElectronProxySettingsMock.mockResolvedValue({ source: 'settings' })
     previewGhosttyImportMock.mockClear()
@@ -230,5 +237,43 @@ describe('registerSettingsHandlers', () => {
       { notifyListeners: true, originWebContentsId: 1 }
     )
     expect(applyElectronProxySettingsMock).toHaveBeenCalledWith({ httpProxyUrl: '' })
+  })
+
+  it('normalizes and applies app icon changes from renderer settings IPC', async () => {
+    store.getSettings.mockReturnValue({ appIcon: 'classic' })
+    store.updateSettings.mockReturnValue({ appIcon: 'watercolor' })
+    registerSettingsHandlers(store as never)
+
+    const handler = handleMock.mock.calls.find((call) => call[0] === 'settings:set')?.[1] as (
+      _event: unknown,
+      args: unknown
+    ) => Promise<unknown>
+
+    await handler(settingsInvokeEvent, { appIcon: 'watercolor' })
+
+    expect(store.updateSettings).toHaveBeenCalledWith(
+      { appIcon: 'watercolor' },
+      { notifyListeners: true, originWebContentsId: 1 }
+    )
+    expect(applyAppIconMock).toHaveBeenCalledWith('watercolor')
+  })
+
+  it('falls back to the classic app icon for invalid renderer settings IPC values', async () => {
+    store.getSettings.mockReturnValue({ appIcon: 'watercolor' })
+    store.updateSettings.mockReturnValue({ appIcon: 'classic' })
+    registerSettingsHandlers(store as never)
+
+    const handler = handleMock.mock.calls.find((call) => call[0] === 'settings:set')?.[1] as (
+      _event: unknown,
+      args: unknown
+    ) => Promise<unknown>
+
+    await handler(settingsInvokeEvent, { appIcon: 'not-real' })
+
+    expect(store.updateSettings).toHaveBeenCalledWith(
+      { appIcon: 'classic' },
+      { notifyListeners: true, originWebContentsId: 1 }
+    )
+    expect(applyAppIconMock).toHaveBeenCalledWith('classic')
   })
 })

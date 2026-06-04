@@ -341,7 +341,7 @@ describe('updateDiffComment', () => {
       selector: 'env-1',
       method: 'worktree.set',
       params: {
-        worktree: WT,
+        worktree: `id:${WT}`,
         diffComments: [expect.objectContaining({ id: 'c1', body: 'remote body' })]
       },
       timeoutMs: 15_000
@@ -632,7 +632,7 @@ describe('bulk clear diff comments', () => {
       selector: 'env-1',
       method: 'worktree.set',
       params: {
-        worktree: WT,
+        worktree: `id:${WT}`,
         diffComments: []
       },
       timeoutMs: 15_000
