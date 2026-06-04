@@ -132,6 +132,12 @@ import {
   sourceControlAiSettingsFromLegacy
 } from '../shared/source-control-ai'
 import { normalizeDisabledTuiAgents } from '../shared/tui-agent-selection'
+import {
+  collectTerminalScrollbackSnapshotRefs,
+  deleteTerminalScrollbackSnapshotSync,
+  migrateWorkspaceSessionTerminalScrollbackSnapshots,
+  readTerminalScrollbackSnapshotSync
+} from './terminal-scrollback-snapshots'
 
 function encrypt(plaintext: string): string {
   if (!plaintext || !safeStorage.isEncryptionAvailable()) {
@@ -509,14 +515,25 @@ function remapLegacyOnboardingLastCompletedStep(
   if (raw.outcome === 'completed' && lastCompletedStep >= ONBOARDING_FINAL_STEP) {
     return ONBOARDING_FINAL_STEP
   }
+  // Why: v2 was the five-step flow; missing/older versions were seven-step
+  // data where step 4 was removed agent setup, not completed integrations.
+  if (raw.flowVersion === 2) {
+    if (lastCompletedStep === 3) {
+      return 2
+    }
+    if (lastCompletedStep >= 4) {
+      return 3
+    }
+    return lastCompletedStep
+  }
+  if (lastCompletedStep === 3) {
+    return 2
+  }
   if (lastCompletedStep === 4) {
+    return 2
+  }
+  if (lastCompletedStep >= 5) {
     return 3
-  }
-  if (lastCompletedStep === 5 || lastCompletedStep === 6) {
-    return 4
-  }
-  if (lastCompletedStep > 6) {
-    return 4
   }
   return lastCompletedStep
 }
@@ -1169,6 +1186,11 @@ function normalizeTerminalLayoutSnapshotForPersistence(
     leafIdByInputLeafId,
     duplicatedInputLeafIds
   )
+  const scrollbackRefsByLeafId = remapLeafRecordForPersistence(
+    inputSnapshot.scrollbackRefsByLeafId,
+    leafIdByInputLeafId,
+    duplicatedInputLeafIds
+  )
   const titlesByLeafId = remapLeafRecordForPersistence(
     inputSnapshot.titlesByLeafId,
     leafIdByInputLeafId,
@@ -1177,6 +1199,7 @@ function normalizeTerminalLayoutSnapshotForPersistence(
   const recordsChanged =
     !leafRecordEquivalent(inputSnapshot.ptyIdsByLeafId, ptyIdsByLeafId) ||
     !leafRecordEquivalent(inputSnapshot.buffersByLeafId, buffersByLeafId) ||
+    !leafRecordEquivalent(inputSnapshot.scrollbackRefsByLeafId, scrollbackRefsByLeafId) ||
     !leafRecordEquivalent(inputSnapshot.titlesByLeafId, titlesByLeafId)
   const metadataChanged =
     activeLeafId !== inputSnapshot.activeLeafId || expandedLeafId !== inputSnapshot.expandedLeafId
@@ -1186,6 +1209,7 @@ function normalizeTerminalLayoutSnapshotForPersistence(
   const {
     ptyIdsByLeafId: _oldPtyIdsByLeafId,
     buffersByLeafId: _oldBuffersByLeafId,
+    scrollbackRefsByLeafId: _oldScrollbackRefsByLeafId,
     titlesByLeafId: _oldTitlesByLeafId,
     ...snapshotWithoutLeafRecords
   } = inputSnapshot
@@ -1197,6 +1221,7 @@ function normalizeTerminalLayoutSnapshotForPersistence(
       expandedLeafId,
       ...(ptyIdsByLeafId ? { ptyIdsByLeafId } : {}),
       ...(buffersByLeafId ? { buffersByLeafId } : {}),
+      ...(scrollbackRefsByLeafId ? { scrollbackRefsByLeafId } : {}),
       ...(titlesByLeafId ? { titlesByLeafId } : {})
     },
     changed: true,
@@ -1526,6 +1551,21 @@ function createMinimalPersistedTerminalTab(args: {
 
 function cloneWorkspaceSessionState(session: WorkspaceSessionState): WorkspaceSessionState {
   return structuredClone(session)
+}
+
+function deleteRemovedTerminalScrollbackSnapshots(
+  prior: WorkspaceSessionState | undefined,
+  next: WorkspaceSessionState
+): void {
+  if (!prior) {
+    return
+  }
+  const nextRefs = collectTerminalScrollbackSnapshotRefs(next)
+  for (const ref of collectTerminalScrollbackSnapshotRefs(prior)) {
+    if (!nextRefs.has(ref)) {
+      deleteTerminalScrollbackSnapshotSync(ref)
+    }
+  }
 }
 
 export class Store {
@@ -2114,12 +2154,18 @@ export class Store {
       result = getDefaultPersistedState(homedir())
     }
 
+    const workspaceSession = pruneWorkspaceSessionBrowserHistory(
+      pruneLocalTerminalScrollbackBuffers(result.workspaceSession, result.repos)
+    )
+    const migratedScrollback = migrateWorkspaceSessionTerminalScrollbackSnapshots(workspaceSession)
+    if (migratedScrollback.changed) {
+      this.loadNeedsSave = true
+    }
+
     result = {
       ...result,
       repos: clearMissingProjectGroupMemberships(result.repos, result.projectGroups ?? []),
-      workspaceSession: pruneWorkspaceSessionBrowserHistory(
-        pruneLocalTerminalScrollbackBuffers(result.workspaceSession, result.repos)
-      )
+      workspaceSession: migratedScrollback.session
     }
 
     return this.migrateTelemetry(result, fileExistedOnLoad)
@@ -3272,6 +3318,10 @@ export class Store {
     return this.state.workspaceSession ?? getDefaultWorkspaceSession()
   }
 
+  readTerminalScrollbackSnapshot(ref: string): string | null {
+    return readTerminalScrollbackSnapshotSync(ref)
+  }
+
   /** Resolve the worktree a terminal tab belongs to, from the session's
    *  tab→worktree map. More reliable than agent-echoed hook fields. */
   getWorktreeIdForTab(tabId: string): string | undefined {
@@ -3397,6 +3447,11 @@ export class Store {
             layout.buffersByLeafId,
             liveLeafIds
           )
+          const scrollbackRefsByLeafId = preserveMissingLeafRecordEntries(
+            priorLayout.scrollbackRefsByLeafId,
+            layout.scrollbackRefsByLeafId,
+            liveLeafIds
+          )
           const titlesByLeafId = preserveMissingLeafRecordEntries(
             priorLayout.titlesByLeafId,
             layout.titlesByLeafId,
@@ -3405,12 +3460,19 @@ export class Store {
           if (buffersByLeafId) {
             layout.buffersByLeafId = buffersByLeafId
           }
+          if (scrollbackRefsByLeafId) {
+            layout.scrollbackRefsByLeafId = scrollbackRefsByLeafId
+          }
           if (titlesByLeafId) {
             layout.titlesByLeafId = titlesByLeafId
           }
         }
       }
     }
+    session = pruneLocalTerminalScrollbackBuffers(session, this.state.repos)
+    const migratedScrollback = migrateWorkspaceSessionTerminalScrollbackSnapshots(session)
+    session = migratedScrollback.session
+    deleteRemovedTerminalScrollbackSnapshots(prior, session)
     this.state.workspaceSession = session
     this.scheduleSave()
   }
