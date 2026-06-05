@@ -57,7 +57,7 @@ export function SidebarTaskProviderShortcuts({
         return (
           <span
             key={provider.id}
-            role="button"
+            role={canBrowseTasks ? 'button' : undefined}
             tabIndex={-1}
             onClick={(e) => {
               e.stopPropagation()
@@ -66,8 +66,12 @@ export function SidebarTaskProviderShortcuts({
               }
               openTaskPage({ taskSource: provider.id })
             }}
-            className="rounded p-0.5 text-muted-foreground/70 transition-colors hover:text-foreground"
-            aria-label={`Open ${provider.label} tasks`}
+            className={cn(
+              'rounded p-0.5 text-muted-foreground/70',
+              canBrowseTasks ? 'transition-colors hover:text-foreground' : 'cursor-default'
+            )}
+            aria-label={canBrowseTasks ? `Open ${provider.label} tasks` : undefined}
+            aria-hidden={canBrowseTasks ? undefined : true}
           >
             <Icon className="size-3.5" />
           </span>
@@ -81,6 +85,23 @@ export function shouldShowMobileButton(
   settings: Pick<GlobalSettings, 'showMobileButton'> | null | undefined
 ): boolean {
   return settings?.showMobileButton !== false
+}
+
+export function shouldShowAutomationsButton(
+  settings: Pick<GlobalSettings, 'showAutomationsButton'> | null | undefined
+): boolean {
+  return settings?.showAutomationsButton !== false
+}
+
+function HideSidebarMenu({ onHide }: { onHide: () => void }): React.JSX.Element {
+  return (
+    <ContextMenuContent>
+      <ContextMenuItem onSelect={onHide}>
+        <EyeOff className="size-3.5" />
+        Hide from sidebar
+      </ContextMenuItem>
+    </ContextMenuContent>
+  )
 }
 
 const SidebarNav = React.memo(function SidebarNav() {
@@ -107,6 +128,7 @@ const SidebarNav = React.memo(function SidebarNav() {
   const linearStatusChecked = useAppStore((s) => s.linearStatusChecked)
   const checkLinearConnection = useAppStore((s) => s.checkLinearConnection)
   const showAgentsButton = useAppStore((s) => shouldShowAgentsButton(s.settings))
+  const showAutomationsButton = useAppStore((s) => shouldShowAutomationsButton(s.settings))
   const showMobileButton = useAppStore((s) => shouldShowMobileButton(s.settings))
   const preferredVisibleTaskProviders = React.useMemo(
     () => normalizeVisibleTaskProviders(rawVisibleTaskProviders),
@@ -184,6 +206,12 @@ const SidebarNav = React.memo(function SidebarNav() {
   const mobileActive = activeView === 'mobile'
   const activityUnreadCount = useActivityUnreadCount(showAgentsButton, 'sidebar-badge')
   const mobileOnboardingBadge = useMobileSidebarOnboardingBadge(showMobileButton)
+  const hideTasksButton = React.useCallback(() => {
+    void updateSettings({ showTasksButton: false })
+  }, [updateSettings])
+  const hideAutomationsButton = React.useCallback(() => {
+    void updateSettings({ showAutomationsButton: false })
+  }, [updateSettings])
   const hideMobileButton = React.useCallback(() => {
     void updateSettings({ showMobileButton: false })
   }, [updateSettings])
@@ -195,57 +223,71 @@ const SidebarNav = React.memo(function SidebarNav() {
     >
       <SetupGuideSidebarEntry />
       {showTasksButton ? (
-        <button
-          type="button"
-          onClick={() => {
-            if (!canBrowseTasks) {
-              return
-            }
-            openTaskPage()
-          }}
-          onPointerEnter={handlePrefetch}
-          onFocus={handlePrefetch}
-          disabled={!canBrowseTasks}
-          aria-current={tasksActive ? 'page' : undefined}
-          data-contextual-tour-target="sidebar-tasks"
-          className={cn(
-            'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] font-medium tracking-tight transition-colors',
-            tasksActive
-              ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-              : 'text-sidebar-foreground/60 hover:bg-sidebar-foreground/8',
-            !canBrowseTasks && 'cursor-not-allowed opacity-50 hover:bg-transparent'
-          )}
-        >
-          <List
-            className={cn('size-4 shrink-0', !tasksActive && 'text-sidebar-foreground/30')}
-            strokeWidth={tasksActive ? 2.25 : 1.75}
-          />
-          <span className="flex-1">Tasks</span>
-          <SidebarTaskProviderShortcuts
-            visibleTaskProviders={visibleTaskProviders}
-            canBrowseTasks={canBrowseTasks}
-            openTaskPage={openTaskPage}
-          />
-
-        </button>
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <button
+              type="button"
+              onClick={() => {
+                if (!canBrowseTasks) {
+                  return
+                }
+                openTaskPage()
+              }}
+              onPointerEnter={handlePrefetch}
+              onFocus={handlePrefetch}
+              aria-disabled={!canBrowseTasks}
+              aria-current={tasksActive ? 'page' : undefined}
+              data-contextual-tour-target="sidebar-tasks"
+              className={cn(
+                'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] font-medium tracking-tight transition-colors',
+                tasksActive
+                  ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                  : 'text-sidebar-foreground/60 hover:bg-sidebar-foreground/8',
+                !canBrowseTasks && 'cursor-not-allowed opacity-50 hover:bg-transparent'
+              )}
+            >
+              <List
+                className={cn('size-4 shrink-0', !tasksActive && 'text-sidebar-foreground/30')}
+                strokeWidth={tasksActive ? 2.25 : 1.75}
+              />
+              <span className="flex-1">Tasks</span>
+              <SidebarTaskProviderShortcuts
+                visibleTaskProviders={visibleTaskProviders}
+                canBrowseTasks={canBrowseTasks}
+                openTaskPage={openTaskPage}
+              />
+            </button>
+          </ContextMenuTrigger>
+          <HideSidebarMenu onHide={hideTasksButton} />
+        </ContextMenu>
       ) : null}
-      <button
-        type="button"
-        onClick={openAutomationsPage}
-        aria-current={automationsActive ? 'page' : undefined}
-        className={cn(
-          'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] font-medium tracking-tight transition-colors',
-          automationsActive
-            ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-            : 'text-sidebar-foreground/60 hover:bg-sidebar-foreground/8'
-        )}
-      >
-        <CalendarClock
-          className={cn('size-4 shrink-0', !automationsActive && 'text-sidebar-foreground/30')}
-          strokeWidth={automationsActive ? 2.25 : 1.75}
-        />
-        <span className="flex-1">Automations</span>
-      </button>
+      {showAutomationsButton ? (
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <button
+              type="button"
+              onClick={openAutomationsPage}
+              aria-current={automationsActive ? 'page' : undefined}
+              className={cn(
+                'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] font-medium tracking-tight transition-colors',
+                automationsActive
+                  ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                  : 'text-sidebar-foreground/60 hover:bg-sidebar-foreground/8'
+              )}
+            >
+              <CalendarClock
+                className={cn(
+                  'size-4 shrink-0',
+                  !automationsActive && 'text-sidebar-foreground/30'
+                )}
+                strokeWidth={automationsActive ? 2.25 : 1.75}
+              />
+              <span className="flex-1">Automations</span>
+            </button>
+          </ContextMenuTrigger>
+          <HideSidebarMenu onHide={hideAutomationsButton} />
+        </ContextMenu>
+      ) : null}
       {showAgentsButton ? (
         <button
           type="button"
@@ -299,12 +341,7 @@ const SidebarNav = React.memo(function SidebarNav() {
               ) : null}
             </button>
           </ContextMenuTrigger>
-          <ContextMenuContent>
-            <ContextMenuItem onSelect={hideMobileButton}>
-              <EyeOff className="size-3.5" />
-              Hide from sidebar
-            </ContextMenuItem>
-          </ContextMenuContent>
+          <HideSidebarMenu onHide={hideMobileButton} />
         </ContextMenu>
       ) : null}
       <button
