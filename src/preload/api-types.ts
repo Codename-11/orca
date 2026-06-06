@@ -2230,7 +2230,7 @@ export type PreloadApi = {
         worktreeId: string
         filePath: string
         relativePath: string
-        runtimeEnvironmentId: string
+        runtimeEnvironmentId?: string
       }) => void
     ) => () => void
     onOpenDiffFromMobile: (
@@ -2239,7 +2239,7 @@ export type PreloadApi = {
         filePath: string
         relativePath: string
         staged: boolean
-        runtimeEnvironmentId: string
+        runtimeEnvironmentId?: string
       }) => void
     ) => () => void
     onMobileMarkdownRequest: (

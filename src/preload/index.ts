@@ -2910,7 +2910,7 @@ const api = {
         worktreeId: string
         filePath: string
         relativePath: string
-        runtimeEnvironmentId: string
+        runtimeEnvironmentId?: string
       }) => void
     ): (() => void) => {
       const listener = (
@@ -2919,7 +2919,7 @@ const api = {
           worktreeId: string
           filePath: string
           relativePath: string
-          runtimeEnvironmentId: string
+          runtimeEnvironmentId?: string
         }
       ) => callback(data)
       ipcRenderer.on('ui:openFileFromMobile', listener)
@@ -2931,7 +2931,7 @@ const api = {
         filePath: string
         relativePath: string
         staged: boolean
-        runtimeEnvironmentId: string
+        runtimeEnvironmentId?: string
       }) => void
     ): (() => void) => {
       const listener = (
@@ -2941,7 +2941,7 @@ const api = {
           filePath: string
           relativePath: string
           staged: boolean
-          runtimeEnvironmentId: string
+          runtimeEnvironmentId?: string
         }
       ) => callback(data)
       ipcRenderer.on('ui:openDiffFromMobile', listener)
