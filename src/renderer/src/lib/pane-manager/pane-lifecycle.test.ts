@@ -69,8 +69,9 @@ describe('buildDefaultTerminalOptions', () => {
     expect(buildDefaultTerminalOptions().macOptionIsMeta).toBe(false)
   })
 
-  it('keeps the default inactive cursor as a single bar', () => {
-    expect(buildDefaultTerminalOptions().cursorInactiveStyle).toBe('bar')
+  it('uses the default inactive outline only for the block cursor', () => {
+    expect(buildDefaultTerminalOptions().cursorStyle).toBe('block')
+    expect(buildDefaultTerminalOptions().cursorInactiveStyle).toBe('outline')
   })
 
   it('only uses inactive outline for block cursors', () => {
@@ -86,6 +87,10 @@ describe('buildDefaultTerminalOptions', () => {
     // bytes once the terminal advertises support. Regressing this flag
     // silently breaks enhanced chords, especially inside tmux.
     expect(buildDefaultTerminalOptions().vtExtensions?.kittyKeyboard).toBe(true)
+  })
+
+  it('uses xterm scrollbar options for the slimmer terminal scrollbar', () => {
+    expect(buildDefaultTerminalOptions().scrollbar?.width).toBe(7)
   })
 })
 

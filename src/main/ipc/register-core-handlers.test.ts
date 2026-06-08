@@ -49,7 +49,8 @@ const {
   registerSpeechHandlersMock,
   registerSkillsHandlersMock,
   registerWorkspaceSpaceHandlersMock,
-  registerWorkspacePortHandlersMock
+  registerWorkspacePortHandlersMock,
+  registerEmulatorFrameStreamHandlersMock
 } = vi.hoisted(() => ({
   registerCliHandlersMock: vi.fn(),
   registerPreflightHandlersMock: vi.fn(),
@@ -97,7 +98,8 @@ const {
   registerSpeechHandlersMock: vi.fn(),
   registerSkillsHandlersMock: vi.fn(),
   registerWorkspaceSpaceHandlersMock: vi.fn(),
-  registerWorkspacePortHandlersMock: vi.fn()
+  registerWorkspacePortHandlersMock: vi.fn(),
+  registerEmulatorFrameStreamHandlersMock: vi.fn()
 }))
 
 vi.mock('./onboarding', () => ({
@@ -206,6 +208,10 @@ vi.mock('./session', () => ({
 
 vi.mock('./ui', () => ({
   registerUIHandlers: registerUIHandlersMock
+}))
+
+vi.mock('./emulator-frame-stream', () => ({
+  registerEmulatorFrameStreamHandlers: registerEmulatorFrameStreamHandlersMock
 }))
 
 vi.mock('./filesystem', () => ({
@@ -332,6 +338,7 @@ describe('registerCoreHandlers', () => {
     registerSkillsHandlersMock.mockReset()
     registerWorkspaceSpaceHandlersMock.mockReset()
     registerWorkspacePortHandlersMock.mockReset()
+    registerEmulatorFrameStreamHandlersMock.mockReset()
   })
 
   it('passes the store through to handler registrars that need it', () => {
@@ -395,6 +402,7 @@ describe('registerCoreHandlers', () => {
     expect(registerTelemetryHandlersMock).toHaveBeenCalledWith(store)
     expect(registerSessionHandlersMock).toHaveBeenCalledWith(store)
     expect(registerUIHandlersMock).toHaveBeenCalledWith(store)
+    expect(registerEmulatorFrameStreamHandlersMock).toHaveBeenCalled()
     expect(registerFilesystemHandlersMock).toHaveBeenCalledWith(store)
     expect(registerRuntimeHandlersMock).toHaveBeenCalledWith(runtime)
     expect(registerRuntimeEnvironmentHandlersMock).toHaveBeenCalled()

@@ -8,11 +8,11 @@ export function resolveTerminalCursorInactiveStyle(
 ): TerminalCursorInactiveStyle {
   // Why: xterm's default inactive outline turns a bar/underline cursor into
   // extra strokes in blurred panes; only block cursors benefit from outline.
-  return (cursorStyle ?? 'bar') === 'block' ? 'outline' : (cursorStyle ?? 'bar')
+  return (cursorStyle ?? 'block') === 'block' ? 'outline' : (cursorStyle ?? 'block')
 }
 
 export function buildDefaultTerminalOptions(): ITerminalOptions {
-  const cursorStyle: TerminalCursorStyle = 'bar'
+  const cursorStyle: TerminalCursorStyle = 'block'
 
   return {
     allowProposedApi: true,
@@ -26,6 +26,13 @@ export function buildDefaultTerminalOptions(): ITerminalOptions {
     fontWeight: '300',
     fontWeightBold: '500',
     scrollback: 10000,
+    // Why: xterm 6.x renders its own DOM scrollbar (default 14px), which no CSS
+    // on .xterm-viewport can resize. Slim it via the option. Setting width also
+    // enables the overview ruler, whose border is hidden via overviewRulerBorder
+    // in composeActiveTerminalTheme.
+    scrollbar: {
+      width: 7
+    },
     allowTransparency: false,
     // Why: on macOS, non-US layouts rely on Option to compose characters like @ and €.
     macOptionIsMeta: false,
