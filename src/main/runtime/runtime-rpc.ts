@@ -283,6 +283,8 @@ const MOBILE_RPC_METHOD_ALLOWLIST = new Set([
   'speech.dictation.start',
   'stats.summary',
   'status.get',
+  'agentTeams.prepareLaunch',
+  'agentTeams.tmuxCompat',
   'terminal.clearBuffer',
   'terminal.close',
   'terminal.create',

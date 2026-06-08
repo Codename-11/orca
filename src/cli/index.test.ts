@@ -7,13 +7,15 @@ const {
   serveOrcaAppMock,
   getDefaultUserDataPathMock,
   addEnvironmentFromPairingCodeMock,
-  listEnvironmentsMock
+  listEnvironmentsMock,
+  spawnMock
 } = vi.hoisted(() => ({
   callMock: vi.fn(),
   serveOrcaAppMock: vi.fn(),
   getDefaultUserDataPathMock: vi.fn(() => '/tmp/orca-user-data'),
   addEnvironmentFromPairingCodeMock: vi.fn(),
-  listEnvironmentsMock: vi.fn()
+  listEnvironmentsMock: vi.fn(),
+  spawnMock: vi.fn()
 }))
 
 vi.mock('./runtime-client', () => {
@@ -78,6 +80,17 @@ vi.mock('./runtime/environments', () => ({
   removeEnvironment: vi.fn(),
   resolveEnvironment: vi.fn()
 }))
+
+vi.mock('child_process', async () => {
+  const { EventEmitter } = await import('events')
+  return {
+    spawn: spawnMock.mockImplementation(() => {
+      const child = new EventEmitter()
+      process.nextTick(() => child.emit('exit', 0, null))
+      return child
+    })
+  }
+})
 
 import {
   buildCurrentWorktreeSelector,
@@ -147,6 +160,7 @@ describe('orca cli worktree awareness', () => {
     getDefaultUserDataPathMock.mockClear()
     addEnvironmentFromPairingCodeMock.mockReset()
     listEnvironmentsMock.mockReset()
+    spawnMock.mockClear()
     addEnvironmentFromPairingCodeMock.mockReturnValue({
       id: 'env-1',
       name: 'desk',
@@ -239,6 +253,107 @@ describe('orca cli worktree awareness', () => {
     })
     expect(logSpy).toHaveBeenCalledTimes(1)
   })
+
+  it.skipIf(process.platform === 'win32')(
+    'prepares and starts Claude Agent Teams in the current Orca terminal',
+    async () => {
+      process.env.ORCA_PANE_KEY = 'tab-1:11111111-1111-4111-8111-111111111111'
+      queueFixtures(
+        callMock,
+        okFixture('req_agent_teams_prepare', {
+          launch: {
+            env: {
+              CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+              TMUX: '/tmp/orca-claude-agent-teams/team-1,0,1',
+              TMUX_PANE: '%1',
+              PATH: '/tmp/orca-shim:/usr/bin'
+            }
+          }
+        })
+      )
+
+      await main(['claude-teams'], '/tmp/repo')
+
+      expect(callMock).toHaveBeenCalledWith('agentTeams.prepareLaunch', {
+        paneKey: 'tab-1:11111111-1111-4111-8111-111111111111',
+        env: expect.objectContaining({
+          ORCA_PANE_KEY: 'tab-1:11111111-1111-4111-8111-111111111111'
+        })
+      })
+      expect(spawnMock).toHaveBeenCalledWith('claude', ['--teammate-mode', 'auto'], {
+        stdio: 'inherit',
+        env: expect.objectContaining({
+          CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+          TMUX_PANE: '%1'
+        })
+      })
+    }
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'passes Claude Agent Teams arguments through to Claude Code',
+    async () => {
+      process.env.ORCA_PANE_KEY = 'tab-1:11111111-1111-4111-8111-111111111111'
+      queueFixtures(
+        callMock,
+        okFixture('req_agent_teams_prepare', {
+          launch: {
+            env: {
+              CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+              TMUX: '/tmp/orca-claude-agent-teams/team-1,0,1',
+              TMUX_PANE: '%1',
+              PATH: '/tmp/orca-shim:/usr/bin'
+            }
+          }
+        })
+      )
+
+      await main(
+        ['claude-teams', '--resume', 'session-1', '--model', 'sonnet', 'review this'],
+        '/tmp/repo'
+      )
+
+      expect(spawnMock).toHaveBeenCalledWith(
+        'claude',
+        ['--teammate-mode', 'auto', '--resume', 'session-1', '--model', 'sonnet', 'review this'],
+        {
+          stdio: 'inherit',
+          env: expect.objectContaining({
+            CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+            TMUX_PANE: '%1'
+          })
+        }
+      )
+    }
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'does not duplicate an explicit Claude teammate mode',
+    async () => {
+      process.env.ORCA_PANE_KEY = 'tab-1:11111111-1111-4111-8111-111111111111'
+      queueFixtures(
+        callMock,
+        okFixture('req_agent_teams_prepare', {
+          launch: {
+            env: {
+              CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+              TMUX: '/tmp/orca-claude-agent-teams/team-1,0,1',
+              TMUX_PANE: '%1',
+              PATH: '/tmp/orca-shim:/usr/bin'
+            }
+          }
+        })
+      )
+
+      await main(['claude-teams', '--teammate-mode', 'in-process'], '/tmp/repo')
+
+      expect(spawnMock).toHaveBeenCalledWith(
+        'claude',
+        ['--teammate-mode', 'in-process'],
+        expect.objectContaining({ stdio: 'inherit' })
+      )
+    }
+  )
 
   it('rejects remote `worktree current` without listing worktrees from client cwd', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
