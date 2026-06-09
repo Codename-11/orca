@@ -276,12 +276,14 @@ export function FloatingTerminalPanel({
               title: resolveUnifiedTabLabel(
                 {
                   ...tab,
+                  quickCommandLabel: tab.quickCommandLabel ?? terminalTab.quickCommandLabel,
                   generatedLabel: tab.generatedLabel ?? terminalTab.generatedTitle
                 },
                 generatedTabTitlesEnabled,
                 tab.label
               ),
               generatedTitle: terminalTab.generatedTitle ?? tab.generatedLabel ?? null,
+              quickCommandLabel: terminalTab.quickCommandLabel ?? tab.quickCommandLabel ?? null,
               customTitle: tab.customLabel ?? terminalTab.customTitle,
               color: tab.color ?? terminalTab.color
             }
@@ -1458,7 +1460,6 @@ export function FloatingTerminalPanel({
       )}
       <FloatingTerminalOrchestrationDialog
         open={orchestrationDialogOpen}
-        activeTabId={activeTerminalId}
         onOpenChange={setOrchestrationDialogOpen}
         onSetupStateChange={() => void refreshOrchestrationSetupVisibility()}
       />

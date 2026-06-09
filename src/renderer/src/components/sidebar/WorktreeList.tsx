@@ -123,7 +123,7 @@ import {
   SCROLL_TO_CURRENT_WORKSPACE_REVEAL_REQUEST_EVENT,
   type ScrollToCurrentWorkspaceRevealRequestDetail
 } from '@/lib/scroll-to-current-workspace-status'
-import { useRepoHeaderDrag } from './project-header-drag'
+import { isRepoHeaderActionTarget, useRepoHeaderDrag } from './project-header-drag'
 import WorktreeContextMenu from './WorktreeContextMenu'
 import {
   buildManualOrderUpdatesForGroupDrop,
@@ -201,7 +201,6 @@ import {
 import { buildImportedWorktreesCardCandidates } from './imported-worktrees-card-candidates'
 import {
   WORKTREE_SECTION_HEADER_PADDING_LEFT,
-  SIDEBAR_TREE_INDENT,
   getProjectGroupHeaderPaddingLeft,
   getWorktreeCardContentIndent
 } from './worktree-list-indentation'
@@ -297,6 +296,14 @@ function stopNestedWorktreeCardBubble(event: React.SyntheticEvent<HTMLElement>):
   event.stopPropagation()
 }
 
+function handleRepoHeaderActionPointerDown(event: React.PointerEvent<HTMLElement>): void {
+  event.stopPropagation()
+}
+
+function shouldIgnoreRepoHeaderToggle(event: React.SyntheticEvent<HTMLElement>): boolean {
+  return isRepoHeaderActionTarget(event.target, event.currentTarget)
+}
+
 function getWorktreeOptionId(worktreeId: string): string {
   return `worktree-list-option-${encodeURIComponent(worktreeId)}`
 }
@@ -350,7 +357,9 @@ function getWorktreeVisibilityMenuLabel(repo: Repo): string {
   return visibility === 'show' ? 'Hide non-Orca worktrees' : 'Show hidden worktrees'
 }
 
-const LINEAGE_INDENT = SIDEBAR_TREE_INDENT
+// Why: child workspace cards are already nested inside the parent card body;
+// using the full tree step makes the second-level card drift too far right.
+const LINEAGE_INDENT = 14
 const SIDEBAR_POINTER_DRAG_THRESHOLD_PX = 4
 
 type VirtualizedWorktreeViewportProps = {
@@ -2928,8 +2937,16 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                         ? (event) => handleWorkspaceStatusDrop(event, headerWorkspaceStatus)
                         : undefined
                     }
-                    onClick={() => toggleGroupWithScrollAnchor(row.key)}
+                    onClick={(event) => {
+                      if (shouldIgnoreRepoHeaderToggle(event)) {
+                        return
+                      }
+                      toggleGroupWithScrollAnchor(row.key)
+                    }}
                     onKeyDown={(e) => {
+                      if (shouldIgnoreRepoHeaderToggle(e)) {
+                        return
+                      }
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault()
                         toggleGroupWithScrollAnchor(row.key)
@@ -2982,11 +2999,12 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                             type="button"
                             variant="ghost"
                             size="icon-xs"
+                            data-repo-header-action=""
                             className="size-5 shrink-0 rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent/70 hover:text-foreground focus:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
                             aria-label={`Group actions for ${row.label}`}
                             onClick={(event) => event.stopPropagation()}
                             onKeyDown={stopRepoHeaderKeyboardToggle}
-                            onPointerDown={(event) => event.stopPropagation()}
+                            onPointerDown={handleRepoHeaderActionPointerDown}
                           >
                             <Ellipsis className="size-3.5" />
                           </Button>
@@ -3029,11 +3047,12 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                                 type="button"
                                 variant="ghost"
                                 size="icon-xs"
+                                data-repo-header-action=""
                                 className="size-5 shrink-0 rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent/70 hover:text-foreground focus:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
                                 aria-label={`Project actions for ${row.label}`}
                                 onClick={(event) => event.stopPropagation()}
                                 onKeyDown={stopRepoHeaderKeyboardToggle}
-                                onPointerDown={(event) => event.stopPropagation()}
+                                onPointerDown={handleRepoHeaderActionPointerDown}
                               >
                                 <Ellipsis className="size-3.5" />
                               </Button>
@@ -3150,12 +3169,13 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                         <TooltipTrigger asChild>
                           {createState?.disabled ? (
                             <span
+                              data-repo-header-action=""
                               className="inline-flex cursor-not-allowed opacity-0 transition-opacity focus:opacity-100 group-hover:opacity-100"
                               tabIndex={0}
                               aria-label={createState.ariaLabel}
                               onKeyDown={stopRepoHeaderKeyboardToggle}
                               onClick={(event) => event.stopPropagation()}
-                              onPointerDown={(event) => event.stopPropagation()}
+                              onPointerDown={handleRepoHeaderActionPointerDown}
                             >
                               <Button
                                 type="button"
@@ -3173,6 +3193,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                               type="button"
                               variant="ghost"
                               size="icon-xs"
+                              data-repo-header-action=""
                               className="size-5 shrink-0 rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent/70 hover:text-foreground focus:opacity-100 group-hover:opacity-100"
                               aria-label={
                                 createState?.ariaLabel ?? `Create workspace for ${row.label}`
