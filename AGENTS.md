@@ -16,7 +16,7 @@ Never add a `max-lines` disable (`eslint-disable max-lines`, `oxlint-disable max
 
 ## File and Module Naming
 
-Never use vague names like `helpers`, `utils`, `common`, `misc`, or `shared-stuff` for files, folders, or modules. They carry zero information and tend to become dumping grounds. Name files after what they _actually_ contain — prefer the concrete domain concept (e.g. `tab-group-state.ts`, `terminal-orphan-cleanup.ts`) over the generic role (`tabs-helpers.ts`, `terminal-utils.ts`). If you find yourself reaching for `helpers`, the file probably has more than one responsibility and should be split, or there's a better name hiding in the code that describes what the functions operate on.
+Never use vague names like `helpers`, `utils`, `common`, `misc`, or `shared-stuff` for files, folders, or modules. They carry zero info and tend to become dumping grounds. Name files after what they _actually_ contain — prefer the concrete domain concept (e.g. `tab-group-state.ts`, `terminal-orphan-cleanup.ts`) over the generic role (`tabs-helpers.ts`, `terminal-utils.ts`). If you find yourself reaching for `helpers`, the file probably has more than one responsibility and should be split, or there's a better name hiding in the code that describes what the functions operate on.
 
 ## Worktree Safety
 
@@ -41,12 +41,10 @@ Source-control and review changes must consider GitLab and other supported git p
 ## GitHub CLI Usage
 
 Be mindful of the user's `gh` CLI API rate limit — batch requests where possible and avoid unnecessary calls. All code, commands, and scripts must be compatible with macOS, Linux, and Windows.
-Never commit PR evidence images; attach them to the PR conversation instead.
+Never commit PR evidence images; attach them to the PR conversation instead (but never use gh-attach).
 
 ## Axiom Fork Releases
 
 Before changing release behavior or publishing fork builds, read [`FORK.md`](./FORK.md) and [`docs/reference/axiom-release-readiness.md`](./docs/reference/axiom-release-readiness.md). Axiom patch releases are not triggered by plain pushes to `axiom/deploy`; dispatch `.github/workflows/axiom-upstream-sync-release.yml` with `bump_axiom_revision=true` so the fork gets a new `axiom-v*` tag and updater-visible version.
 
 ## Type Declarations: Prefer `.ts` Over `.d.ts`
-
-Project-owned type declarations belong in `.ts` files. `.d.ts` is reserved for ambient shims (e.g., `env.d.ts`, `vite/client.d.ts`). TypeScript's `skipLibCheck: true` setting applies globally, including to our own `.d.ts` files, which means any unresolved type reference in a `.d.ts` silently becomes `any` at its call sites. Write your types in `.ts` files so the compiler actually checks them. CI enforces this for `src/preload/` and `src/shared/` — see `docs/preload-typecheck-hole.md`.
