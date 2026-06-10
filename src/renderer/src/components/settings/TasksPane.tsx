@@ -17,8 +17,6 @@ type TasksPaneProps = {
   updateSettings: (updates: Partial<GlobalSettings>) => void
 }
 
-
-
 export function TasksPane({ settings, updateSettings }: TasksPaneProps): React.JSX.Element {
   const visibleProviders = normalizeVisibleTaskProviders(settings.visibleTaskProviders)
 
@@ -40,13 +38,19 @@ export function TasksPane({ settings, updateSettings }: TasksPaneProps): React.J
     <div className="space-y-6">
       <section className="space-y-3">
         <SettingsSubsectionHeader
-          title={translate("auto.components.settings.TasksPane.93e72ef659", "Task Sources")}
-          description={translate("auto.components.settings.TasksPane.71644aba56", "Choose which task providers appear in the Tasks page source picker and sidebar shortcuts. At least one provider must stay visible.")}
+          title={translate('auto.components.settings.TasksPane.93e72ef659', 'Task Sources')}
+          description={translate(
+            'auto.components.settings.TasksPane.71644aba56',
+            'Choose which task providers appear in the Tasks page source picker and sidebar shortcuts. At least one provider must stay visible.'
+          )}
         />
 
         <SearchableSetting
-          title={translate("auto.components.settings.TasksPane.f71d8a9dd3", "Task Providers")}
-          description={translate("auto.components.settings.TasksPane.3a72b9745e", "Choose which task providers appear in the Tasks page and sidebar shortcuts.")}
+          title={translate('auto.components.settings.TasksPane.f71d8a9dd3', 'Task Providers')}
+          description={translate(
+            'auto.components.settings.TasksPane.3a72b9745e',
+            'Choose which task providers appear in the Tasks page and sidebar shortcuts.'
+          )}
           keywords={[
             'tasks',
             'provider',
