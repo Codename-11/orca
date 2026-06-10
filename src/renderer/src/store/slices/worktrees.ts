@@ -39,6 +39,7 @@ import { branchName } from '@/lib/git-utils'
 import { markInputQuietSchedulerInput, scheduleAfterInputQuiet } from '@/lib/input-quiet-scheduler'
 import { showLocalBaseRefUpdateSuggestionToast } from '@/components/sidebar/local-base-ref-suggestion-toast'
 import { translate } from '@/i18n/i18n'
+import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../../shared/constants'
 export type { WorktreeSlice, WorktreeDeleteState } from './worktree-helpers'
 
 // Why: old runtime servers only have `worktree.list`; preserve the large-list
@@ -869,6 +870,9 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
       return
     }
     const validIds = new Set<string>()
+    // Why: floating is persisted renderer state, but not a repo worktree that
+    // authoritative runtime scans can return.
+    validIds.add(FLOATING_TERMINAL_WORKTREE_ID)
     for (const result of Object.values(get().detectedWorktreesByRepo)) {
       if (!result.authoritative) {
         continue
@@ -1145,10 +1149,17 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
           set((s) => {
             const current = s.worktreesByRepo[repoId] ?? []
             const alreadyPresent = current.some((w) => w.id === result.worktree.id)
+            const nextWorktrees = alreadyPresent
+              ? current.map((worktree) =>
+                  worktree.id === result.worktree.id
+                    ? { ...worktree, ...result.worktree }
+                    : worktree
+                )
+              : [...current, result.worktree]
             return {
               worktreesByRepo: {
                 ...s.worktreesByRepo,
-                [repoId]: alreadyPresent ? current : [...current, result.worktree]
+                [repoId]: nextWorktrees
               },
               ...(result.initialBaseStatus
                 ? {
@@ -2462,9 +2473,10 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
   getKnownWorktreeById: (worktreeId) => findKnownWorktreeById(get(), worktreeId),
 
   purgeWorktreeTerminalState: (worktreeIds: string[]) => {
-    if (worktreeIds.length === 0) {
+    const purgeableWorktreeIds = worktreeIds.filter((id) => id !== FLOATING_TERMINAL_WORKTREE_ID)
+    if (purgeableWorktreeIds.length === 0) {
       return
     }
-    set((s) => buildWorktreePurgeState(s, worktreeIds))
+    set((s) => buildWorktreePurgeState(s, purgeableWorktreeIds))
   }
 })
