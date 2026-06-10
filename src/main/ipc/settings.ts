@@ -3,6 +3,7 @@ import type { Store } from '../persistence'
 import type { GlobalSettings, PersistedState } from '../../shared/types'
 import { listSystemFontFamilies } from '../system-fonts'
 import { previewGhosttyImport } from '../ghostty/index'
+import { previewWarpThemeImport } from '../warp-themes'
 import { setMainUiLanguage } from '../i18n/main-i18n'
 import { rebuildAppMenu } from '../menu/register-app-menu'
 import { track } from '../telemetry/client'
@@ -16,6 +17,7 @@ import { normalizeProxyBypassRules, normalizeProxyUrl } from '../../shared/netwo
 import { normalizeAppIconId } from '../../shared/app-icon'
 import { normalizeUiLanguage } from '../../shared/ui-language'
 import { applyAppIcon } from '../app-icon'
+import { normalizeTerminalCustomThemes } from '../../shared/terminal-custom-themes'
 
 // Why: the whitelist is the source-of-truth for which keys we emit on. Casting
 // to a Set once at module load lets the IPC handler's per-key membership
@@ -71,6 +73,9 @@ export function registerSettingsHandlers(
     }
     if ('appIcon' in args) {
       sanitizedArgs.appIcon = normalizeAppIconId(args.appIcon)
+    }
+    if ('terminalCustomThemes' in args) {
+      sanitizedArgs.terminalCustomThemes = normalizeTerminalCustomThemes(args.terminalCustomThemes)
     }
     if ('uiLanguage' in args) {
       sanitizedArgs.uiLanguage = normalizeUiLanguage(args.uiLanguage)
@@ -206,6 +211,11 @@ export function registerSettingsHandlers(
       }
     }
   )
+
+  ipcMain.handle('settings:previewWarpThemeImport', (event, args?: unknown) => {
+    const source = args === undefined ? { kind: 'auto' } : args
+    return previewWarpThemeImport(store, source, event.sender)
+  })
 
   ipcMain.handle('cache:getGitHub', () => {
     return store.getGitHubCache()
