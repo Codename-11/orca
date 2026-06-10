@@ -52,16 +52,25 @@ M  src/shared/ui-locale.test.ts
 M  src/shared/ui-locale.ts
 ```
 
+## Resolution summary
+- `package.json`: kept the Axiom fork semver as `1.4.57-axiom.1` while accepting the upstream v1.4.57 dependency/script changes.
+- `src/renderer/src/components/TaskPage.tsx`: accepted upstream's localized task option extraction and preserved the Axiom Forge task provider UI, project/workspace affordances, and task-source visibility behavior.
+- `src/renderer/src/components/task-page-localized-options.tsx`: added Forge to the upstream localized task source catalog and covered the provider order in the new localized-options test.
+- Locale catalogs: added the Forge source label key across the shipped locale catalogs so localization coverage remains complete.
+
 ## Axiom safety notes
-- Bot branch PR only; do not push conflict remediation directly to `axiom/deploy`.
-- Preserve side-by-side identity, updater feed, fork semver, profile portability, and Forge provider/task-registry additions.
-- Protected-file deletion or fork identity/update-feed changes require explicit review before merge.
+- Bot branch PR only; no conflict remediation was pushed directly to `axiom/deploy`.
+- Preserved side-by-side identity, updater feed, fork semver, profile portability, and Forge provider/task-registry additions.
+- Reviewed protected-file status: no protected Axiom files were deleted.
 
 ## Verification checklist
-- [ ] `pnpm install --frozen-lockfile`
-- [ ] `pnpm run typecheck`
-- [ ] `pnpm exec vitest run --config config/vitest.config.ts src/shared/task-providers.test.ts src/main/axiom-release-hardening.test.ts src/main/updater-endpoints.test.ts src/main/app-build-identity.test.ts config/scripts/axiom-upstream-sync-release.test.mjs`
-- [ ] `pnpm exec oxlint config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml`
-- [ ] `pnpm exec oxfmt --check config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml config/axiom-merge-remediation-policy.json`
-- [ ] `git diff --check`
+- [x] `pnpm install --frozen-lockfile` — passed (Node 25.6.0 emitted the existing Node 24 engine warning only).
+- [x] `pnpm run typecheck` — passed.
+- [x] `pnpm exec vitest run --config config/vitest.config.ts src/shared/task-providers.test.ts src/main/axiom-release-hardening.test.ts src/main/updater-endpoints.test.ts src/main/app-build-identity.test.ts config/scripts/axiom-upstream-sync-release.test.mjs` — passed, 50 tests.
+- [x] `pnpm exec oxlint config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml` — passed.
+- [x] `pnpm exec oxfmt --check config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml config/axiom-merge-remediation-policy.json` — passed.
+- [x] `git diff --check` — passed.
+
+## Additional focused verification
+- [x] `pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/task-page-localized-options.test.ts src/renderer/src/components/task-providers/provider-ui-registry.test.tsx` — passed, 7 tests.
 
