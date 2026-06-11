@@ -15,7 +15,8 @@ import type {
   WorktreeBaseStatusEvent,
   WorktreeLineage,
   WorktreeRemoteBranchConflictEvent,
-  WorktreeMeta
+  WorktreeMeta,
+  WorkspaceKey
 } from '../../../../shared/types'
 import type { TerminalGitHubPRLink } from '@/lib/terminal-github-pr-link-detector'
 import type {
@@ -41,6 +42,7 @@ export type WorktreeSlice = {
   detectedWorktreesByRepo: Record<string, DetectedWorktreeListResult>
   worktreeLineageById: Record<string, WorktreeLineage>
   activeWorktreeId: string | null
+  activeWorkspaceKey: WorkspaceKey | null
   /**
    * In-flight / failed background worktree creations, keyed by a renderer
    * `creationId`. Kept separate from `worktreesByRepo` on purpose — a real
@@ -131,7 +133,9 @@ export type WorktreeSlice = {
     pendingFirstAgentMessageRename?: boolean,
     /** When set, correlates the backend's `createWorktree:progress` events to a
      *  renderer pending creation. Synchronous callers omit it. */
-    creationId?: string
+    creationId?: string,
+    linkedLinearIssueWorkspaceId?: string | null,
+    linkedLinearIssueOrganizationUrlKey?: string | null
   ) => Promise<CreateWorktreeResult>
   /** Register an in-flight background creation and make it the active surface. */
   beginPendingWorktreeCreation: (entry: PendingWorktreeCreation) => void
@@ -207,6 +211,7 @@ export type WorktreeSlice = {
    */
   seedActiveWorktreeLastVisitedIfMissing: () => void
   setActiveWorktree: (worktreeId: string | null) => void
+  setActiveFolderWorkspace: (folderWorkspaceId: string) => void
   setRenamingWorktreeId: (worktreeId: string | null) => void
   allWorktrees: () => Worktree[]
   getKnownWorktreeById: (worktreeId: string) => Worktree | DetectedWorktree | undefined
