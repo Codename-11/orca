@@ -9,24 +9,26 @@ import { useAppStore } from '@/store'
 import { useRepoMap } from '@/store/selectors'
 import { translate } from '@/i18n/i18n'
 import { isGitRepoKind } from '../../../../shared/repo-kind'
+import type { TaskProvider } from '../../../../shared/types'
 import {
   normalizeVisibleTaskProviders,
   restoreAvailableDefaultTaskProvider,
   resolveVisibleTaskProvider
 } from '../../../../shared/task-providers'
-import type { TaskProvider } from '../../../../shared/types'
 import { HideSidebarMenu, TaskProviderShortcut } from './sidebar-nav-controls'
 
 type SidebarTaskProviderShortcutsProps = {
   visibleTaskProviders: readonly TaskProvider[]
   canBrowseTasks: boolean
   openTaskPage: (options?: { taskSource: TaskProvider }) => void
+  className?: string
 }
 
 export function SidebarTaskProviderShortcuts({
   visibleTaskProviders,
   canBrowseTasks,
-  openTaskPage
+  openTaskPage,
+  className = 'flex items-center gap-1'
 }: SidebarTaskProviderShortcutsProps): React.JSX.Element | null {
   const visibleProviderOptions = TASK_PROVIDER_UI_OPTIONS.filter((provider) =>
     visibleTaskProviders.includes(provider.id)
@@ -37,7 +39,7 @@ export function SidebarTaskProviderShortcuts({
   }
 
   return (
-    <span className="hidden items-center gap-1 group-hover:flex group-focus-within:flex">
+    <span className={className}>
       {visibleProviderOptions.map((provider) => {
         const Icon = provider.Icon
         return (
@@ -191,6 +193,7 @@ export function SidebarTaskNavButton(): React.JSX.Element | null {
             visibleTaskProviders={visibleTaskProviders}
             canBrowseTasks={canBrowseTasks}
             openTaskPage={openTaskPage}
+            className="hidden items-center gap-1 group-hover:flex group-focus-within:flex"
           />
         </button>
       </ContextMenuTrigger>
