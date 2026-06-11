@@ -76,6 +76,20 @@
       }
     },
     {
+      "files": [
+        "src/renderer/src/components/mobile/MobileHero.tsx",
+        "src/renderer/src/components/onboarding/ThemeStep.tsx",
+        "src/renderer/src/components/right-sidebar/HostedReviewActions.tsx",
+        "src/renderer/src/components/settings/McpConfigSection.tsx",
+        "src/renderer/src/components/stats/ClaudeUsagePane.tsx",
+        "src/renderer/src/components/stats/CodexUsagePane.tsx",
+        "src/renderer/src/components/stats/OpenCodeUsagePane.tsx"
+      ],
+      "rules": {
+        "max-lines": ["error", { "max": 520, "skipBlankLines": true, "skipComments": true }]
+      }
+    },
+    {
       "files": ["mobile/app/index.tsx"],
       "rules": {
         "max-lines": ["error", { "max": 1448, "skipBlankLines": true, "skipComments": true }]
