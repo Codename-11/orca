@@ -209,7 +209,8 @@ import { translate } from '@/i18n/i18n'
 import { folderWorkspaceKey } from '../../../../shared/workspace-scope'
 import {
   isConfirmedStaleFolderPathStatus,
-  type FolderWorkspacePathStatus
+  type FolderWorkspacePathStatus,
+  type FolderWorkspacePathStatusRequest
 } from '../../../../shared/folder-workspace-path-status'
 import {
   getFolderWorkspaceRevealGroupKeys,
@@ -237,6 +238,24 @@ type ProjectGroupDeleteDialogState = {
 // terminal title changes) trigger score recalculations.
 const SORT_SETTLE_MS = 3_000
 const USER_SCROLL_MEASUREMENT_ADJUSTMENT_SUPPRESS_MS = 500
+
+function getFallbackFolderWorkspacePathStatusCacheKey(
+  request: FolderWorkspacePathStatusRequest
+): string {
+  return request.scope === 'folder-workspace'
+    ? `folder-workspace:${request.folderWorkspaceId}`
+    : `project-group:${request.projectGroupId}`
+}
+
+const EMPTY_FOLDER_WORKSPACE_PATH_STATUSES = {}
+
+async function noopFetchFolderWorkspacePathStatus(): Promise<undefined> {
+  return undefined
+}
+
+function getNoFreshFolderWorkspacePathStatus(): null {
+  return null
+}
 const EMPTY_PROJECT_GROUPS: readonly ProjectGroup[] = []
 const EMPTY_AGENT_STATUS_BY_PANE_KEY: AppState['agentStatusByPaneKey'] = {}
 const EMPTY_TABS_BY_WORKTREE: AppState['tabsByWorktree'] = {}
@@ -1066,13 +1085,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     [renderRows, activeWorktreeId]
   )
   const sshConnectionStates = useAppStore((s) => s.sshConnectionStates)
-  const {
-    folderWorkspacePathStatuses,
-    fetchFolderWorkspacePathStatus,
-    getFolderWorkspacePathStatusCacheKey,
-    getFreshFolderWorkspacePathStatus,
-    activeRuntimeEnvironmentId
-  } = useAppStore(
+  const folderWorkspacePathState = useAppStore(
     useShallow((s) => ({
       folderWorkspacePathStatuses: s.folderWorkspacePathStatuses,
       fetchFolderWorkspacePathStatus: s.fetchFolderWorkspacePathStatus,
@@ -1081,6 +1094,17 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
       activeRuntimeEnvironmentId: s.settings?.activeRuntimeEnvironmentId ?? null
     }))
   )
+  const folderWorkspacePathStatuses =
+    folderWorkspacePathState.folderWorkspacePathStatuses ?? EMPTY_FOLDER_WORKSPACE_PATH_STATUSES
+  const fetchFolderWorkspacePathStatus =
+    folderWorkspacePathState.fetchFolderWorkspacePathStatus ?? noopFetchFolderWorkspacePathStatus
+  const getFolderWorkspacePathStatusCacheKey =
+    folderWorkspacePathState.getFolderWorkspacePathStatusCacheKey ??
+    getFallbackFolderWorkspacePathStatusCacheKey
+  const getFreshFolderWorkspacePathStatus =
+    folderWorkspacePathState.getFreshFolderWorkspacePathStatus ??
+    getNoFreshFolderWorkspacePathStatus
+  const { activeRuntimeEnvironmentId } = folderWorkspacePathState
   const folderPathStatusRepoMembershipKey = useMemo(
     () =>
       allRepoIds
@@ -4179,7 +4203,7 @@ const WorktreeList = React.memo(function WorktreeList({
   // header order from the sorted visible worktree stream instead.
   const repos = useAppStore((s) => s.repos)
   const projectGroups = useAppStore((s) => s.projectGroups ?? EMPTY_PROJECT_GROUPS)
-  const folderWorkspaces = useAppStore((s) => s.folderWorkspaces)
+  const folderWorkspaces = useAppStore((s) => s.folderWorkspaces ?? [])
   const effectiveCollapsedGroups = useMemo(() => {
     if (!agentSendTargetWorktreeId) {
       return collapsedGroups
