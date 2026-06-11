@@ -1,7 +1,7 @@
 import React from 'react'
 import { List } from 'lucide-react'
-import { ContextMenu, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { TASK_PROVIDER_UI_OPTIONS } from '@/components/task-providers/provider-ui-registry'
+import { ContextMenu, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { getTaskPresetQuery, PER_REPO_FETCH_LIMIT } from '@/lib/new-workspace'
 import { getLocalPreflightContext, localPreflightContextKey } from '@/lib/local-preflight-context'
 import { cn } from '@/lib/utils'
