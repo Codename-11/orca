@@ -1,28 +1,16 @@
 import React from 'react'
-import { Bell, CalendarClock, EyeOff, List, Search, Smartphone } from 'lucide-react'
+import { Bell, CalendarClock, Search, Smartphone } from 'lucide-react'
 import { useAppStore } from '@/store'
-import { useRepoMap } from '@/store/selectors'
 import { cn } from '@/lib/utils'
-import { isGitRepoKind } from '../../../../shared/repo-kind'
-import type { GlobalSettings, TaskProvider } from '../../../../shared/types'
-import { getTaskPresetQuery, PER_REPO_FETCH_LIMIT } from '@/lib/new-workspace'
-import { TASK_PROVIDER_UI_OPTIONS } from '@/components/task-providers/provider-ui-registry'
-import {
-  normalizeVisibleTaskProviders,
-  restoreAvailableDefaultTaskProvider,
-  resolveVisibleTaskProvider
-} from '../../../../shared/task-providers'
+import type { GlobalSettings } from '../../../../shared/types'
 import { useActivityUnreadCount } from '@/components/activity/useActivityUnreadCount'
 import { useShortcutLabel } from '@/hooks/useShortcutLabel'
-import { getLocalPreflightContext, localPreflightContextKey } from '@/lib/local-preflight-context'
 import { useMobileSidebarOnboardingBadge } from './mobile-sidebar-onboarding-badge'
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger
-} from '@/components/ui/context-menu'
+import { ContextMenu, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { SetupGuideSidebarEntry } from './SetupGuideSidebarEntry'
+import { SidebarTaskNavButton } from './SidebarTaskNavButton'
+export { SidebarTaskProviderShortcuts } from './SidebarTaskNavButton'
+import { HideSidebarMenu } from './sidebar-nav-controls'
 import { translate } from '@/i18n/i18n'
 
 export { getSetupGuideSidebarEntryReady, shouldShowSetupGuideEntry } from './SetupGuideSidebarEntry'
@@ -31,56 +19,6 @@ export function shouldShowAgentsButton(
   settings: Pick<GlobalSettings, 'experimentalActivity'> | null | undefined
 ): boolean {
   return settings?.experimentalActivity === true
-}
-
-type SidebarTaskProviderShortcutsProps = {
-  visibleTaskProviders: readonly TaskProvider[]
-  canBrowseTasks: boolean
-  openTaskPage: (options?: { taskSource: TaskProvider }) => void
-}
-
-export function SidebarTaskProviderShortcuts({
-  visibleTaskProviders,
-  canBrowseTasks,
-  openTaskPage
-}: SidebarTaskProviderShortcutsProps): React.JSX.Element | null {
-  const visibleProviderOptions = TASK_PROVIDER_UI_OPTIONS.filter((provider) =>
-    visibleTaskProviders.includes(provider.id)
-  )
-
-  if (visibleProviderOptions.length === 0) {
-    return null
-  }
-
-  return (
-    <span className="flex items-center gap-1">
-      {visibleProviderOptions.map((provider) => {
-        const Icon = provider.Icon
-        return (
-          <span
-            key={provider.id}
-            role={canBrowseTasks ? 'button' : undefined}
-            tabIndex={-1}
-            onClick={(e) => {
-              e.stopPropagation()
-              if (!canBrowseTasks) {
-                return
-              }
-              openTaskPage({ taskSource: provider.id })
-            }}
-            className={cn(
-              'rounded p-0.5 text-muted-foreground/70',
-              canBrowseTasks ? 'transition-colors hover:text-foreground' : 'cursor-default'
-            )}
-            aria-label={canBrowseTasks ? `Open ${provider.label} tasks` : undefined}
-            aria-hidden={canBrowseTasks ? undefined : true}
-          >
-            <Icon className="size-3.5" />
-          </span>
-        )
-      })}
-    </span>
-  )
 }
 
 export function shouldShowMobileButton(
@@ -95,134 +33,23 @@ export function shouldShowAutomationsButton(
   return settings?.showAutomationsButton !== false
 }
 
-function HideSidebarMenu({ onHide }: { onHide: () => void }): React.JSX.Element {
-  return (
-    <ContextMenuContent>
-      <ContextMenuItem onSelect={onHide}>
-        <EyeOff className="size-3.5" />
-        {translate('auto.components.sidebar.SidebarNav.d599269755', 'Hide from sidebar')}
-      </ContextMenuItem>
-    </ContextMenuContent>
-  )
-}
-
 const SidebarNav = React.memo(function SidebarNav() {
   const worktreePaletteShortcut = useShortcutLabel('worktree.palette')
-  const openTaskPage = useAppStore((s) => s.openTaskPage)
   const openAutomationsPage = useAppStore((s) => s.openAutomationsPage)
   const openActivityPage = useAppStore((s) => s.openActivityPage)
   const openMobilePage = useAppStore((s) => s.openMobilePage)
   const openModal = useAppStore((s) => s.openModal)
   const updateSettings = useAppStore((s) => s.updateSettings)
   const activeView = useAppStore((s) => s.activeView)
-  const repos = useAppStore((s) => s.repos)
-  const repoMap = useRepoMap()
-  const canBrowseTasks = repos.some((repo) => isGitRepoKind(repo))
-  // Why: the setting is opt-out (default true). `!== false` keeps the button
-  // visible for users whose persisted settings predate this field.
-  const showTasksButton = useAppStore((s) => s.settings?.showTasksButton !== false)
-  const rawVisibleTaskProviders = useAppStore((s) => s.settings?.visibleTaskProviders)
-  const defaultTaskSource = useAppStore((s) => s.settings?.defaultTaskSource ?? 'github')
-  const preflightStatus = useAppStore((s) => s.preflightStatus)
-  const preflightStatusChecked = useAppStore((s) => s.preflightStatusChecked)
-  const preflightStatusContextKey = useAppStore((s) => s.preflightStatusContextKey)
-  const refreshPreflightStatus = useAppStore((s) => s.refreshPreflightStatus)
-  const expectedPreflightContextKey = useAppStore((s) =>
-    localPreflightContextKey(getLocalPreflightContext(s))
-  )
-  const linearStatus = useAppStore((s) => s.linearStatus)
-  const linearStatusChecked = useAppStore((s) => s.linearStatusChecked)
-  const checkLinearConnection = useAppStore((s) => s.checkLinearConnection)
   const showAgentsButton = useAppStore((s) => shouldShowAgentsButton(s.settings))
   const showAutomationsButton = useAppStore((s) => shouldShowAutomationsButton(s.settings))
   const showMobileButton = useAppStore((s) => shouldShowMobileButton(s.settings))
-  const preferredVisibleTaskProviders = React.useMemo(
-    () => normalizeVisibleTaskProviders(rawVisibleTaskProviders),
-    [rawVisibleTaskProviders]
-  )
-  const preflightStatusCurrent = preflightStatusContextKey === expectedPreflightContextKey
-  const visibleTaskProviders = React.useMemo(
-    () =>
-      restoreAvailableDefaultTaskProvider(
-        preferredVisibleTaskProviders,
-        {
-          gitlabInstalled: preflightStatusCurrent && preflightStatus?.glab?.installed === true,
-          linearConnected: linearStatus.connected === true
-        },
-        defaultTaskSource
-      ),
-    [
-      defaultTaskSource,
-      linearStatus.connected,
-      preferredVisibleTaskProviders,
-      preflightStatusCurrent,
-      preflightStatus?.glab?.installed
-    ]
-  )
-  const resolvedDefaultTaskSource = React.useMemo(
-    () => resolveVisibleTaskProvider(defaultTaskSource, visibleTaskProviders),
-    [defaultTaskSource, visibleTaskProviders]
-  )
 
-  React.useEffect(() => {
-    if (!preflightStatusChecked || !preflightStatusCurrent) {
-      void refreshPreflightStatus()
-    }
-    if (!linearStatusChecked) {
-      void checkLinearConnection()
-    }
-  }, [
-    checkLinearConnection,
-    linearStatusChecked,
-    preflightStatusChecked,
-    preflightStatusCurrent,
-    refreshPreflightStatus
-  ])
-
-  // Why: warm the GitHub work-item cache on hover/focus so by the time the
-  // user's click finishes the round-trip has either completed or is already
-  // in-flight. Shaves ~200–600ms off perceived page-load latency.
-  const prefetchWorkItems = useAppStore((s) => s.prefetchWorkItems)
-  const activeRepoId = useAppStore((s) => s.activeRepoId)
-  const defaultTaskViewPreset = useAppStore((s) => s.settings?.defaultTaskViewPreset ?? 'all')
-  const handlePrefetch = React.useCallback(() => {
-    if (!canBrowseTasks || resolvedDefaultTaskSource !== 'github') {
-      return
-    }
-    const activeRepo = activeRepoId ? (repoMap.get(activeRepoId) ?? null) : null
-    const activeGitRepo = activeRepo && isGitRepoKind(activeRepo) ? activeRepo : null
-    const firstGitRepo = activeGitRepo ?? repos.find((r) => isGitRepoKind(r))
-    if (firstGitRepo?.path) {
-      // Why: warm the exact cache key the page will read on mount — must
-      // match TaskPage's `initialTaskQuery` derived from the same default
-      // preset, otherwise the prefetch lands in a key the page never reads
-      // and we pay the full round-trip after click.
-      prefetchWorkItems(
-        firstGitRepo.id,
-        firstGitRepo.path,
-        PER_REPO_FETCH_LIMIT,
-        getTaskPresetQuery(defaultTaskViewPreset)
-      )
-    }
-  }, [
-    activeRepoId,
-    canBrowseTasks,
-    defaultTaskViewPreset,
-    prefetchWorkItems,
-    repoMap,
-    repos,
-    resolvedDefaultTaskSource
-  ])
-
-  const tasksActive = activeView === 'tasks'
   const automationsActive = activeView === 'automations'
   const activityActive = activeView === 'activity'
   const mobileActive = activeView === 'mobile'
   const activityUnreadCount = useActivityUnreadCount(showAgentsButton, 'sidebar-badge')
   const mobileOnboardingBadge = useMobileSidebarOnboardingBadge(showMobileButton)
-  const hideTasksButton = React.useCallback(() => {
-    void updateSettings({ showTasksButton: false })
-  }, [updateSettings])
   const hideAutomationsButton = React.useCallback(() => {
     void updateSettings({ showAutomationsButton: false })
   }, [updateSettings])
@@ -236,50 +63,7 @@ const SidebarNav = React.memo(function SidebarNav() {
       data-contextual-tour-target="sidebar-navigation"
     >
       <SetupGuideSidebarEntry />
-      {showTasksButton ? (
-        <ContextMenu>
-          <ContextMenuTrigger asChild>
-            <button
-              type="button"
-              onClick={() => {
-                if (!canBrowseTasks) {
-                  return
-                }
-                openTaskPage()
-              }}
-              onPointerEnter={handlePrefetch}
-              onFocus={handlePrefetch}
-              aria-disabled={!canBrowseTasks}
-              aria-current={tasksActive ? 'page' : undefined}
-              data-contextual-tour-target="sidebar-tasks"
-              className={cn(
-                'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] font-medium tracking-tight transition-colors',
-                tasksActive
-                  ? 'bg-worktree-sidebar-accent text-worktree-sidebar-accent-foreground'
-                  : 'text-worktree-sidebar-foreground/60 hover:bg-worktree-sidebar-foreground/8',
-                !canBrowseTasks && 'cursor-not-allowed opacity-50 hover:bg-transparent'
-              )}
-            >
-              <List
-                className={cn(
-                  'size-4 shrink-0',
-                  !tasksActive && 'text-worktree-sidebar-foreground/30'
-                )}
-                strokeWidth={tasksActive ? 2.25 : 1.75}
-              />
-              <span className="flex-1">
-                {translate('auto.components.sidebar.SidebarNav.fee535205b', 'Tasks')}
-              </span>
-              <SidebarTaskProviderShortcuts
-                visibleTaskProviders={visibleTaskProviders}
-                canBrowseTasks={canBrowseTasks}
-                openTaskPage={openTaskPage}
-              />
-            </button>
-          </ContextMenuTrigger>
-          <HideSidebarMenu onHide={hideTasksButton} />
-        </ContextMenu>
-      ) : null}
+      <SidebarTaskNavButton />
       {showAutomationsButton ? (
         <ContextMenu>
           <ContextMenuTrigger asChild>
