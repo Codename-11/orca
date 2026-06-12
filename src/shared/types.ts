@@ -2209,6 +2209,9 @@ export type GlobalSettings = {
    *  The setting stays opt-in so existing workflows continue to use the system browser
    *  until the user explicitly wants worktree-scoped in-app browsing. */
   openLinksInApp: boolean
+  /** Why: terminal link routing asks once at first use instead of silently
+   *  changing where links open for new users. */
+  openLinksInAppPreferencePrompted: boolean
   /** Extra launcher rows for the worktree "Open in" submenu. VS Code is always shown first. */
   openInApplications?: OpenInApplication[]
   /** Deprecated: migration/backward-compat only. Use PersistedUIState.rightSidebarOpen. */
@@ -2797,6 +2800,9 @@ export type PersistedUIState = {
   /** User-dismissed browser import hint in the browser toolbar. Import remains
    *  available from Settings > Browser and the toolbar overflow menu. */
   browserImportHintHidden?: boolean
+  /** One-shot rollout notice for manual project ordering becoming the default.
+   *  Absent or true means the sidebar callout stays hidden. */
+  projectOrderManualDefaultNoticeDismissed?: boolean
   /** User-hidden empty-state usage CTA in the status bar. Permanently hides the
    *  "Connect AI accounts to see usage" prompt even if all providers are later
    *  disconnected — a dismissed teaching nudge stays dismissed. */

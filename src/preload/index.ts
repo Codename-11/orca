@@ -1520,6 +1520,8 @@ const api = {
     dismiss: (): Promise<void> => ipcRenderer.invoke('star-nag:dismiss'),
     complete: (): Promise<void> => ipcRenderer.invoke('star-nag:complete'),
     disable: (): Promise<void> => ipcRenderer.invoke('star-nag:disable'),
+    openWeb: (): Promise<void> => ipcRenderer.invoke('star-nag:openWeb'),
+    starOrca: (): Promise<boolean> => ipcRenderer.invoke('star-nag:starOrca'),
     forceShow: (): Promise<void> => ipcRenderer.invoke('star-nag:forceShow')
   },
 

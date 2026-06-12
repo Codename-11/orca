@@ -1683,6 +1683,8 @@ export type PreloadApi = {
     dismiss: () => Promise<void>
     complete: () => Promise<void>
     disable: () => Promise<void>
+    openWeb: () => Promise<void>
+    starOrca: () => Promise<boolean>
     forceShow: () => Promise<void>
   }
   /** Fire-and-forget track. Loose typing at the IPC boundary on purpose —
