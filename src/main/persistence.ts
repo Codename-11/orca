@@ -107,6 +107,11 @@ import { normalizeTerminalShortcutPolicy } from '../shared/keybindings'
 import { normalizeAppIconId } from '../shared/app-icon'
 import { normalizeTerminalCustomThemes } from '../shared/terminal-custom-themes'
 import {
+  normalizeLeftSidebarAppearanceMode,
+  normalizeLeftSidebarTintColor,
+  normalizeLeftSidebarTintOpacity
+} from '../shared/left-sidebar-appearance'
+import {
   compareFeatureInteractionUsageBuckets,
   getFeatureInteractionCategory,
   getFeatureInteractionUsageBucket,
@@ -2335,6 +2340,15 @@ export class Store {
             terminalCustomThemes: normalizeTerminalCustomThemes(
               parsed.settings?.terminalCustomThemes
             ),
+            leftSidebarAppearanceMode: normalizeLeftSidebarAppearanceMode(
+              parsed.settings?.leftSidebarAppearanceMode
+            ),
+            leftSidebarTintColor: normalizeLeftSidebarTintColor(
+              parsed.settings?.leftSidebarTintColor
+            ),
+            leftSidebarTintOpacity: normalizeLeftSidebarTintOpacity(
+              parsed.settings?.leftSidebarTintOpacity
+            ),
             appIcon: normalizeAppIconId(parsed.settings?.appIcon),
             uiLanguage: normalizeUiLanguage(parsed.settings?.uiLanguage),
             defaultTaskSource: taskProviderSettings.defaultTaskSource,
@@ -3720,6 +3734,21 @@ export class Store {
     if ('terminalCustomThemes' in updates) {
       sanitizedUpdates.terminalCustomThemes = normalizeTerminalCustomThemes(
         updates.terminalCustomThemes
+      )
+    }
+    if ('leftSidebarAppearanceMode' in updates) {
+      sanitizedUpdates.leftSidebarAppearanceMode = normalizeLeftSidebarAppearanceMode(
+        updates.leftSidebarAppearanceMode
+      )
+    }
+    if ('leftSidebarTintColor' in updates) {
+      sanitizedUpdates.leftSidebarTintColor = normalizeLeftSidebarTintColor(
+        updates.leftSidebarTintColor
+      )
+    }
+    if ('leftSidebarTintOpacity' in updates) {
+      sanitizedUpdates.leftSidebarTintOpacity = normalizeLeftSidebarTintOpacity(
+        updates.leftSidebarTintOpacity
       )
     }
     if ('visibleTaskProviders' in updates || 'defaultTaskSource' in updates) {
