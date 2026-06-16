@@ -65,10 +65,7 @@ export function getTaskSourceContextSummary(args: {
         hostAvailability: args.hostAvailability
       })
     case 'forge':
-      return {
-        label: args.providerLabel,
-        title: `${args.providerLabel} source`
-      }
+      return { label: args.providerLabel, title: `${args.providerLabel} source` }
   }
 }
 
