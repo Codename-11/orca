@@ -2,15 +2,16 @@
 
 import { createHash } from 'node:crypto'
 import { readFileSync, statSync, writeFileSync } from 'node:fs'
-import { basename, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { basename, dirname, resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 export const MOBILE_UPDATE_MANIFEST_ASSET_NAME = 'mobile-update.json'
 export const MOBILE_UPDATE_MANIFEST_SCHEMA_VERSION = 1
 
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
+
 function parseArgs(argv) {
   const args = {
-    appConfig: 'mobile/app.json',
     generatedAt: new Date().toISOString()
   }
 
@@ -58,6 +59,10 @@ function requiredString(value, label) {
 
 function readJson(filePath) {
   return JSON.parse(readFileSync(filePath, 'utf8'))
+}
+
+function resolveRepoPath(filePath) {
+  return resolve(REPO_ROOT, filePath)
 }
 
 function sha256File(filePath) {
@@ -150,8 +155,11 @@ export function buildMobileUpdateManifest({
 
 async function main() {
   const args = parseArgs(process.argv.slice(2))
+  const appConfigPath = args.appConfig
+    ? resolve(args.appConfig)
+    : resolveRepoPath('mobile/app.json')
   const manifest = buildMobileUpdateManifest({
-    appConfig: readJson(args.appConfig),
+    appConfig: readJson(appConfigPath),
     releaseTag: args.releaseTag,
     releaseVersion: args.releaseVersion,
     repository: args.repository || process.env.GITHUB_REPOSITORY,

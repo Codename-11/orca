@@ -1,7 +1,8 @@
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 
 import { buildMobileUpdateManifest } from './generate-mobile-update-manifest.mjs'
@@ -83,5 +84,40 @@ describe('buildMobileUpdateManifest', () => {
         generatedAt: '2026-06-16T00:00:00.000Z'
       })
     ).toThrow('expo.android.versionCode must be a positive integer')
+  })
+
+  it('reads the default app config from the repo root when run from mobile', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'orca-mobile-update-manifest-cli-'))
+    const apkPath = join(dir, 'app-release.apk')
+    const outputPath = join(dir, 'mobile-update.json')
+    writeFileSync(apkPath, 'signed apk bytes')
+
+    execFileSync(
+      process.execPath,
+      [
+        join(process.cwd(), 'config/scripts/generate-mobile-update-manifest.mjs'),
+        '--release-tag',
+        'axiom-v1.4.72-axiom.1',
+        '--release-version',
+        '1.4.72-axiom.1',
+        '--repository',
+        'Codename-11/orca',
+        '--source-sha',
+        'abc123',
+        '--apk',
+        apkPath,
+        '--output',
+        outputPath,
+        '--generated-at',
+        '2026-06-16T00:00:00.000Z'
+      ],
+      { cwd: join(process.cwd(), 'mobile') }
+    )
+
+    const manifest = JSON.parse(readFileSync(outputPath, 'utf8'))
+    expect(manifest.platforms.android).toMatchObject({
+      packageName: 'com.axiomlabs.orca.mobile',
+      versionCode: 4
+    })
   })
 })
