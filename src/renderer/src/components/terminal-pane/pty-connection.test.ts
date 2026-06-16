@@ -51,7 +51,12 @@ type StoreState = {
       workspaceStatus?: string
     }[]
   >
-  repos: { id: string; connectionId?: string | null; displayName?: string }[]
+  repos: {
+    id: string
+    connectionId?: string | null
+    displayName?: string
+    executionHostId?: string | null
+  }[]
   sshConnectionStates: Map<string, { status: string }>
   cacheTimerByKey: Record<string, number | null>
   settings: {
@@ -84,6 +89,7 @@ type StoreState = {
   clearSleepingAgentSession: ReturnType<typeof vi.fn>
   markWorktreeUnread: ReturnType<typeof vi.fn>
   observeTerminalGitHubPullRequestLink: ReturnType<typeof vi.fn>
+  recordTerminalInput: ReturnType<typeof vi.fn>
   setAgentStatus: ReturnType<typeof vi.fn>
   removeAgentStatus: ReturnType<typeof vi.fn>
   dropAgentStatus: ReturnType<typeof vi.fn>
@@ -479,6 +485,7 @@ describe('connectPanePty', () => {
       }),
       markWorktreeUnread: vi.fn(),
       observeTerminalGitHubPullRequestLink: vi.fn(),
+      recordTerminalInput: vi.fn(),
       setAgentStatus: vi.fn((paneKey: string, payload: Record<string, unknown>) => {
         mockStoreState.agentStatusByPaneKey[paneKey] = {
           ...payload,
@@ -4733,6 +4740,81 @@ describe('connectPanePty', () => {
       expect.objectContaining({ existingPtyId: 'remote:env-1@@terminal-1' })
     )
     expect(deps.syncPanePtyLayoutBinding).toHaveBeenCalledWith(2, 'remote:env-1@@terminal-1')
+  })
+
+  it('spawns fresh PTYs through the worktree owner runtime when focus differs', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const { createRemoteRuntimePtyTransport } = await import('./remote-runtime-pty-transport')
+    const transport = createMockTransport('remote:owner-runtime@@terminal-1')
+    transportFactoryQueue.push(transport)
+
+    mockStoreState = {
+      ...mockStoreState,
+      tabsByWorktree: {
+        'wt-1': [{ id: 'tab-1', ptyId: null }]
+      },
+      repos: [
+        {
+          id: 'repo1',
+          connectionId: null,
+          displayName: 'orca',
+          executionHostId: 'runtime:owner-runtime'
+        }
+      ],
+      settings: {
+        ...mockStoreState.settings,
+        activeRuntimeEnvironmentId: 'focused-runtime'
+      }
+    } as StoreState
+
+    const pane = createPane(2)
+    const manager = createManager(2)
+    const deps = createDeps()
+
+    connectPanePty(pane as never, manager as never, deps as never)
+
+    expect(createRemoteRuntimePtyTransport).toHaveBeenCalledWith(
+      'owner-runtime',
+      expect.any(Object)
+    )
+    expect(transport.connect).toHaveBeenCalled()
+  })
+
+  it('spawns fresh PTYs locally for explicitly local worktrees while a runtime is focused', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const { createRemoteRuntimePtyTransport } = await import('./remote-runtime-pty-transport')
+    const { createIpcPtyTransport } = await import('./pty-transport')
+    const transport = createMockTransport('pty-local-1')
+    transportFactoryQueue.push(transport)
+
+    mockStoreState = {
+      ...mockStoreState,
+      tabsByWorktree: {
+        'wt-1': [{ id: 'tab-1', ptyId: null }]
+      },
+      repos: [
+        {
+          id: 'repo1',
+          connectionId: null,
+          displayName: 'orca',
+          executionHostId: 'local'
+        }
+      ],
+      settings: {
+        ...mockStoreState.settings,
+        activeRuntimeEnvironmentId: 'focused-runtime'
+      }
+    } as StoreState
+
+    const pane = createPane(2)
+    const manager = createManager(2)
+    const deps = createDeps()
+
+    connectPanePty(pane as never, manager as never, deps as never)
+
+    expect(createRemoteRuntimePtyTransport).not.toHaveBeenCalled()
+    expect(createIpcPtyTransport).toHaveBeenCalled()
+    expect(transport.connect).toHaveBeenCalled()
   })
 
   it('attaches restored remote PTYs for later split panes instead of spawning host tabs', async () => {
