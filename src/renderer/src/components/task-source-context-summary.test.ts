@@ -302,6 +302,15 @@ describe('task source context summary', () => {
     )
   })
 
+  it('shows Forge as a first-class fork task source without repo context', () => {
+    expect(
+      getTaskSourceContextSummary({
+        provider: 'forge',
+        providerLabel: 'Forge'
+      })
+    ).toEqual({ label: 'Forge', title: 'Forge source' })
+  })
+
   it('builds a visible unavailable-source notice from host availability', () => {
     expect(
       getTaskSourceAvailabilityNotice({
