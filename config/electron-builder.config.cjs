@@ -77,6 +77,7 @@ const winSpeechNativeResource = {
   to: 'node_modules/sherpa-onnx-win-x64'
 }
 const windowsCliExecutableMarker = 'orca-electron-executable.txt'
+const windowsCliUserDataMarker = 'orca-user-data-name.txt'
 const windowsExecutableFilename = windowsExecutableName.endsWith('.exe')
   ? windowsExecutableName
   : `${windowsExecutableName}.exe`
@@ -193,6 +194,9 @@ module.exports = {
         `${windowsExecutableFilename}\n`,
         'utf8'
       )
+      // Why: fork builds use the package metadata name for Electron userData.
+      // The packaged CLI must read the same runtime metadata directory as the GUI.
+      writeFileSync(join(resourcesDir, windowsCliUserDataMarker), `${packageName}\n`, 'utf8')
     }
     if (context.electronPlatformName === 'darwin') {
       await signMacComputerUseHelper(join(resourcesDir, 'Orca Computer Use.app'), context.packager)

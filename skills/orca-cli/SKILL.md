@@ -119,7 +119,7 @@ orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 300000 --json
 orca terminal stop --worktree id:<worktreeId> --json
 orca terminal create --json
 orca terminal create --title "Worker" --json
-orca terminal create --worktree active --command "codex" --json
+orca terminal create --worktree active --command "codex" [--focus] --json
 orca terminal split --terminal <handle> --direction vertical --json
 orca terminal split --terminal <handle> --direction horizontal --command "npm test" --json
 orca terminal rename --terminal <handle> --title "New Name" --json
@@ -137,6 +137,7 @@ Terminal rules:
 - Terminal handles are runtime-scoped. If Orca restarts or returns `terminal_handle_stale`, reacquire with `terminal list`.
 - For long output, use cursor reads. After a limited tail preview, page from `oldestCursor`; after a cursor read, continue with `nextCursor` while `limited` is true and `nextCursor !== latestCursor`.
 - `--direction horizontal` splits left/right. `--direction vertical` splits top/bottom.
+- `terminal create` stays backgrounded unless `--focus` is explicit. Bare `codex` and `claude` commands use Orca's renderer-backed terminal sizing, but they do not immediately reveal or switch the GUI without `--focus`.
 
 ## Automations
 

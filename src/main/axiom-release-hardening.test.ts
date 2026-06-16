@@ -107,8 +107,9 @@ describe('Axiom release hardening', () => {
     expect(config.publish).toMatchObject({ owner: 'Codename-11', repo: 'orca' })
   })
 
-  it('writes the configured Windows executable name for the packaged CLI launcher', async () => {
+  it('writes configured Windows runtime markers for the packaged CLI launcher', async () => {
     process.env.ORCA_PRODUCT_NAME = 'Axiom Orca'
+    process.env.ORCA_PACKAGE_NAME = 'axiom-orca'
     process.env.ORCA_WINDOWS_EXECUTABLE_NAME = 'Axiom Orca'
 
     const config = loadBuilderConfig()
@@ -125,6 +126,9 @@ describe('Axiom release hardening', () => {
       expect(
         readFileSync(join(appOutDir, 'resources', 'orca-electron-executable.txt'), 'utf8')
       ).toBe('Axiom Orca.exe\n')
+      expect(readFileSync(join(appOutDir, 'resources', 'orca-user-data-name.txt'), 'utf8')).toBe(
+        'axiom-orca\n'
+      )
     } finally {
       rmSync(appOutDir, { recursive: true, force: true })
     }

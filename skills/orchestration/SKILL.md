@@ -126,14 +126,14 @@ Other terminal commands coordinators often need:
 
 ```bash
 orca terminal list [--worktree <selector>] [--json]
-orca terminal create [--worktree <selector>] [--title <text>] [--command <cmd>] [--json]
+orca terminal create [--worktree <selector>] [--title <text>] [--command <cmd>] [--focus] [--json]
 orca terminal split --terminal <handle> [--direction horizontal|vertical] [--command <cmd>] [--json]
 orca terminal wait --terminal <handle> --for tui-idle --timeout-ms <n> --json
 orca terminal read --terminal <handle> --json
 orca terminal send --terminal <handle> --text <text> --enter --json
 ```
 
-If an older CLI rejects `worktree create --agent`, create the worktree normally, then run `orca terminal create --worktree <selector> --command "codex" --json` or `--command "claude"`.
+If an older CLI rejects `worktree create --agent`, create the worktree normally, then run `orca terminal create --worktree <selector> --command "codex" [--focus] --json` or `--command "claude"`. Use `--focus` only when the user expects the worker tab to appear in the GUI immediately; otherwise `terminal create` stays backgrounded even for renderer-backed agent terminals.
 
 Wait for `tui-idle` before dispatching. Always pass `--timeout-ms`; real coding tasks can take 15-60 minutes. During supervision, use rolling `check --wait` windows. If a window returns no matching message, inspect `task-list`, `terminal read`, or `terminal wait --for tui-idle` as a liveness checkpoint; if the terminal is still working or producing activity, keep waiting instead of retrying the task.
 

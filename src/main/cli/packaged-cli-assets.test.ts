@@ -18,6 +18,10 @@ const builderConfig = require('../../../config/electron-builder.config.cjs') as 
 const linuxLauncherAsset = new URL('../../../resources/linux/bin/orca-ide', import.meta.url)
 const windowsLauncherAsset = new URL('../../../resources/win32/bin/orca.cmd', import.meta.url)
 
+function normalizeResourceTarget(target: string | undefined): string | undefined {
+  return target?.replaceAll('\\', '/')
+}
+
 describe('packaged CLI assets', () => {
   it('copies runtime dependencies used before Electron asar integration is available', () => {
     const runtimeResourceTargets = new Set(
@@ -25,19 +29,19 @@ describe('packaged CLI assets', () => {
         ...(builderConfig.mac?.extraResources ?? []),
         ...(builderConfig.linux?.extraResources ?? []),
         ...(builderConfig.win?.extraResources ?? [])
-      ].map((resource) => resource.to)
+      ].map((resource) => normalizeResourceTarget(resource.to))
     )
 
     expect([...runtimeResourceTargets]).toEqual(
       expect.arrayContaining([
-        join('node_modules', 'ws'),
-        join('node_modules', 'tweetnacl'),
-        join('node_modules', 'zod'),
-        join('node_modules', 'yaml'),
-        join('node_modules', 'node-pty'),
-        join('node_modules', 'sherpa-onnx-darwin-${arch}'),
-        join('node_modules', 'sherpa-onnx-linux-${arch}'),
-        join('node_modules', 'sherpa-onnx-win-x64')
+        'node_modules/ws',
+        'node_modules/tweetnacl',
+        'node_modules/zod',
+        'node_modules/yaml',
+        'node_modules/node-pty',
+        'node_modules/sherpa-onnx-darwin-${arch}',
+        'node_modules/sherpa-onnx-linux-${arch}',
+        'node_modules/sherpa-onnx-win-x64'
       ])
     )
   })
@@ -54,6 +58,14 @@ describe('packaged CLI assets', () => {
   itRunsUnixShell('keeps the Linux launcher executable in packaged resources', async () => {
     const launcherStats = await stat(linuxLauncherAsset)
     expect(launcherStats.mode & 0o111).not.toBe(0)
+  })
+
+  it('lets the Windows launcher use the packaged app user-data directory', async () => {
+    const launcher = await readFile(windowsLauncherAsset, 'utf8')
+
+    expect(launcher).toContain('orca-user-data-name.txt')
+    expect(launcher).toContain('if not defined ORCA_USER_DATA_PATH if defined APPDATA')
+    expect(launcher).toContain('set "ORCA_USER_DATA_PATH=%APPDATA%\\%USER_DATA_NAME%"')
   })
 
   itRunsUnixShell(

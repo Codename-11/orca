@@ -13,6 +13,16 @@ if exist "%ELECTRON_NAME_FILE%" (
   set /p ELECTRON_EXE=<"%ELECTRON_NAME_FILE%"
 )
 set "ELECTRON=%APP_DIR%\%ELECTRON_EXE%"
+set "USER_DATA_NAME=orca"
+set "USER_DATA_NAME_FILE=%RESOURCES_DIR%\orca-user-data-name.txt"
+if exist "%USER_DATA_NAME_FILE%" (
+  set /p USER_DATA_NAME=<"%USER_DATA_NAME_FILE%"
+)
+REM Why: fork builds use Electron's package name as the userData directory.
+REM Keep the CLI attached to the same runtime metadata as the packaged GUI.
+if not defined ORCA_USER_DATA_PATH if defined APPDATA (
+  set "ORCA_USER_DATA_PATH=%APPDATA%\%USER_DATA_NAME%"
+)
 
 if not exist "%ELECTRON%" (
   echo Unable to locate %ELECTRON_EXE% next to "%RESOURCES_DIR%" 1>&2
