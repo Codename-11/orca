@@ -140,9 +140,24 @@ cd ..
 pnpm typecheck:node
 ```
 
+## Mobile Update Manifest
+
+Axiom releases attach an Android APK to stable fork releases even when the
+mobile app did not change. Mobile therefore does **not** use the release SHA or
+APK hash as the update trigger. It checks the fork-owned
+`mobile-update.json` release asset and only prompts when the native build id is
+newer:
+
+- Android: `expo.android.versionCode`
+- iOS: `expo.ios.buildNumber`
+
+The APK hash in the manifest is for verification and diagnostics. If the APK
+contents change without a matching native build id bump, treat that as a release
+packaging error.
+
 ## Protocol Version Compatibility
 
-Mobile and desktop talk over a versioned protocol. Because mobile updates lag desktop by 24-48h via the App Store, both sides exchange version numbers on `status.get` so a genuinely incompatible combo can hard-block instead of silently misbehaving.
+Mobile and desktop talk over a versioned protocol. Because mobile updates can lag desktop releases, both sides exchange version numbers on `status.get` so a genuinely incompatible combo can hard-block instead of silently misbehaving.
 
 Constants live in two files (Metro can't resolve outside `mobile/`):
 
@@ -167,7 +182,7 @@ Do **not** bump for additive changes:
 
 Set `MIN_COMPATIBLE_MOBILE_VERSION` (kill-switch) when desktop ships a change that requires a minimum mobile version to function safely. Same for `MIN_COMPATIBLE_DESKTOP_VERSION` from the mobile side.
 
-When a verdict is `blocked`, `mobile/src/components/ProtocolBlockScreen.tsx` renders a screen pointing the user at either the App Store (mobile too old) or GitHub Releases (desktop too old).
+When a verdict is `blocked`, `mobile/src/components/ProtocolBlockScreen.tsx` renders a screen pointing the user at the Axiom mobile update path (mobile too old) or Axiom GitHub Releases (desktop too old).
 
 To exercise the block screen locally: set `MIN_COMPATIBLE_DESKTOP_VERSION = 999` in `mobile/src/transport/protocol-version.ts`, rebuild, pair to any desktop. Revert before merging.
 

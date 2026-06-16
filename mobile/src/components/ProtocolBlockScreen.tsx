@@ -2,9 +2,8 @@ import { Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-nati
 import { router } from 'expo-router'
 import { colors, radii, spacing, typography } from '../theme/mobile-theme'
 import type { CompatVerdict } from '../transport/protocol-compat'
-
-const RELEASES_URL = 'https://github.com/stablyai/orca/releases'
-const IOS_APP_STORE_URL = 'itms-apps://apps.apple.com/app/orca-ide/id6766130217'
+import { AXIOM_RELEASES_URL, LATEST_ANDROID_APK_URL } from '../updates/mobile-update-manifest'
+import { useMobileUpdateCheck } from '../updates/use-mobile-update-check'
 
 type Props = {
   verdict: Extract<CompatVerdict, { kind: 'blocked' }>
@@ -12,20 +11,37 @@ type Props = {
 
 export function ProtocolBlockScreen({ verdict }: Props) {
   const isMobileTooOld = verdict.reason === 'mobile-too-old'
+  const updateState = useMobileUpdateCheck({ enabled: isMobileTooOld })
   const mobileUpdateTarget =
-    Platform.OS === 'ios'
-      ? { label: 'Open App Store', url: IOS_APP_STORE_URL, storeName: 'the App Store' }
-      : { label: null, url: null, storeName: 'your mobile app store' }
+    updateState.state === 'available'
+      ? {
+          label:
+            updateState.evaluation.update.platform === 'android' ? 'Download APK' : 'Open Update',
+          url: updateState.evaluation.update.downloadUrl,
+          storeName:
+            updateState.evaluation.update.platform === 'android'
+              ? 'the Axiom GitHub release APK'
+              : 'your Axiom mobile distribution channel'
+        }
+      : Platform.OS === 'android'
+        ? {
+            label: 'Download APK',
+            url: LATEST_ANDROID_APK_URL,
+            storeName: 'the Axiom GitHub release APK'
+          }
+        : {
+            label: 'Open Axiom Releases',
+            url: AXIOM_RELEASES_URL,
+            storeName: 'your Axiom mobile distribution channel'
+          }
   const primaryAction = isMobileTooOld
-    ? mobileUpdateTarget.url && mobileUpdateTarget.label
-      ? { label: mobileUpdateTarget.label, url: mobileUpdateTarget.url }
-      : null
-    : { label: 'Open GitHub Releases', url: RELEASES_URL }
+    ? { label: mobileUpdateTarget.label, url: mobileUpdateTarget.url }
+    : { label: 'Open Axiom Releases', url: AXIOM_RELEASES_URL }
 
-  const title = isMobileTooOld ? 'Update Orca Mobile' : 'Update Orca on your computer'
+  const title = isMobileTooOld ? 'Update Axiom Orca Mobile' : 'Update Axiom Orca on your computer'
   const body = isMobileTooOld
-    ? `This desktop needs a newer Orca Mobile app. Update Orca Mobile from ${mobileUpdateTarget.storeName}, then try this host again.`
-    : 'This paired desktop app is too old for your current Orca Mobile app. Update Orca on your computer, then try this host again.'
+    ? `This desktop needs a newer Axiom Orca Mobile app. Update from ${mobileUpdateTarget.storeName}, then try this host again.`
+    : 'This paired desktop app is too old for your current Axiom Orca Mobile app. Update Axiom Orca on your computer, then try this host again.'
   const recoveryNote =
     'Already updated? Go back to Hosts and refresh the connection. If this message stays, remove this host and pair it again.'
 
@@ -34,8 +50,8 @@ export function ProtocolBlockScreen({ verdict }: Props) {
       <View style={styles.card}>
         <Text style={styles.title}>{title}</Text>
         <Text style={styles.body}>{body}</Text>
-        {/* Why: desktop updates come from GitHub; mobile update links depend
-            on the native store available for this platform. */}
+        {/* Why: Axiom mobile updates are fork release assets; Android can
+            install the APK directly while iOS depends on its distribution channel. */}
         {primaryAction ? (
           <Pressable
             style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}

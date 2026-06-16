@@ -54,6 +54,12 @@ describe('getRequiredReleaseAssetNames', () => {
       ])
     )
   })
+
+  it('requires the mobile update manifest with Android APK releases', () => {
+    expect(
+      getRequiredReleaseAssetNames('axiom-v1.4.27-axiom.2', { platforms: ['android'] })
+    ).toEqual(['app-release.apk', 'mobile-update.json'])
+  })
 })
 
 describe('extractManifestAssetNames', () => {

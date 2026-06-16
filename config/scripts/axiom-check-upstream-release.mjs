@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-
 import { appendFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { parseAxiomReleaseTag, resolveForkReleaseVersion } from './axiom-release-versioning.mjs'

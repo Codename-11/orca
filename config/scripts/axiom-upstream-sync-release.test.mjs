@@ -179,8 +179,13 @@ describe('Axiom upstream sync release workflow', () => {
       'latest.yml',
       'axiom-orca-windows-setup.exe',
       'axiom-orca-windows-setup.exe.blockmap',
-      'app-release.apk'
+      'app-release.apk',
+      'mobile-update.json'
     ])
+    expect(workflow).toContain('node ../config/scripts/generate-mobile-update-manifest.mjs')
+    expect(workflow).toContain('--source-sha')
+    expect(workflow).toContain('git rev-parse HEAD')
+    expect(workflow).toContain('mobile-update.json --clobber')
     expect(workflow).toContain(
       "needs.sync.outputs.upstream_prerelease != 'true' || inputs.build_mobile"
     )

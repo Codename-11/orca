@@ -41,6 +41,7 @@ import { TaskProviderLogo } from '../src/components/TaskProviderLogo'
 import { TextInputModal } from '../src/components/TextInputModal'
 import { ActionSheetModal, type ActionSheetAction } from '../src/components/ActionSheetModal'
 import { ConfirmModal } from '../src/components/ConfirmModal'
+import { MobileUpdateNotice } from '../src/components/MobileUpdateNotice'
 import { setCachedWorktrees, getCachedWorktrees } from '../src/cache/worktree-cache'
 import { loadHomeSnapshot, saveHomeSnapshot } from '../src/cache/home-snapshot-cache'
 import { colors, spacing } from '../src/theme/mobile-theme'
@@ -795,6 +796,8 @@ export default function HomeScreen() {
               <View style={styles.hero}>
                 <Text style={styles.heroTitle}>Welcome back</Text>
               </View>
+
+              <MobileUpdateNotice />
 
               {stats && (
                 <View style={styles.statsRow}>

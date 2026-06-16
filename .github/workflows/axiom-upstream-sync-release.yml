@@ -212,7 +212,8 @@ jobs:
             src/main/updater-nudge.test.ts \
             src/main/updater-changelog.test.ts \
             src/main/app-build-identity.test.ts \
-            config/scripts/axiom-upstream-sync-release.test.mjs
+            config/scripts/axiom-upstream-sync-release.test.mjs \
+            config/scripts/generate-mobile-update-manifest.test.mjs
 
       - name: Generate release notes
         if: steps.check.outputs.should_release == 'true' && steps.merge.outputs.merge_result != 'agent_remediate'
@@ -398,17 +399,36 @@ jobs:
             sleep 20
           done
 
+      - name: Generate mobile update manifest
+        shell: bash
+        run: |
+          apk_path="$(find android/app/build/outputs/apk/release -name '*.apk' -print -quit)"
+          if [[ -z "$apk_path" ]]; then
+            echo "No release APK found for mobile update manifest" >&2
+            exit 1
+          fi
+          source_sha="$(git rev-parse HEAD)"
+          node ../config/scripts/generate-mobile-update-manifest.mjs \
+            --release-tag "${{ needs.sync.outputs.tag }}" \
+            --release-version "${{ needs.sync.outputs.fork_version }}" \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-sha "$source_sha" \
+            --apk "$apk_path" \
+            --output mobile-update.json
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: axiom-orca-mobile-apk
-          path: mobile/android/app/build/outputs/apk/release/*.apk
+          path: |
+            mobile/android/app/build/outputs/apk/release/*.apk
+            mobile/mobile-update.json
 
-      - name: Upload APKs to draft release
+      - name: Upload APKs and mobile update manifest to draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
-        run: gh release upload "${{ needs.sync.outputs.tag }}" --repo "$GITHUB_REPOSITORY" android/app/build/outputs/apk/release/*.apk --clobber
+        run: gh release upload "${{ needs.sync.outputs.tag }}" --repo "$GITHUB_REPOSITORY" android/app/build/outputs/apk/release/*.apk mobile-update.json --clobber
 
   publish:
     name: Verify assets and publish release

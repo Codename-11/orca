@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-
 import { pathToFileURL } from 'node:url'
 
 const API_VERSION = '2022-11-28'

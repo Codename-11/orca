@@ -59,6 +59,14 @@ Axiom-only update builds should use `bump_axiom_revision`, `axiom_revision`, or 
 pushed `axiom-v*` tag so the Electron updater sees a semantically newer fork
 version from the `Codename-11/orca` release feed.
 
+Mobile release assets are intentionally version-gated rather than SHA-gated.
+Stable Axiom releases may attach `app-release.apk` even when only desktop or
+upstream code changed, so mobile checks `mobile-update.json` and prompts only
+when the native mobile build id is newer (`expo.android.versionCode` on Android,
+`expo.ios.buildNumber` on iOS). The manifest also carries the release source SHA
+and APK SHA-256 for verification/diagnostics; a changed APK hash without a native
+build id bump is a release packaging error, not a client update signal.
+
 ## Axiom patch release workflow
 
 Use this path when Axiom has a fork-only fix already on `axiom/deploy` and needs
@@ -118,8 +126,9 @@ git diff --check
 ```
 
 For workflow-only edits, also validate any Axiom release scripts with Node, run
-`config/scripts/axiom-upstream-sync-release.test.mjs`, and parse the workflow
-YAML before merging.
+`config/scripts/axiom-upstream-sync-release.test.mjs`,
+`config/scripts/generate-mobile-update-manifest.test.mjs`, and parse the
+workflow YAML before merging.
 
 ## Upstream-sync automation
 

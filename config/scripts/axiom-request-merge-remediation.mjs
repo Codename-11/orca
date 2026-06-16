@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-
 import { execFileSync } from 'node:child_process'
 import { createHmac } from 'node:crypto'
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'

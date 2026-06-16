@@ -62,7 +62,7 @@ export function getRequiredReleaseAssetNames(
   }
 
   if (selectedPlatforms.has('android')) {
-    names.push('app-release.apk')
+    names.push('app-release.apk', 'mobile-update.json')
   }
 
   return names
