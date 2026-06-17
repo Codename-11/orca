@@ -2546,6 +2546,7 @@ function PRMergeCell({
                 repo: runtimeRepoId,
                 prNumber: item.number,
                 enabled,
+                method: enabled ? mergeMethods.defaultMethod : undefined,
                 prRepo: item.prRepo ?? null
               },
               { timeoutMs: 30_000 }
@@ -2556,6 +2557,7 @@ function PRMergeCell({
               sourceContext,
               prNumber: item.number,
               enabled,
+              method: enabled ? mergeMethods.defaultMethod : undefined,
               prRepo: item.prRepo ?? null
             })
       if (result.ok) {
