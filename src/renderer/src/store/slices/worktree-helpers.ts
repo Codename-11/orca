@@ -146,7 +146,8 @@ export type WorktreeSlice = {
     linkedLinearIssueOrganizationUrlKey?: string | null,
     linkedBitbucketPR?: number | null,
     linkedAzureDevOpsPR?: number | null,
-    linkedGiteaPR?: number | null
+    linkedGiteaPR?: number | null,
+    compareBaseRef?: string
   ) => Promise<CreateWorktreeResult>
   /** Register an in-flight background creation and make it the active surface. */
   beginPendingWorktreeCreation: (entry: PendingWorktreeCreation) => void
@@ -232,6 +233,13 @@ export type WorktreeSlice = {
    * one-shot at hydration time. See design §4.4.
    */
   purgeWorktreeTerminalState: (worktreeIds: string[]) => void
+  /**
+   * Re-key every worktree-scoped map + pointer from `oldWorktreeId` to
+   * `newWorktreeId` after a folder rename changed the worktree's path-derived id.
+   * The inverse of purge: move state instead of dropping it, so the live worktree
+   * keeps its tabs, terminals, and selections. No-op when the ids match.
+   */
+  migrateWorktreeIdentity: (oldWorktreeId: string, newWorktreeId: string) => void
   updateWorktreeGitIdentity: (
     worktreeId: string,
     identity: { head?: string; branch?: string | null }
