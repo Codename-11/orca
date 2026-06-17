@@ -1,6 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { startDiagnosticFetchTimeout } from '../diagnostics/diagnostic-fetch-timeout'
+import {
+  startDiagnosticFetchTimeout,
+  type DiagnosticFetchTimeout
+} from '../diagnostics/diagnostic-fetch-timeout'
 import { getInstalledMobileBuild } from './installed-mobile-build'
 import {
   MOBILE_UPDATE_MANIFEST_URL,
@@ -10,6 +13,7 @@ import {
 } from './mobile-update-manifest'
 
 export type MobileUpdateCheckState =
+  | { state: 'idle' }
   | { state: 'checking' }
   | { state: 'available'; evaluation: Extract<MobileUpdateEvaluation, { kind: 'available' }> }
   | { state: 'current'; evaluation: Extract<MobileUpdateEvaluation, { kind: 'current' }> }
@@ -19,26 +23,41 @@ export type MobileUpdateCheckState =
     }
   | { state: 'error'; message: string }
 
+export type MobileUpdateCheckResult = MobileUpdateCheckState & {
+  checkNow: () => void
+}
+
 type Options = {
   enabled?: boolean
+  checkOnMount?: boolean
   timeoutMs?: number
   manifestUrl?: string
 }
 
 export function useMobileUpdateCheck({
   enabled = true,
+  checkOnMount = true,
   timeoutMs = 6_000,
   manifestUrl = MOBILE_UPDATE_MANIFEST_URL
-}: Options = {}): MobileUpdateCheckState {
-  const [state, setState] = useState<MobileUpdateCheckState>({ state: 'checking' })
+}: Options = {}): MobileUpdateCheckResult {
+  const [state, setState] = useState<MobileUpdateCheckState>(
+    enabled && checkOnMount ? { state: 'checking' } : { state: 'idle' }
+  )
+  const requestIdRef = useRef(0)
+  const timeoutRef = useRef<DiagnosticFetchTimeout | null>(null)
+  const disposedRef = useRef(false)
 
-  useEffect(() => {
+  const checkNow = useCallback(() => {
     if (!enabled) {
+      setState({ state: 'idle' })
       return
     }
 
-    let disposed = false
+    requestIdRef.current += 1
+    const requestId = requestIdRef.current
+    timeoutRef.current?.dispose()
     const timeout = startDiagnosticFetchTimeout(timeoutMs)
+    timeoutRef.current = timeout
 
     async function check() {
       setState({ state: 'checking' })
@@ -55,7 +74,7 @@ export function useMobileUpdateCheck({
           throw new Error('Update manifest has an unexpected shape')
         }
         const evaluation = evaluateMobileUpdate(manifest, getInstalledMobileBuild())
-        if (disposed) {
+        if (disposedRef.current || requestId !== requestIdRef.current) {
           return
         }
         if (evaluation.kind === 'available') {
@@ -66,7 +85,7 @@ export function useMobileUpdateCheck({
           setState({ state: 'unavailable', reason: evaluation.kind })
         }
       } catch (error) {
-        if (disposed) {
+        if (disposedRef.current || requestId !== requestIdRef.current) {
           return
         }
         setState({
@@ -78,17 +97,37 @@ export function useMobileUpdateCheck({
               : 'Update check failed'
         })
       } finally {
+        if (timeoutRef.current === timeout) {
+          timeoutRef.current = null
+        }
         timeout.dispose()
       }
     }
 
     void check()
-
-    return () => {
-      disposed = true
-      timeout.dispose()
-    }
   }, [enabled, manifestUrl, timeoutMs])
 
-  return state
+  useEffect(() => {
+    disposedRef.current = false
+    return () => {
+      disposedRef.current = true
+      requestIdRef.current += 1
+      timeoutRef.current?.dispose()
+      timeoutRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!enabled) {
+      timeoutRef.current?.dispose()
+      timeoutRef.current = null
+      setState({ state: 'idle' })
+      return
+    }
+    if (checkOnMount) {
+      checkNow()
+    }
+  }, [checkNow, checkOnMount, enabled])
+
+  return { ...state, checkNow }
 }

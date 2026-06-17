@@ -10,14 +10,14 @@ import { buildMobileUpdateManifest } from './generate-mobile-update-manifest.mjs
 function appConfig(overrides = {}) {
   return {
     expo: {
-      version: '0.0.14',
+      version: '0.0.15',
       android: {
         package: 'com.axiomlabs.orca.mobile',
-        versionCode: 4
+        versionCode: 5
       },
       ios: {
         bundleIdentifier: 'com.stably.orca.mobile',
-        buildNumber: '3'
+        buildNumber: '4'
       },
       ...overrides
     }
@@ -54,8 +54,8 @@ describe('buildMobileUpdateManifest', () => {
       platforms: {
         android: {
           packageName: 'com.axiomlabs.orca.mobile',
-          version: '0.0.14',
-          versionCode: 4,
+          version: '0.0.15',
+          versionCode: 5,
           artifact: {
             name: 'app-release.apk',
             sizeBytes: apkBytes.length,
@@ -66,8 +66,8 @@ describe('buildMobileUpdateManifest', () => {
         },
         ios: {
           bundleIdentifier: 'com.stably.orca.mobile',
-          version: '0.0.14',
-          buildNumber: '3'
+          version: '0.0.15',
+          buildNumber: '4'
         }
       }
     })
@@ -117,7 +117,7 @@ describe('buildMobileUpdateManifest', () => {
     const manifest = JSON.parse(readFileSync(outputPath, 'utf8'))
     expect(manifest.platforms.android).toMatchObject({
       packageName: 'com.axiomlabs.orca.mobile',
-      versionCode: 4
+      versionCode: 5
     })
   })
 })

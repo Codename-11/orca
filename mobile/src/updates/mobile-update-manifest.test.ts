@@ -21,8 +21,8 @@ function manifest(overrides: Partial<MobileUpdateManifest> = {}): MobileUpdateMa
     platforms: {
       android: {
         packageName: 'com.axiomlabs.orca.mobile',
-        version: '0.0.14',
-        versionCode: 4,
+        version: '0.0.15',
+        versionCode: 5,
         artifact: {
           name: 'app-release.apk',
           sizeBytes: 123,
@@ -33,8 +33,8 @@ function manifest(overrides: Partial<MobileUpdateManifest> = {}): MobileUpdateMa
       },
       ios: {
         bundleIdentifier: 'com.stably.orca.mobile',
-        version: '0.0.14',
-        buildNumber: '3'
+        version: '0.0.15',
+        buildNumber: '4'
       }
     },
     ...overrides
@@ -64,12 +64,12 @@ describe('evaluateMobileUpdate', () => {
       kind: 'available',
       update: {
         platform: 'android',
-        nativeBuild: '4',
+        nativeBuild: '5',
         artifactSha256: 'apk-sha'
       }
     })
     expect(result.kind === 'available' ? formatAvailableMobileUpdate(result.update) : '').toBe(
-      'v0.0.14 (4)'
+      'v0.0.15 (5)'
     )
   })
 
@@ -86,8 +86,8 @@ describe('evaluateMobileUpdate', () => {
         platforms: {
           android: {
             packageName: 'com.axiomlabs.orca.mobile',
-            version: '0.0.14',
-            versionCode: 4,
+            version: '0.0.15',
+            versionCode: 5,
             artifact: {
               name: 'app-release.apk',
               sizeBytes: 456,
@@ -100,8 +100,8 @@ describe('evaluateMobileUpdate', () => {
       }),
       {
         platform: 'android',
-        version: '0.0.14',
-        versionCode: 4,
+        version: '0.0.15',
+        versionCode: 5,
         packageName: 'com.axiomlabs.orca.mobile'
       }
     )
@@ -125,7 +125,7 @@ describe('evaluateMobileUpdate', () => {
       kind: 'available',
       update: {
         platform: 'ios',
-        nativeBuild: '3'
+        nativeBuild: '4'
       }
     })
   })

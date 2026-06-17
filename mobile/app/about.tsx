@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router'
 import { ChevronLeft, Globe } from 'lucide-react-native'
 import Svg, { Path } from 'react-native-svg'
 import Constants from 'expo-constants'
-import { MobileUpdateNotice } from '../src/components/MobileUpdateNotice'
+import { MobileUpdateCheckRow } from '../src/components/MobileUpdateCheckRow'
 import { OrcaLogo } from '../src/components/OrcaLogo'
 import { colors, spacing, typography } from '../src/theme/mobile-theme'
 
@@ -56,7 +56,7 @@ export default function AboutScreen() {
         <Text style={styles.brandSub}>Open-source agent IDE for 100x builders</Text>
       </View>
 
-      <MobileUpdateNotice compact />
+      <MobileUpdateCheckRow />
 
       <View style={styles.section}>
         <Pressable
