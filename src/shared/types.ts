@@ -12,6 +12,7 @@ import type {
 } from './agent-status-types'
 import type { VoiceSettings } from './speech-types'
 import type { WorkspaceCleanupUIState } from './workspace-cleanup'
+import type { LargeDiffRenderLimit } from './large-diff-render-limit'
 import type { GitLabProjectSettings } from './gitlab-types'
 import type { TaskProvider } from './task-providers'
 import type { FeatureTipId } from './feature-tips'
@@ -33,6 +34,7 @@ import type { SleepingAgentSessionRecord } from './agent-session-resume'
 import type { ClaudeAgentTeamsMode } from './claude-agent-teams-tmux-compat'
 import type { TerminalCustomTheme } from './terminal-custom-themes'
 import type { UiLanguage } from './ui-language'
+import type { ForkSyncMode } from './git-fork-sync'
 
 // Re-exported for backward compat with renderer call sites that import
 // `WorkspaceCreateTelemetrySource` from '../../../shared/types'.
@@ -87,6 +89,7 @@ export type RepoKind = 'git' | 'folder'
  * - `'origin'`: explicit origin. Same precedence.
  */
 export type IssueSourcePreference = 'upstream' | 'origin' | 'auto'
+export type { ForkSyncMode, GitForkSyncExpectedUpstream, GitForkSyncResult } from './git-fork-sync'
 export type ExternalWorktreeVisibility = 'hide' | 'show'
 
 export type ProjectProviderIdentity = {
@@ -239,6 +242,8 @@ export type Repo = {
    *  identically to `'auto'`; writers leave it undefined on creation so
    *  existing persisted records stay forward-compatible. */
   issueSourcePreference?: IssueSourcePreference
+  /** Controls Orca's fork-default-branch sync offer for repos with upstream metadata. */
+  forkSyncMode?: ForkSyncMode
   /** Controls whether worktrees Orca did not create appear in the sidebar. */
   externalWorktreeVisibility?: ExternalWorktreeVisibility
   /** True when the repo predates hidden-by-default external worktrees. */
@@ -558,6 +563,11 @@ export type WorktreeMeta = {
   /** User-assigned workspace board status for manual sidebar organization. */
   workspaceStatus?: WorkspaceStatus
   diffComments?: DiffComment[]
+  /** Path-derived worktree ids this worktree had before its folder was renamed
+   *  on disk (the id embeds the path). Lets the daemon's session GC and registry
+   *  hydration recognize sessions minted under an old id instead of reaping
+   *  them. Self-prunes when the worktree is deleted. */
+  priorWorktreeIds?: string[]
   mobileDiffReview?: MobileDiffReviewState
 }
 
@@ -702,6 +712,7 @@ export type TabContentType =
   | 'editor'
   | 'diff'
   | 'conflict-review'
+  | 'check-details'
   | 'browser'
   | 'simulator'
 
@@ -1036,6 +1047,7 @@ export type PRInfo = {
   mergeable: PRMergeableState
   reviewDecision?: PRReviewDecision | null
   autoMergeEnabled?: boolean
+  autoMergeAllowed?: boolean | null
   mergeQueueRequired?: boolean | null
   mergeMethodSettings?: GitHubPRMergeMethodSettings
   mergeStateStatus?: string | null
@@ -1309,6 +1321,7 @@ export type GitHubWorkItem = {
   checksSummary?: GitHubPRCheckSummary
   mergeable?: PRMergeableState
   autoMergeEnabled?: boolean
+  autoMergeAllowed?: boolean | null
   mergeQueueRequired?: boolean | null
   mergeMethodSettings?: GitHubPRMergeMethodSettings
   mergeStateStatus?: string | null
@@ -2941,6 +2954,7 @@ export type RightSidebarTab =
   | 'search'
   | 'vault'
   | 'workspaces'
+  | 'pr-checks'
   | 'source-control'
   | 'checks'
   | 'ports'
@@ -2960,6 +2974,7 @@ export type PersistedUIState = {
   rightSidebarTab: RightSidebarTab
   rightSidebarExplorerView: RightSidebarExplorerView
   rightSidebarWidth: number
+  markdownTocPanelWidth?: number
   groupBy: 'none' | 'workspace-status' | 'repo' | 'pr-status'
   sortBy: 'name' | 'smart' | 'recent' | 'repo' | 'manual'
   /** Project header ordering in `groupBy: 'repo'`, independent of workspace
@@ -3050,6 +3065,11 @@ export type PersistedUIState = {
   /** User-dismissed browser import hint in the browser toolbar. Import remains
    *  available from Settings > Browser and the toolbar overflow menu. */
   browserImportHintHidden?: boolean
+  /** User dismissed the first-run Mobile Emulator intro (Keep, Hide, or close).
+   *  Reversible only by re-enabling the feature in Settings. */
+  mobileEmulatorTabIntroDismissed?: boolean
+  /** User deferred the in-pane Mobile Emulator CLI + skill setup guide. */
+  mobileEmulatorAgentSetupDismissed?: boolean
   /** One-shot rollout notice for manual project ordering becoming the default.
    *  Absent or true means the sidebar callout stays hidden. */
   projectOrderManualDefaultNoticeDismissed?: boolean
@@ -3345,6 +3365,7 @@ export type GitDiffTextResult = {
   modifiedContent: string
   originalIsBinary: false
   modifiedIsBinary: false
+  largeDiffRenderLimit?: LargeDiffRenderLimit
 }
 
 export type GitDiffBinaryResult = {
