@@ -303,8 +303,26 @@ describe('useComposerState host-context boundaries', () => {
     expect(section).toContain("linkedProvider !== 'linear' && linkedProvider !== 'jira'")
   })
 
+  it('resolves full-create base refs through the worktree-create precedence helper', () => {
+    const section = sourceBetween(
+      HOOK_SOURCE,
+      'const submitBaseBranch',
+      'const result = await createWorktree'
+    )
+
+    expect(section).toContain('resolveWorktreeCreateBaseBranch')
+    expect(section).toContain('explicitBaseBranch: baseBranch')
+    expect(section).toContain('repoWorktreeBaseRef: selectedRepo.worktreeBaseRef')
+    expect(section).toContain('getRuntimeRepoBaseRefDefault')
+  })
+
   it('resolves quick-create base refs through the worktree-create precedence helper', () => {
-    const section = sourceBetween(HOOK_SOURCE, 'const submitBaseBranch', 'const createDisplayName')
+    const quickSubmit = sourceBetween(
+      HOOK_SOURCE,
+      'const submitQuick = useCallback',
+      'const createGateInput'
+    )
+    const section = sourceBetween(quickSubmit, 'const submitBaseBranch', 'const createDisplayName')
 
     expect(section).toContain('resolveWorktreeCreateBaseBranch')
     expect(section).toContain('explicitBaseBranch: baseBranch')

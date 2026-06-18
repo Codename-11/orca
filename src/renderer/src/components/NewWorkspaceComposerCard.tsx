@@ -37,6 +37,7 @@ import SmartWorkspaceNameField, {
 } from '@/components/new-workspace/SmartWorkspaceNameField'
 import ProjectCombobox from '@/components/new-workspace/ProjectCombobox'
 import ProjectHostSetupCombobox from '@/components/new-workspace/ProjectHostSetupCombobox'
+import { CreateFromPicker } from '@/components/automations/CreateFromPicker'
 import type { SetupConfig } from '@/lib/new-workspace'
 import type { NewWorkspaceProjectOption } from '@/lib/new-workspace-project-options'
 import type { ProjectHostSetupOption } from '@/lib/project-host-setup-options'
@@ -110,6 +111,9 @@ type NewWorkspaceComposerCardProps = {
   selectedRepoConnectInProgress: boolean
   onConnectSelectedRepo: () => Promise<void>
   branchesEnabled?: boolean
+  baseBranch?: string
+  onBaseBranchChange?: (next: string | undefined) => void
+  startFromResetHint?: string | null
   setupControlsEnabled?: boolean
   canUseSparseCheckout: boolean
   sparsePresets: SparsePreset[]
@@ -342,6 +346,9 @@ export default function NewWorkspaceComposerCard({
   selectedRepoConnectInProgress,
   onConnectSelectedRepo,
   branchesEnabled = true,
+  baseBranch,
+  onBaseBranchChange,
+  startFromResetHint = null,
   setupControlsEnabled = true,
   canUseSparseCheckout,
   sparsePresets,
@@ -358,6 +365,7 @@ export default function NewWorkspaceComposerCard({
   const defaultTuiAgent = useAppStore((s) => s.settings?.defaultTuiAgent ?? null)
   const disabledTuiAgents = useAppStore((s) => s.settings?.disabledTuiAgents ?? [])
   const updateSettings = useAppStore((s) => s.updateSettings)
+  const selectedRepoWorktrees = useAppStore((s) => s.worktreesByRepo?.[repoId] ?? [])
   const nameInputFocusFrameRef = React.useRef<number | null>(null)
   const submitShortcutModifierLabel = getScreenSubmitModifierLabel()
   const selectedRepoName = React.useMemo(() => {
@@ -368,6 +376,16 @@ export default function NewWorkspaceComposerCard({
     const option = projectOptions.find((candidate) => candidate.id === selectedProjectId)
     return option?.displayName ?? selectedRepoName
   }, [projectOptions, selectedProjectId, selectedRepoName])
+  const eligibleRepoMap = React.useMemo(
+    () => new Map(eligibleRepos.map((repo) => [repo.id, repo])),
+    [eligibleRepos]
+  )
+  const handleBaseBranchChange = React.useCallback(
+    (next: string): void => {
+      onBaseBranchChange?.(next.trim() || undefined)
+    },
+    [onBaseBranchChange]
+  )
   const sshStatusLabel = selectedRepoSshStatus
     ? getSshStatusLabel(selectedRepoSshStatus)
     : translate('auto.components.NewWorkspaceComposerCard.notConnected', 'Not connected')
@@ -656,6 +674,25 @@ export default function NewWorkspaceComposerCard({
             <p className="flex items-start gap-1.5 text-[11px] text-yellow-600 dark:text-yellow-500">
               <AlertTriangle className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
               <span>{forkPushWarning}</span>
+            </p>
+          ) : null}
+          {selectedRepoIsGit && branchesEnabled ? (
+            <CreateFromPicker
+              repoId={repoId}
+              repoMap={eligibleRepoMap}
+              worktrees={selectedRepoWorktrees}
+              value={baseBranch ?? ''}
+              onValueChange={handleBaseBranchChange}
+              triggerClassName="h-8"
+            />
+          ) : null}
+          {startFromResetHint ? (
+            <p className="text-[11px] text-muted-foreground">
+              {translate(
+                'auto.components.NewWorkspaceComposerCard.startFromResetHint',
+                'Start-from reset to the project default; {{value0}}.',
+                { value0: startFromResetHint }
+              )}
             </p>
           ) : null}
         </div>

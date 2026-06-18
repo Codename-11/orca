@@ -1,6 +1,6 @@
 /* oxlint-disable react-doctor/no-adjust-state-on-prop-change -- Why: picker base-ref defaults and search results come from debounced runtime IPC, so loading/result state is intentionally synchronized from effects. */
 import React from 'react'
-import { Check, ChevronsUpDown } from 'lucide-react'
+import { AlertTriangle, Check, ChevronsUpDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Command,
@@ -21,6 +21,7 @@ import {
 import { translate } from '@/i18n/i18n'
 
 const DEFAULT_VALUE = '__project_default__'
+type CreateFromRepo = Pick<Repo, 'id' | 'worktreeBaseRef'>
 
 function displayBranchName(branch: string): string {
   return branch.replace(/^refs\/heads\//, '')
@@ -35,7 +36,7 @@ export function CreateFromPicker({
   onValueChange
 }: {
   repoId: string
-  repoMap: Map<string, Repo>
+  repoMap: Map<string, CreateFromRepo>
   worktrees: Worktree[]
   value: string
   triggerClassName?: string
@@ -49,13 +50,22 @@ export function CreateFromPicker({
   const inputRef = React.useRef<HTMLInputElement | null>(null)
   const focusFrameRef = React.useRef<number | null>(null)
   const [defaultBaseRef, setDefaultBaseRef] = React.useState<string | null>(null)
+  const [defaultBaseRefLoaded, setDefaultBaseRefLoaded] = React.useState(false)
   const [query, setQuery] = React.useState('')
   const [searchResults, setSearchResults] = React.useState<string[]>([])
   const [isSearching, setIsSearching] = React.useState(false)
-  const effectiveDefault = repo?.worktreeBaseRef ?? defaultBaseRef
+  const repoDefaultBaseRef = repo?.worktreeBaseRef?.trim()
+  const resolvedDefaultBaseRef = defaultBaseRef?.trim()
+  const effectiveDefault = repoDefaultBaseRef || resolvedDefaultBaseRef || null
   const selectedValue = value || DEFAULT_VALUE
+  const missingDefaultBase = !value && defaultBaseRefLoaded && !effectiveDefault
   const selectedLabel =
-    value || (effectiveDefault ? `${effectiveDefault} (default)` : 'Project default')
+    value ||
+    (effectiveDefault
+      ? `${effectiveDefault} (default)`
+      : missingDefaultBase
+        ? 'No default base branch'
+        : 'Project default')
   const branchOptions = React.useMemo(() => {
     const options = new Set<string>()
     if (effectiveDefault) {
@@ -114,15 +124,18 @@ export function CreateFromPicker({
     }
     let stale = false
     setDefaultBaseRef(null)
+    setDefaultBaseRefLoaded(false)
     void getRuntimeRepoBaseRefDefault({ activeRuntimeEnvironmentId }, repoId)
       .then((result) => {
         if (!stale) {
           setDefaultBaseRef(result.defaultBaseRef)
+          setDefaultBaseRefLoaded(true)
         }
       })
       .catch(() => {
         if (!stale) {
           setDefaultBaseRef(null)
+          setDefaultBaseRefLoaded(true)
         }
       })
     return () => {
@@ -238,10 +251,15 @@ export function CreateFromPicker({
                         '{{value0}} (default)',
                         { value0: effectiveDefault }
                       )
-                    : translate(
-                        'auto.components.automations.CreateFromPicker.ef6d762538',
-                        'Project default'
-                      )}
+                    : missingDefaultBase
+                      ? translate(
+                          'auto.components.automations.CreateFromPicker.noDefaultBaseBranch',
+                          'No default base branch'
+                        )
+                      : translate(
+                          'auto.components.automations.CreateFromPicker.ef6d762538',
+                          'Project default'
+                        )}
                 </span>
               </CommandItem>
               {branchOptions
@@ -265,6 +283,17 @@ export function CreateFromPicker({
           </Command>
         </PopoverContent>
       </Popover>
+      {missingDefaultBase ? (
+        <p className="flex items-start gap-1.5 text-[11px] text-destructive">
+          <AlertTriangle className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
+          <span>
+            {translate(
+              'auto.components.automations.CreateFromPicker.missingDefaultBaseHelp',
+              'Choose a branch or set a project base branch before creating a workspace.'
+            )}
+          </span>
+        </p>
+      ) : null}
     </div>
   )
 }

@@ -35,6 +35,25 @@ vi.mock('@/components/sparse/SparseCheckoutPresetSelect', () => ({
   default: () => <div data-testid="sparse-select" />
 }))
 
+vi.mock('@/components/automations/CreateFromPicker', () => ({
+  CreateFromPicker: ({
+    value,
+    onValueChange
+  }: {
+    value: string
+    onValueChange: (value: string) => void
+  }) => (
+    <button
+      type="button"
+      data-testid="create-from-picker"
+      data-value={value}
+      onClick={() => onValueChange('')}
+    >
+      Branch from {value || 'project default'}
+    </button>
+  )
+}))
+
 vi.mock('@/components/new-workspace/SmartWorkspaceNameField', () => ({
   default: ({
     branchesEnabled,
@@ -224,5 +243,36 @@ describe('NewWorkspaceComposerCard folder task source mode', () => {
         .querySelector('[aria-label="workspace name"]')
         ?.getAttribute('data-repo-backed-sources-disabled')
     ).toBe('false')
+  })
+
+  it('shows the explicit branch-from selection and reset hint for git projects', () => {
+    const onBaseBranchChange = vi.fn()
+    current = renderCard({
+      eligibleRepos: [
+        {
+          id: 'repo-a',
+          displayName: 'Repo A',
+          path: '/repo-a',
+          badgeColor: '#111111',
+          worktreeBaseRef: 'dev'
+        } as never
+      ],
+      branchesEnabled: true,
+      baseBranch: 'origin/main',
+      onBaseBranchChange,
+      startFromResetHint: 'was origin/main'
+    })
+
+    const picker = current.container.querySelector<HTMLButtonElement>(
+      '[data-testid="create-from-picker"]'
+    )
+    expect(picker?.getAttribute('data-value')).toBe('origin/main')
+    expect(current.container.textContent).toContain(
+      'Start-from reset to the project default; was origin/main.'
+    )
+
+    act(() => picker?.click())
+
+    expect(onBaseBranchChange).toHaveBeenCalledWith(undefined)
   })
 })

@@ -2895,10 +2895,19 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
               telemetry: composerTelemetry
             }
           : undefined
+      const submitBaseBranch = selectedRepoIsGit
+        ? await resolveWorktreeCreateBaseBranch({
+            explicitBaseBranch: baseBranch,
+            repoWorktreeBaseRef: selectedRepo.worktreeBaseRef,
+            loadDefaultBaseRef: async () =>
+              (await getRuntimeRepoBaseRefDefault(selectedRepoSettings, repoId).catch(() => null))
+                ?.defaultBaseRef
+          })
+        : undefined
       const result = await createWorktree(
         repoId,
         workspaceName,
-        selectedRepoIsGit ? baseBranch : undefined,
+        submitBaseBranch,
         effectiveSetupDecision,
         selectedRepoIsGit && sparseEnabled
           ? {
@@ -3020,6 +3029,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     selectedRepo,
     selectedRepoAgentLaunchPlatform,
     selectedRepoIsGit,
+    selectedRepoSettings,
     selectedRepoRequiresConnection,
     showProjectRequiredError,
     settings?.agentCmdOverrides,

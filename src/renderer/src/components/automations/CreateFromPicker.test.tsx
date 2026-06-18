@@ -113,4 +113,23 @@ describe('CreateFromPicker host routing', () => {
     )
     expect(searchRuntimeRepoBaseRefs).not.toHaveBeenCalled()
   })
+
+  it('shows an actionable missing-base warning when no project or git default exists', async () => {
+    vi.mocked(getRuntimeRepoBaseRefDefault).mockResolvedValueOnce({
+      defaultBaseRef: null,
+      remoteCount: 0
+    })
+    const repo = makeRepo({})
+    storeState.repos = [repo]
+
+    await renderPicker(repo)
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(container.textContent).toContain('No default base branch')
+    expect(container.textContent).toContain(
+      'Choose a branch or set a project base branch before creating a workspace.'
+    )
+  })
 })
