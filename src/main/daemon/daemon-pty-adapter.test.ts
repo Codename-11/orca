@@ -14,6 +14,8 @@ const { getMacDaemonSystemResolverHealthMock } = vi.hoisted(() => ({
   getMacDaemonSystemResolverHealthMock: vi.fn(async () => 'unknown')
 }))
 
+const itOnPosix = process.platform === 'win32' ? it.skip : it
+
 vi.mock('./daemon-health', async (importOriginal) => {
   const actual = await importOriginal<typeof DaemonHealthModule>()
   return {
@@ -122,6 +124,37 @@ describe('DaemonPtyAdapter (IPtyProvider)', () => {
     it('uses worktreeId as session prefix when provided', async () => {
       const result = await adapter.spawn({ cols: 80, rows: 24, worktreeId: 'wt-1' })
       expect(result.id).toContain('wt-1')
+    })
+
+    itOnPosix('keeps plain Codex startup on the short daemon shell-ready timeout', async () => {
+      await adapter.spawn({
+        cols: 80,
+        rows: 24,
+        command: 'codex',
+        env: { SHELL: '/bin/zsh' }
+      })
+
+      await waitFor(() => vi.mocked(lastSubprocess.write).mock.calls.length > 0)
+      expect(lastSubprocess.write).toHaveBeenCalledWith('codex\n')
+    })
+
+    itOnPosix('waits for shell-ready for delivery-hinted Codex startup', async () => {
+      await adapter.spawn({
+        cols: 80,
+        rows: 24,
+        command: "codex 'linked issue context'",
+        startupCommandDelivery: 'shell-ready',
+        env: { SHELL: '/bin/zsh' }
+      })
+
+      await new Promise((resolve) => setTimeout(resolve, 350))
+      expect(lastSubprocess.write).not.toHaveBeenCalled()
+
+      lastSubprocess._simulateData('\x1b]777;orca-shell-ready\x07')
+      lastSubprocess._simulateData('\r\nuser@host $ ')
+
+      await waitFor(() => vi.mocked(lastSubprocess.write).mock.calls.length > 0)
+      expect(lastSubprocess.write).toHaveBeenCalledWith("codex 'linked issue context'\n")
     })
   })
 
@@ -681,6 +714,105 @@ describe('DaemonPtyAdapter (IPtyProvider)', () => {
       } finally {
         adapterClass.CHECKPOINT_INTERVAL_MS = previousInterval
         clearTimeoutSpy.mockRestore()
+      }
+    })
+
+    it('checkpoints before keep-history shutdown so sleep can cold restore latest output', async () => {
+      const adapterClass = DaemonPtyAdapter as unknown as { CHECKPOINT_INTERVAL_MS: number }
+      const previousInterval = adapterClass.CHECKPOINT_INTERVAL_MS
+      adapterClass.CHECKPOINT_INTERVAL_MS = 10_000
+
+      try {
+        historyAdapter = new DaemonPtyAdapter({ socketPath, tokenPath, historyPath: historyDir })
+        const { id } = await historyAdapter.spawn({
+          cols: 80,
+          rows: 24,
+          cwd: '/home/user',
+          sessionId: 'sleep-checkpoint'
+        })
+        const checkpointSpy = vi.spyOn(historyAdapter.getHistoryManager()!, 'checkpoint')
+
+        lastSubprocess._simulateData('latest before sleep\r\n')
+        await historyAdapter.shutdown(id, { immediate: true, keepHistory: true })
+
+        expect(checkpointSpy).toHaveBeenCalledWith(
+          id,
+          expect.objectContaining({ snapshotAnsi: expect.stringContaining('latest before sleep') })
+        )
+        expect(existsSync(join(historyDir, getHistorySessionDirName(id)))).toBe(true)
+
+        const restored = await historyAdapter.spawn({
+          cols: 80,
+          rows: 24,
+          cwd: '/home/user',
+          sessionId: id
+        })
+        expect(restored.coldRestore?.scrollback).toContain('latest before sleep')
+        historyAdapter.ackColdRestore(id)
+
+        const remountAfterAck = await historyAdapter.spawn({
+          cols: 80,
+          rows: 24,
+          cwd: '/home/user',
+          sessionId: id
+        })
+        expect(remountAfterAck.coldRestore).toBeUndefined()
+      } finally {
+        adapterClass.CHECKPOINT_INTERVAL_MS = previousInterval
+      }
+    })
+
+    it('cold restores the second sleep/wake cycle with post-wake output', async () => {
+      const adapterClass = DaemonPtyAdapter as unknown as { CHECKPOINT_INTERVAL_MS: number }
+      const previousInterval = adapterClass.CHECKPOINT_INTERVAL_MS
+      adapterClass.CHECKPOINT_INTERVAL_MS = 10_000
+
+      try {
+        historyAdapter = new DaemonPtyAdapter({ socketPath, tokenPath, historyPath: historyDir })
+        const { id } = await historyAdapter.spawn({
+          cols: 80,
+          rows: 24,
+          cwd: '/home/user',
+          sessionId: 'sleep-wake-cycles'
+        })
+
+        lastSubprocess._simulateData('first cycle content\r\n')
+        await historyAdapter.shutdown(id, { immediate: true, keepHistory: true })
+        const metaPath = join(historyDir, getHistorySessionDirName(id), 'meta.json')
+        const checkpointPath = join(historyDir, getHistorySessionDirName(id), 'checkpoint.json')
+        // Why: keep-history sleep stays unclean so cold restore remains eligible;
+        // the final checkpoint is the deterministic handoff signal.
+        expect(JSON.parse(readFileSync(metaPath, 'utf-8')).endedAt).toBeNull()
+        expect(JSON.parse(readFileSync(checkpointPath, 'utf-8')).snapshotAnsi).toContain(
+          'first cycle content'
+        )
+
+        const firstWake = await historyAdapter.spawn({
+          cols: 80,
+          rows: 24,
+          cwd: '/home/user',
+          sessionId: id
+        })
+        expect(firstWake.coldRestore?.scrollback).toContain('first cycle content')
+        historyAdapter.ackColdRestore(id)
+        expect(historyAdapter.hasPty(id)).toBe(true)
+
+        lastSubprocess._simulateData('second cycle content\r\n')
+        await historyAdapter.shutdown(id, { immediate: true, keepHistory: true })
+        expect(JSON.parse(readFileSync(metaPath, 'utf-8')).endedAt).toBeNull()
+        expect(JSON.parse(readFileSync(checkpointPath, 'utf-8')).snapshotAnsi).toContain(
+          'second cycle content'
+        )
+
+        const secondWake = await historyAdapter.spawn({
+          cols: 80,
+          rows: 24,
+          cwd: '/home/user',
+          sessionId: id
+        })
+        expect(secondWake.coldRestore?.scrollback).toContain('second cycle content')
+      } finally {
+        adapterClass.CHECKPOINT_INTERVAL_MS = previousInterval
       }
     })
 

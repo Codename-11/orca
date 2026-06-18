@@ -49,6 +49,8 @@ import { dispatchWindowCloseRequest } from './components/window-close-request-co
 import { useSystemPrefersDark } from './components/terminal-pane/use-system-prefers-dark'
 import RightSidebar from './components/right-sidebar'
 import { StarNagCard } from './components/StarNagCard'
+import { StarNagAgentValueMomentObserver } from './components/star-nag/StarNagAgentValueMomentObserver'
+import { StarNagToastHost } from './components/star-nag/StarNagToastHost'
 import { TelemetryFirstLaunchSurface } from './components/TelemetryFirstLaunchSurface'
 import { ZoomOverlay } from './components/ZoomOverlay'
 import { onOnboardingReopened } from './components/onboarding/show-onboarding-event'
@@ -109,6 +111,7 @@ import {
 import { shouldRenderPetOverlay } from './components/pet/pet-overlay-visibility'
 import { applyDocumentTheme } from './lib/document-theme'
 import { getSystemPrefersDark } from './lib/terminal-theme'
+import { publishTerminalViewAttributesAtAppStart } from './components/terminal-pane/terminal-appearance'
 import { isEditableTarget } from './lib/editable-target'
 import { getSelectedTextForFileSearch } from './lib/file-search-selection'
 import { useShortcutLabel } from './hooks/useShortcutLabel'
@@ -817,6 +820,14 @@ function App(): React.JSX.Element {
         // Load settings first so a persisted remote runtime does not boot against
         // the local filesystem and then hydrate stale local workspace state.
         await actions.fetchSettings()
+        // Why here: hidden-at-launch PTYs (background terminal reconnects,
+        // agent sessions) can query OSC 10/11 before any terminal pane mounts
+        // and main's responder is silent-until-first-push. Publish composed
+        // view attributes as soon as settings exist, before any spawn below.
+        publishTerminalViewAttributesAtAppStart(
+          useAppStore.getState().settings,
+          getSystemPrefersDark()
+        )
         await actions.fetchRepos()
         await actions.fetchProjectGroups()
         await actions.fetchFolderWorkspaces()
@@ -2429,6 +2440,15 @@ function App(): React.JSX.Element {
             >
               <StarNagCard />
             </RecoverableRenderErrorBoundary>
+            <RecoverableRenderErrorBoundary
+              boundaryId="overlay.star-nag-toast"
+              surface="overlay"
+              resetKey={activeView}
+              compact
+            >
+              <StarNagToastHost />
+            </RecoverableRenderErrorBoundary>
+            <StarNagAgentValueMomentObserver />
             {/* Why: the existing-user opt-in banner mounts at App root so it
           renders once per renderer session, not per view. It gates
           internally on the cohort markers populated by the migration,

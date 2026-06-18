@@ -3,6 +3,7 @@ import type { ReplayingPanesRef } from './replay-guard'
 import type { AgentCompletionStatusSnapshot } from './agent-completion-coordinator-types'
 import type { EventProps } from '../../../../shared/telemetry-events'
 import type { TerminalColorSchemeMode } from '../../../../shared/terminal-color-scheme-protocol'
+import type { StartupCommandDelivery } from '../../../../shared/codex-startup-delivery'
 import type { TuiAgent } from '../../../../shared/types'
 
 export type PtyConnectionDeps = {
@@ -14,6 +15,7 @@ export type PtyConnectionDeps = {
     /** Renderer-delivered startup input for callers that need xterm paste
      *  semantics before the submit Enter. */
     delivery?: 'terminal-paste'
+    startupCommandDelivery?: StartupCommandDelivery
     env?: Record<string, string>
     /** Telemetry payload for `agent_started`. Forwarded to `pty:spawn`
      *  so main fires the event only after the spawn succeeds. */
@@ -59,4 +61,10 @@ export type PtyConnectionDeps = {
   }) => void
   setCacheTimerStartedAt: (key: string, ts: number | null) => void
   syncPanePtyLayoutBinding: (paneId: number, ptyId: string | null) => void
+  /** Records a DECSET 2031 subscription answered from main's
+   *  '2031-subscribe' fact, mirroring the xterm CSI handler's registry write
+   *  (paneMode2031 + last replied theme) so later theme flips push CSI 997.
+   *  The reply itself is sent by the fact handler — query authority stays
+   *  with the view (model/view contract invariant 6). */
+  recordPaneMode2031Subscription?: (paneId: number, repliedMode: 'dark' | 'light') => void
 }

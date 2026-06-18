@@ -5,6 +5,7 @@ const {
   applyElectronProxySettingsMock,
   browserWindowGetAllWindowsMock,
   handleMock,
+  onMock,
   previewGhosttyImportMock,
   showSaveDialogMock,
   showOpenDialogMock,
@@ -16,6 +17,7 @@ const {
   applyElectronProxySettingsMock: vi.fn(),
   browserWindowGetAllWindowsMock: vi.fn(),
   handleMock: vi.fn(),
+  onMock: vi.fn(),
   previewGhosttyImportMock: vi.fn(),
   showSaveDialogMock: vi.fn(),
   showOpenDialogMock: vi.fn(),
@@ -28,7 +30,7 @@ vi.mock('electron', () => ({
   BrowserWindow: { getAllWindows: browserWindowGetAllWindowsMock },
   app: { name: 'Axiom Orca', getVersion: () => '1.4.18-rc.0.axiom.1' },
   dialog: { showSaveDialog: showSaveDialogMock, showOpenDialog: showOpenDialogMock },
-  ipcMain: { handle: handleMock },
+  ipcMain: { handle: handleMock, on: onMock },
   nativeTheme: { themeSource: 'system' }
 }))
 
@@ -80,6 +82,7 @@ const store = {
 describe('registerSettingsHandlers', () => {
   beforeEach(() => {
     handleMock.mockClear()
+    onMock.mockClear()
     applyAppIconMock.mockClear()
     applyElectronProxySettingsMock.mockClear()
     applyElectronProxySettingsMock.mockResolvedValue({ source: 'settings' })
@@ -102,6 +105,22 @@ describe('registerSettingsHandlers', () => {
     expect(channels).toContain('settings:exportProfile')
     expect(channels).toContain('settings:previewProfileImport')
     expect(channels).toContain('settings:importProfile')
+  })
+
+  it('answers the synchronous settings read with the persisted settings', () => {
+    // Why: panes can bind PTYs before async hydration; the side-effect
+    // authority kill switch needs the persisted value synchronously.
+    store.getSettings.mockReturnValue({ terminalMainSideEffectAuthority: false })
+    registerSettingsHandlers(store as never)
+
+    const listener = onMock.mock.calls.find(
+      (call) => call[0] === 'settings:get-sync'
+    )?.[1] as (event: { returnValue: unknown }) => void
+    expect(listener).toBeTypeOf('function')
+
+    const event = { returnValue: undefined as unknown }
+    listener(event)
+    expect(event.returnValue).toEqual({ terminalMainSideEffectAuthority: false })
   })
 
   it('registers settings:previewWarpThemeImport handler', () => {

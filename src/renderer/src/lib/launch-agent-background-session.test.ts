@@ -20,6 +20,12 @@ const mockPasteDraftWhenAgentReady = vi.fn()
 const mockMarkTrusted = vi.fn()
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
+type TestSettings = {
+  agentCmdOverrides: Record<string, string>
+  activeRuntimeEnvironmentId: string | null
+  terminalMainSideEffectAuthority?: boolean
+}
+
 function expectStablePaneSpawn(): string {
   const spawnArgs = mockSpawn.mock.calls[0]?.[0]
   const paneKey = spawnArgs?.env?.ORCA_PANE_KEY
@@ -34,7 +40,11 @@ function expectStablePaneSpawn(): string {
 const state = {
   activeRepoId: 'repo-1',
   activeWorktreeId: 'wt-1',
-  settings: { agentCmdOverrides: {}, activeRuntimeEnvironmentId: null as string | null },
+  settings: {
+    agentCmdOverrides: {},
+    activeRuntimeEnvironmentId: null,
+    terminalMainSideEffectAuthority: undefined
+  } as TestSettings,
   projects: [
     {
       id: 'repo-1',
@@ -100,7 +110,11 @@ describe('launchAgentBackgroundSession', () => {
     )
     state.activeRepoId = 'repo-1'
     state.activeWorktreeId = 'wt-1'
-    state.settings = { agentCmdOverrides: {}, activeRuntimeEnvironmentId: null }
+    state.settings = {
+      agentCmdOverrides: {},
+      activeRuntimeEnvironmentId: null,
+      terminalMainSideEffectAuthority: undefined
+    }
     state.projects = [
       {
         id: 'repo-1',
@@ -254,7 +268,10 @@ describe('launchAgentBackgroundSession', () => {
     expect(mockSpawn).toHaveBeenCalled()
   })
 
-  it('parses agent status from hidden PTY output', async () => {
+  it('parses agent status from hidden PTY output when the kill switch is off', async () => {
+    // Why: with main side-effect authority disabled, this sidecar is the only
+    // OSC 9999 → store path for hidden local sessions.
+    state.settings.terminalMainSideEffectAuthority = false
     const onAgentStatus = vi.fn()
     const { launchAgentBackgroundSession } = await import('./launch-agent-background-session')
 
@@ -274,6 +291,29 @@ describe('launchAgentBackgroundSession', () => {
       expect.objectContaining({ state: 'done', prompt: 'ok', agentType: 'codex' }),
       undefined
     )
+    expect(onAgentStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ state: 'done', prompt: 'ok', agentType: 'codex' })
+    )
+  })
+
+  it('skips the duplicate OSC store write under main side-effect authority', async () => {
+    // Why: main already routes OSC 9999 through the hook server to the store
+    // (agentStatus:set); a second write here would race the authoritative
+    // path. The automation onAgentStatus callback must still fire.
+    const onAgentStatus = vi.fn()
+    const { launchAgentBackgroundSession } = await import('./launch-agent-background-session')
+
+    await launchAgentBackgroundSession({
+      agent: 'claude',
+      worktreeId: 'wt-1',
+      prompt: 'run the automation',
+      onAgentStatus
+    })
+
+    const dataSidecar = mockSubscribeToPtyData.mock.calls[0]?.[1] as (data: string) => void
+    dataSidecar('\x1b]9999;{"state":"done","prompt":"ok","agentType":"codex"}\x07')
+
+    expect(state.setAgentStatus).not.toHaveBeenCalled()
     expect(onAgentStatus).toHaveBeenCalledWith(
       expect.objectContaining({ state: 'done', prompt: 'ok', agentType: 'codex' })
     )
@@ -355,7 +395,7 @@ describe('launchAgentBackgroundSession', () => {
     )
   })
 
-  it('injects startup commands into SSH background sessions after shell output arrives', async () => {
+  it('injects fast startup commands into SSH background sessions after shell output arrives', async () => {
     vi.useFakeTimers()
     try {
       state.repos = [{ id: 'repo-1', connectionId: 'ssh-1', path: '/repo' }]
@@ -368,7 +408,10 @@ describe('launchAgentBackgroundSession', () => {
         title: 'Nightly audit'
       })
 
-      expect(mockSpawn.mock.calls[0]?.[0]?.command).toBeUndefined()
+      expect(mockSpawn.mock.calls[0]?.[0]?.command).toBe(
+        "claude '--dangerously-skip-permissions' 'run the automation'"
+      )
+      expect(mockSpawn.mock.calls[0]?.[0]?.startupCommandDelivery).toBeUndefined()
       const dataSidecar = mockSubscribeToPtyData.mock.calls[0]?.[1] as (data: string) => void
       dataSidecar('user@remote repo % ')
       vi.advanceTimersByTime(50)
@@ -382,8 +425,114 @@ describe('launchAgentBackgroundSession', () => {
     }
   })
 
+  it('waits for shell-ready before injecting payload-bearing SSH background commands', async () => {
+    vi.useFakeTimers()
+    try {
+      state.repos = [{ id: 'repo-1', connectionId: 'ssh-1', path: '/repo' }]
+      const { launchAgentBackgroundSession } = await import('./launch-agent-background-session')
+
+      await launchAgentBackgroundSession({
+        agent: 'codex',
+        worktreeId: 'wt-1',
+        prompt: 'run the automation',
+        title: 'Nightly audit'
+      })
+
+      expect(mockSpawn.mock.calls[0]?.[0]).toEqual(
+        expect.objectContaining({
+          command: "codex '--dangerously-bypass-approvals-and-sandbox' 'run the automation'",
+          startupCommandDelivery: 'shell-ready'
+        })
+      )
+      const dataSidecar = mockSubscribeToPtyData.mock.calls[0]?.[1] as (data: string) => void
+      dataSidecar('user@remote repo % ')
+      vi.advanceTimersByTime(50)
+      expect(mockWrite).not.toHaveBeenCalled()
+
+      dataSidecar('\x1b]777;orca-shell-ready\x07user@remote repo % ')
+      vi.advanceTimersByTime(50)
+
+      expect(mockWrite).toHaveBeenCalledWith(
+        'pty-1',
+        "codex '--dangerously-bypass-approvals-and-sandbox' 'run the automation'\r"
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('waits for shell-ready for SSH background Codex native prefill commands without a hint', async () => {
+    vi.useFakeTimers()
+    try {
+      state.repos = [{ id: 'repo-1', connectionId: 'ssh-1', path: '/repo' }]
+      state.settings = {
+        agentCmdOverrides: { codex: "codex --prefill 'draft from override'" },
+        activeRuntimeEnvironmentId: null
+      }
+      const { launchAgentBackgroundSession } = await import('./launch-agent-background-session')
+
+      await launchAgentBackgroundSession({
+        agent: 'codex',
+        worktreeId: 'wt-1',
+        title: 'Nightly audit'
+      })
+
+      expect(mockSpawn.mock.calls[0]?.[0]).toEqual(
+        expect.objectContaining({
+          command:
+            "codex --prefill 'draft from override' '--dangerously-bypass-approvals-and-sandbox'"
+        })
+      )
+      expect(mockSpawn.mock.calls[0]?.[0]).not.toHaveProperty('startupCommandDelivery')
+      const dataSidecar = mockSubscribeToPtyData.mock.calls[0]?.[1] as (data: string) => void
+      dataSidecar('user@remote repo % ')
+      vi.advanceTimersByTime(50)
+      expect(mockWrite).not.toHaveBeenCalled()
+
+      dataSidecar('\x1b]777;orca-shell-ready\x07user@remote repo % ')
+      vi.advanceTimersByTime(50)
+
+      expect(mockWrite).toHaveBeenCalledWith(
+        'pty-1',
+        "codex --prefill 'draft from override' '--dangerously-bypass-approvals-and-sandbox'\r"
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not rearm SSH background startup delivery after exit cleanup', async () => {
+    vi.useFakeTimers()
+    try {
+      state.repos = [{ id: 'repo-1', connectionId: 'ssh-1', path: '/repo' }]
+      const { launchAgentBackgroundSession } = await import('./launch-agent-background-session')
+
+      await launchAgentBackgroundSession({
+        agent: 'codex',
+        worktreeId: 'wt-1',
+        prompt: 'run the automation',
+        title: 'Nightly audit'
+      })
+
+      const dataSidecar = mockSubscribeToPtyData.mock.calls[0]?.[1] as (data: string) => void
+      const exitSidecar = mockSubscribeToPtyExit.mock.calls[0]?.[1] as (code: number) => void
+      exitSidecar(0)
+
+      dataSidecar('\x1b]777;orca-shell-ready\x07user@remote repo % ')
+      vi.advanceTimersByTime(50)
+
+      expect(mockWrite).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('creates background sessions on the active runtime environment', async () => {
-    state.settings = { agentCmdOverrides: {}, activeRuntimeEnvironmentId: 'env-1' }
+    state.settings = {
+      agentCmdOverrides: {},
+      activeRuntimeEnvironmentId: 'env-1',
+      terminalMainSideEffectAuthority: undefined
+    }
     const { launchAgentBackgroundSession } = await import('./launch-agent-background-session')
 
     const result = await launchAgentBackgroundSession({
