@@ -42,6 +42,7 @@ import { WINDOWS_GIT_BASH_SHELL } from '../../shared/windows-terminal-shell'
 import { resolveAgentForegroundProcess } from './agent-foreground-process'
 import { getAgentForegroundContextPaths } from './agent-foreground-context-paths'
 import { recognizeAgentProcessFromCommandLine } from '../../shared/agent-process-recognition'
+import { shouldUseShellReadyStartupDelivery } from '../../shared/codex-startup-delivery'
 
 const PANE_IDENTITY_ENV_KEYS = ['ORCA_PANE_KEY', 'ORCA_TAB_ID', 'ORCA_WORKTREE_ID'] as const
 
@@ -464,23 +465,31 @@ export class LocalPtyProvider implements IPtyProvider {
       }
     }
     if (!wslInfo && process.platform !== 'win32') {
-      // Why: any Orca-injected overlay env that user rc files can clobber
-      // needs the wrapper so the post-rc restore line runs.
+      // Why: OpenCode/Codex path restoration and OMP's typed-command status
+      // wrapper need shell-ready code after user startup files run.
       const needsNoMarkerWrapper =
         finalEnv.ORCA_ATTRIBUTION_SHIM_DIR ||
         finalEnv.ORCA_OPENCODE_CONFIG_DIR ||
-        finalEnv.ORCA_PI_CODING_AGENT_DIR ||
-        finalEnv.ORCA_OMP_CODING_AGENT_DIR ||
+        finalEnv.ORCA_OMP_STATUS_EXTENSION ||
         finalEnv.ORCA_CODEX_HOME ||
         finalEnv.ORCA_AGENT_TEAMS_SHIM_DIR
       const isCodexStartupCommand =
         recognizeAgentProcessFromCommandLine(args.command)?.agent === 'codex'
       let shellLaunch: ReturnType<typeof getShellReadyLaunchConfig> | null = null
       if (args.command && isCodexStartupCommand) {
-        // Why: Codex needs the env-restoring wrapper, but waiting for a shell
-        // marker delays the first useful TUI frame.
-        getFallbackShellReadyConfig = (shell) => getAttributionShellLaunchConfig(shell)
-        shellLaunch = getAttributionShellLaunchConfig(shellPath)
+        const shouldWaitForShellReady = shouldUseShellReadyStartupDelivery({
+          command: args.command,
+          startupCommandDelivery: args.startupCommandDelivery
+        })
+        // Why: payload-bearing Codex startup text can be dropped by rc-file noise;
+        // plain Codex stays markerless to preserve the startup-speed path.
+        getFallbackShellReadyConfig = (shell) =>
+          shouldWaitForShellReady
+            ? getShellReadyLaunchConfig(shell)
+            : getAttributionShellLaunchConfig(shell)
+        shellLaunch = shouldWaitForShellReady
+          ? getShellReadyLaunchConfig(shellPath)
+          : getAttributionShellLaunchConfig(shellPath)
       } else if (args.command) {
         getFallbackShellReadyConfig = (shell) => getShellReadyLaunchConfig(shell)
         shellLaunch = getShellReadyLaunchConfig(shellPath)
@@ -535,6 +544,9 @@ export class LocalPtyProvider implements IPtyProvider {
         : undefined
     })
     shellPath = spawnResult.shellPath
+    if (args.command && getFallbackShellReadyConfig) {
+      shellReadyLaunch = getFallbackShellReadyConfig(shellPath)
+    }
 
     if (process.platform !== 'win32') {
       finalEnv.SHELL = shellPath

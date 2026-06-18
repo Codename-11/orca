@@ -18,6 +18,7 @@ import type {
 import type { GitHistoryOptions, GitHistoryResult } from '../../shared/git-history'
 import type { CommitMessageDraftContext } from '../../shared/commit-message-generation'
 import type { WorkspaceSpaceDirectoryScanResult } from '../../shared/workspace-space-types'
+import type { StartupCommandDelivery } from '../../shared/codex-startup-delivery'
 
 // ─── PTY Provider ───────────────────────────────────────────────────
 
@@ -28,6 +29,7 @@ export type PtySpawnOptions = {
   env?: Record<string, string>
   envToDelete?: string[]
   command?: string
+  startupCommandDelivery?: StartupCommandDelivery
   /** Orca worktree identity. When present, the local provider scopes shell
    *  history to this worktree so ArrowUp only surfaces local commands. */
   worktreeId?: string
@@ -72,6 +74,11 @@ export type PtySpawnResult = {
    *  writing the snapshot so ANSI cursor positions land correctly. */
   snapshotCols?: number
   snapshotRows?: number
+  /** Kitty keyboard flags persisted in the daemon snapshot, threaded so the
+   *  re-seeded runtime emulator answers hidden `CSI ? u` with the real flags
+   *  (terminal-query-authority.md §kitty). Never replayed into a renderer
+   *  xterm — POST_REPLAY_REATTACH_RESET's kitty reset stays authoritative. */
+  snapshotKittyKeyboardFlags?: number
   /** True when the spawn reattached to an existing daemon session. */
   isReattach?: boolean
   /** True when the reattached session uses the alternate screen buffer

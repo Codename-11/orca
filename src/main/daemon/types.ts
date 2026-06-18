@@ -1,11 +1,13 @@
 // ─── Protocol Version ────────────────────────────────────────────────
+import type { StartupCommandDelivery } from '../../shared/codex-startup-delivery'
+
 // Why: daemons can survive app updates. Bump for IPC wire-shape changes, or
 // when daemon-baked behavior cannot be delivered by on-disk wrapper refresh.
 // Why: bump when adding daemon wire behavior so same-version old daemons do
 // not silently accept the handshake and then reject new RPCs.
-export const PROTOCOL_VERSION = 15
+export const PROTOCOL_VERSION = 16
 export const PREVIOUS_DAEMON_PROTOCOL_VERSIONS = [
-  1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14
+  1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
 ] as const
 
 // ─── Session State Machine ──────────────────────────────────────────
@@ -36,6 +38,15 @@ export type TerminalModes = {
   sgrMousePixelsMode?: boolean
   applicationCursor: boolean
   alternateScreen: boolean
+  /** Kitty keyboard protocol flags (CSI = u pushes) for emulator re-seed
+   *  parity ONLY. Consumed by the daemon warm-reattach path: the spawn
+   *  result threads them into seedHeadlessTerminal, which re-applies them to
+   *  the fresh runtime emulator (HeadlessEmulator.applyKittyKeyboardFlags)
+   *  so hidden `CSI ? u` answers the real flags instead of ?0u.
+   *  rehydrateSequences must never push these into a renderer xterm —
+   *  POST_REPLAY_REATTACH_RESET's deliberate kitty reset stays authoritative
+   *  (terminal-query-authority.md §kitty). */
+  kittyKeyboardFlags?: number
 }
 
 /** On-disk shape of checkpoint.json. Written by history-manager, read by
@@ -87,6 +98,7 @@ export type CreateOrAttachRequest = {
     env?: Record<string, string>
     envToDelete?: string[]
     command?: string
+    startupCommandDelivery?: StartupCommandDelivery
     /** Explicit Windows shell override selected by the user (e.g. 'wsl.exe').
      *  The daemon forwards this to its subprocess spawner so each tab honors
      *  the shell picked in the "+" menu or the persisted default-shell setting,

@@ -214,6 +214,9 @@ import {
 import { buildImportedWorktreesCardCandidates } from './imported-worktrees-card-candidates'
 import {
   WORKTREE_SECTION_HEADER_PADDING_LEFT,
+  LINEAGE_CHILDREN_INLINE_OFFSET,
+  getLineageChildrenInlineStyle,
+  getLineageNestedRowGeometry,
   getProjectGroupHeaderPaddingLeft,
   getWorktreeCardContentIndent,
   getWorktreeCardSurfaceInset
@@ -285,6 +288,7 @@ const EMPTY_PROJECT_GROUPS: readonly ProjectGroup[] = []
 const EMPTY_AGENT_STATUS_BY_PANE_KEY: AppState['agentStatusByPaneKey'] = {}
 const EMPTY_TABS_BY_WORKTREE: AppState['tabsByWorktree'] = {}
 const EMPTY_TERMINAL_LAYOUTS_BY_TAB_ID: AppState['terminalLayoutsByTabId'] = {}
+const EMPTY_PTY_IDS_BY_TAB_ID: AppState['ptyIdsByTabId'] = {}
 const EXPANDING_CARD_MEASUREMENT_ADJUSTMENT_SUPPRESS_MS = 300
 const NOOP_WORKSPACE_BOARD_DRAG_PREVIEW_CALLBACK = (): void => {}
 const WORKTREE_SIDEBAR_SCROLL_STYLE: React.CSSProperties = {
@@ -3981,20 +3985,23 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
               forceActiveSurface = false
             ) => {
               const lineageToggleGroupKey = itemRow.lineageGroupKey
-              // Why: child card rows own lineage depth, while WorktreeCard
-              // still owns the project/group inset inside each card surface.
+              const experimentalNewWorktreeCardStyle =
+                settings?.experimentalNewWorktreeCardStyle === true
+              // Why: experimental in-card lineage inherits the parent surface;
+              // legacy cards keep the old depth-based nested row geometry.
               const paddingDepth = nested ? Math.max(0, itemRow.depth - 1) : itemRow.depth
-              const nestedCardPaddingLeft = nested
-                ? getWorktreeCardSurfaceInset({
-                    isGrouped: true,
-                    groupDepth: itemRow.depth
-                  })
-                : 0
               const inheritedCardContentIndent = getWorktreeCardContentIndent({
                 isGrouped: groupBy !== 'none',
                 groupDepth: itemRow.groupDepth,
                 lineageDepth: 0
               })
+              const nestedLineageGeometry = nested
+                ? getLineageNestedRowGeometry({
+                    experimentalNewWorktreeCardStyle,
+                    inheritedCardContentIndent,
+                    lineageDepth: itemRow.depth
+                  })
+                : null
               // Why: grouped rows inherit their project/group header depth,
               // while the card surface still spans the full hit/background row.
               const paddingLeft = getWorktreeCardContentIndent({
@@ -4003,15 +4010,20 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                 lineageDepth: paddingDepth
               })
               const surfaceInset = nested
-                ? nestedCardPaddingLeft
+                ? nestedLineageGeometry!.surfaceInset
                 : getWorktreeCardSurfaceInset({
                     isGrouped: groupBy !== 'none',
                     groupDepth: itemRow.groupDepth
                   })
-              const cardContentIndent = Math.max(
-                0,
-                (nested ? inheritedCardContentIndent : paddingLeft) - surfaceInset
-              )
+              const cardContentIndent = nested
+                ? nestedLineageGeometry!.cardContentIndent
+                : Math.max(0, paddingLeft - surfaceInset)
+              const lineageChildrenStyle = lineageChildren
+                ? getLineageChildrenInlineStyle(
+                    nestedLineageGeometry?.lineageChildrenInlineOffset ??
+                      LINEAGE_CHILDREN_INLINE_OFFSET
+                  )
+                : undefined
               const worktreeDragGroupKey = groupKeyByRowKey.get(itemRow.rowKey)
               const worktreeDragGroupIndex = groupIndexByRowKey.get(itemRow.rowKey)
               const revealHighlightTone =
@@ -4092,6 +4104,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                     lineageChildCount={itemRow.lineageChildCount}
                     lineageCollapsed={itemRow.lineageCollapsed}
                     lineageChildren={lineageChildren}
+                    lineageChildrenStyle={lineageChildrenStyle}
                     onLineageToggle={
                       lineageToggleGroupKey
                         ? (event) => {
@@ -4417,6 +4430,9 @@ const WorktreeList = React.memo(function WorktreeList({
   const agentTargetTerminalLayoutsByTabId = useAppStore((s) =>
     agentSendPopoverTargetMode ? s.terminalLayoutsByTabId : EMPTY_TERMINAL_LAYOUTS_BY_TAB_ID
   )
+  const agentTargetPtyIdsByTabId = useAppStore((s) =>
+    agentSendPopoverTargetMode ? s.ptyIdsByTabId : EMPTY_PTY_IDS_BY_TAB_ID
+  )
   const agentSendTargetWorktreeId = useMemo(() => {
     void agentTargetStatusEpoch
     if (!agentSendPopoverTargetMode) {
@@ -4426,7 +4442,8 @@ const WorktreeList = React.memo(function WorktreeList({
       {
         agentStatusByPaneKey: agentTargetStatusByPaneKey,
         tabsByWorktree: agentTargetTabsByWorktree,
-        terminalLayoutsByTabId: agentTargetTerminalLayoutsByTabId
+        terminalLayoutsByTabId: agentTargetTerminalLayoutsByTabId,
+        ptyIdsByTabId: agentTargetPtyIdsByTabId
       },
       agentSendPopoverTargetMode.worktreeId
     )
@@ -4440,7 +4457,8 @@ const WorktreeList = React.memo(function WorktreeList({
     agentSendPopoverTargetMode,
     agentTargetStatusByPaneKey,
     agentTargetTabsByWorktree,
-    agentTargetTerminalLayoutsByTabId
+    agentTargetTerminalLayoutsByTabId,
+    agentTargetPtyIdsByTabId
   ])
 
   // Read tabsByWorktree when needed for filtering or sorting

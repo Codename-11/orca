@@ -28,6 +28,7 @@ import type {
 } from '../../../../shared/types'
 import type { TerminalPaneSplitSource } from '../../../../shared/feature-education-telemetry'
 import type { EventProps } from '../../../../shared/telemetry-events'
+import type { StartupCommandDelivery } from '../../../../shared/codex-startup-delivery'
 import { resolveTerminalFontWeights } from '../../../../shared/terminal-fonts'
 import {
   buildFontFamily,
@@ -65,6 +66,7 @@ import { getConnectionId } from '@/lib/connection-context'
 import { isPaneReplaying, type ReplayingPanesRef } from './replay-guard'
 import { fitAndFocusPanes, fitPanes } from './pane-helpers'
 import { registerRuntimeTerminalTab, scheduleRuntimeGraphSync } from '@/runtime/sync-runtime-graph'
+import { captureParkedTerminalPaneCandidates } from './terminal-parked-tab-watchers'
 import { e2eConfig } from '@/lib/e2e-config'
 import { installCopyOnSelectMouseSelectionForcing } from './terminal-mouse-selection-forcing'
 import {
@@ -122,6 +124,7 @@ type UseTerminalPaneLifecycleDeps = {
     /** Renderer-delivered startup input for callers that need xterm paste
      *  semantics before the submit Enter. */
     delivery?: 'terminal-paste'
+    startupCommandDelivery?: StartupCommandDelivery
     env?: Record<string, string>
     /** Telemetry payload for `agent_started`. Forwarded to `pty:spawn`
      *  so main fires the event only after the spawn succeeds. */
@@ -559,6 +562,13 @@ export function useTerminalPaneLifecycle({
       dispatchNotification,
       setCacheTimerStartedAt,
       syncPanePtyLayoutBinding,
+      // Why: a DECSET 2031 subscribe answered from main's fact channel must
+      // land in the same registries the xterm CSI handler writes — otherwise
+      // theme flips never push CSI 997 and the TUI keeps a stale theme.
+      recordPaneMode2031Subscription: (paneId: number, repliedMode: 'dark' | 'light') => {
+        paneMode2031Ref.current.set(paneId, true)
+        paneLastThemeModeRef.current.set(paneId, repliedMode)
+      },
       restoredPtyIdByLeafId: initialLayoutRef.current.ptyIdsByLeafId ?? {}
     }
 
@@ -586,7 +596,19 @@ export function useTerminalPaneLifecycle({
         const mode2031Disposables = installMode2031Handlers({
           paneId: pane.id,
           parser: pane.terminal.parser,
-          onSubscribe: () => pushMode2031ForPane(pane.id),
+          onSubscribe: () => {
+            // Why: for hidden-delivery-gate-managed PTYs main's
+            // '2031-subscribe' fact is the sole responder — bytes reaching
+            // xterm live (foreground, sidecar interest) must not produce a
+            // second reply. The CSI handler still records the subscription.
+            const binding = panePtyBindings.get(pane.id) as
+              | (IDisposable & { isHiddenDeliveryGateManagedPty?: () => boolean })
+              | undefined
+            if (binding?.isHiddenDeliveryGateManagedPty?.()) {
+              return
+            }
+            pushMode2031ForPane(pane.id)
+          },
           isReplaying: () => isPaneReplaying(replayingPanesRef, pane.id),
           paneMode2031: paneMode2031Ref.current,
           paneLastThemeMode: paneLastThemeModeRef.current
@@ -1354,6 +1376,19 @@ export function useTerminalPaneLifecycle({
         disposable.dispose()
       }
       mouseHideDisposables.clear()
+      // Why: hidden-view parking starts pane-less byte watchers right after
+      // this unmount; record pane identities before transports detach so the
+      // watchers write the same runtime-title slots the live panes used.
+      captureParkedTerminalPaneCandidates(
+        tabId,
+        worktreeId,
+        manager.getPanes().map((capturedPane) => ({
+          ptyId: paneTransports.get(capturedPane.id)?.getPtyId() ?? null,
+          paneId: capturedPane.id,
+          leafId: capturedPane.leafId,
+          drivesTabTitle: manager.getActivePane()?.id === capturedPane.id
+        }))
+      )
       for (const transport of paneTransports.values()) {
         const ptyId = transport.getPtyId()
         if (
