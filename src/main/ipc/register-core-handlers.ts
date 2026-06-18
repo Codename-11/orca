@@ -66,7 +66,7 @@ import type { KeybindingService } from '../keybindings/keybinding-service'
 let registered = false
 
 type CoreHandlerLifecycleOptions = {
-  onBeforeRelaunch?: () => void
+  onBeforeRelaunch?: () => void | Promise<void>
   getAdditionalAiVaultCodexHomePaths?: () => readonly string[]
 }
 

@@ -120,12 +120,13 @@ jobs:
 
   mac:
     # macOS Accessibility and Screen Recording require user-granted TCC entries,
-    # and GitHub-hosted macOS images currently do not provide the Swift/TCC
-    # environment this full e2e path needs. Keep scheduled full computer-use
-    # runs opt-in so the default cron does not produce environment-only noise;
-    # manual dispatch remains available for ad hoc validation.
+    # and GitHub-hosted macOS images currently do not provide the full
+    # permission-bearing environment this e2e path needs. Keep scheduled full
+    # computer-use runs opt-in so the default cron does not produce
+    # environment-only noise; manual dispatch remains available for ad hoc
+    # validation.
     if: github.event_name == 'workflow_dispatch' || vars.AXIOM_FULL_COMPUTER_E2E == 'true'
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       ORCA_COMPUTER_E2E: '1'
     steps:
