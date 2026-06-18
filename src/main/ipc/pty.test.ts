@@ -1442,6 +1442,7 @@ describe('registerPtyHandlers', () => {
           const runtime = {
             setPtyController: vi.fn(),
             registerPty: vi.fn(),
+            noteTerminalSpawnCommand: vi.fn(),
             onPtySpawned: vi.fn(),
             onPtyExit: vi.fn(),
             onPtyData: vi.fn()
@@ -1497,6 +1498,7 @@ describe('registerPtyHandlers', () => {
           const runtime = {
             setPtyController: vi.fn(),
             registerPty: vi.fn(),
+            noteTerminalSpawnCommand: vi.fn(),
             onPtySpawned: vi.fn(),
             onPtyExit: vi.fn(),
             onPtyData: vi.fn()
