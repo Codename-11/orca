@@ -37,7 +37,6 @@
     "exploreOrca": "探索 Orca",
     "gettingStarted": "Orca 入门",
     "reportCrash": "发送错误报告...",
-    "exportPdf": "导出为 PDF...",
     "file": "文件",
     "exit": "退出",
     "edit": "编辑",
@@ -277,7 +276,8 @@
           "a5fc0cb622": "OpenClaude",
           "bf53f09bf8": "Claude Agent Teams",
           "0708ed89f1": "Claude",
-          "fc80296033": "Devin"
+          "fc80296033": "Devin",
+          "da41abbdd4": "Ante"
         },
         "skill": {
           "cli": {
@@ -3195,9 +3195,7 @@
         "AddRepoCreateStep": {
           "0ae45b8238": "我的项目",
           "a8149a3a5a": "名称",
-          "038729c107": "文件夹",
           "11fd2a7db8": "Git 存储库",
-          "180e9b5e48": "项目类型",
           "5e97f0c4b9": "项目已创建",
           "2c12db1511": "项目已添加",
           "875dda0995": "输入服务器父路径。",
@@ -3207,7 +3205,7 @@
           "b100311784": "为它命名，Orca 会使用合理的默认设置创建一个真实项目。",
           "685b5eefe1": "{{parent}} 中的 {{kind}}",
           "2a762f3b19": "正在检查此主机上的 Git...",
-          "fe1e616c5b": "未安装 Git，因此默认创建普通文件夹。",
+          "fe1e616c5b": "创建项目需要 Git。",
           "c234df77f7": "创建前请选择或输入服务器父文件夹。",
           "3a13f6e88b": "未选择位置",
           "6ed14c0281": "未选择服务器文件夹",
@@ -3559,6 +3557,9 @@
           "3d4b9c4997": "徘徊",
           "ba87080fb7": "显示属性",
           "320b675c9a": "卡片布局",
+          "newCardDisplay": {
+            "title": "卡片显示"
+          },
           "09faabd875": "项目订单",
           "7bada3b1ab": "排序方式",
           "dc0bb670bc": "分组依据",
@@ -3581,6 +3582,8 @@
           "b8dcc6f321": "PR/MR链接",
           "ca4d3c522e": "Linear 议题",
           "91dfc653e8": "GitHub 票证",
+          "bdd23b4e07": "GitHub 议题",
+          "44713a5d04": "Linear 议题",
           "cc17bd443b": "详细的",
           "0f9b959b31": "PR",
           "e029a2d775": "状态",
@@ -3593,7 +3596,14 @@
           "projectSshHost": "项目 SSH",
           "activeRuntimeHost": "活动服务器",
           "projectRuntimeHost": "项目服务器",
-          "631b97eea9": "主机范围"
+          "631b97eea9": "主机范围",
+          "2d4f0eb933": "默认",
+          "1a0eec0d35": "状态",
+          "b5536d5a88": "任务",
+          "8d62c68b35": "笔记",
+          "2d74665a56": "端口",
+          "65a9820bd1": "Agent 状态",
+          "219ebf1961": "分支名称"
         },
         "SshDisconnectedDialog": {
           "ca4a7892af": "正在连接...",
@@ -3652,8 +3662,6 @@
           "0f33af979b": "部分结帐。这些路径之外的文件不在磁盘上。",
           "4f964d5e8c": "疏",
           "7d517f82e2": "主工作树",
-          "c6833b5187": "将从第一条 Agent 消息中重命名",
-          "f62a3dadbc": "重命名待定",
           "4eba2ea99e": "自动命名失败。点击查看详情。",
           "74522ee457": "重命名失败",
           "02e19349f4": "自动重命名失败：查看错误",
@@ -4659,6 +4667,12 @@
             "idleMinutesSuffix": "分钟",
             "title": "Agent 休眠",
             "toggleLabel": "切换 agent 休眠"
+          },
+          "newWorktreeCardStyle": {
+            "copy": "预览更新后的 worktree 卡片布局、元数据位置、卡片显示菜单选项和状态呈现。",
+            "description": "预览更新后的 worktree 卡片布局、元数据位置、卡片显示菜单选项和状态呈现。",
+            "title": "新卡片样式",
+            "toggleLabel": "切换新卡片样式"
           }
         },
         "FloatingWorkspacePane": {
@@ -6719,6 +6733,17 @@
               "sleep": "睡眠",
               "terminal": "终端",
               "title": "Agent 休眠"
+            },
+            "newWorktreeCardStyle": {
+              "card": "卡片",
+              "cards": "卡片",
+              "description": "预览更新后的 worktree 卡片布局、元数据位置、卡片显示菜单选项和状态呈现。",
+              "menu": "菜单",
+              "metadata": "元数据",
+              "status": "状态",
+              "title": "新卡片样式",
+              "worktree": "worktree",
+              "worktrees": "worktrees"
             }
           }
         },

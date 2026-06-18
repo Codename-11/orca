@@ -37,7 +37,6 @@
     "exploreOrca": "Orca 둘러보기",
     "gettingStarted": "Orca 시작하기",
     "reportCrash": "크래시 신고...",
-    "exportPdf": "PDF로 내보내기...",
     "file": "파일",
     "exit": "종료",
     "edit": "편집",
@@ -277,7 +276,8 @@
           "a5fc0cb622": "OpenClaude",
           "bf53f09bf8": "Claude Agent Teams",
           "0708ed89f1": "Claude",
-          "fc80296033": "Devin"
+          "fc80296033": "Devin",
+          "da41abbdd4": "Ante"
         },
         "skill": {
           "cli": {
@@ -3195,9 +3195,7 @@
         "AddRepoCreateStep": {
           "0ae45b8238": "내 프로젝트",
           "a8149a3a5a": "이름",
-          "038729c107": "폴더",
           "11fd2a7db8": "Git 저장소",
-          "180e9b5e48": "프로젝트 종류",
           "5e97f0c4b9": "프로젝트가 생성되었습니다.",
           "2c12db1511": "프로젝트가 이미 추가되었습니다.",
           "875dda0995": "서버 상위 경로를 입력하세요.",
@@ -3207,7 +3205,7 @@
           "b100311784": "이름을 지정하면 Orca가 적절한 기본값으로 실제 프로젝트를 만듭니다.",
           "685b5eefe1": "{{parent}}의 {{kind}}",
           "2a762f3b19": "이 호스트에서 Git 확인 중...",
-          "fe1e616c5b": "Git이 설치되어 있지 않아 일반 폴더가 기본값입니다.",
+          "fe1e616c5b": "프로젝트를 만들려면 Git이 필요합니다.",
           "c234df77f7": "만들기 전에 서버 상위 폴더를 선택하거나 입력하세요.",
           "3a13f6e88b": "위치가 선택되지 않음",
           "6ed14c0281": "서버 폴더가 선택되지 않음",
@@ -3559,6 +3557,9 @@
           "3d4b9c4997": "호버",
           "ba87080fb7": "속성 표시",
           "320b675c9a": "카드 레이아웃",
+          "newCardDisplay": {
+            "title": "카드 표시"
+          },
           "09faabd875": "프로젝트 순서",
           "7bada3b1ab": "정렬 기준",
           "dc0bb670bc": "그룹화 기준",
@@ -3581,6 +3582,8 @@
           "b8dcc6f321": "PR/MR 링크",
           "ca4d3c522e": "Linear 이슈",
           "91dfc653e8": "GitHub 티켓",
+          "bdd23b4e07": "GitHub 이슈",
+          "44713a5d04": "Linear 이슈",
           "cc17bd443b": "상세한",
           "0f9b959b31": "PR",
           "e029a2d775": "상태",
@@ -3593,7 +3596,14 @@
           "projectSshHost": "Project SSH",
           "activeRuntimeHost": "Active server",
           "projectRuntimeHost": "Project server",
-          "631b97eea9": "Host scope"
+          "631b97eea9": "Host scope",
+          "2d4f0eb933": "기본값",
+          "1a0eec0d35": "상태",
+          "b5536d5a88": "작업",
+          "8d62c68b35": "메모",
+          "2d74665a56": "포트",
+          "65a9820bd1": "Agent 상태",
+          "219ebf1961": "브랜치 이름"
         },
         "SshDisconnectedDialog": {
           "ca4a7892af": "연결 중...",
@@ -3652,8 +3662,6 @@
           "0f33af979b": "부분결제. 이 경로 외부의 파일은 디스크에 없습니다.",
           "4f964d5e8c": "부족한",
           "7d517f82e2": "주요한",
-          "c6833b5187": "첫 번째 agent 메시지에서 이름이 변경됩니다.",
-          "f62a3dadbc": "이름 바꾸기 보류 중",
           "4eba2ea99e": "자동 이름을 지정하지 못했습니다. 자세한 내용을 보려면 클릭하세요.",
           "74522ee457": "이름 바꾸기 실패",
           "02e19349f4": "자동 이름 바꾸기 실패: 보기 오류",
@@ -4659,6 +4667,12 @@
             "idleMinutesSuffix": "분",
             "title": "Agent 최대 절전",
             "toggleLabel": "Agent 최대 절전 전환"
+          },
+          "newWorktreeCardStyle": {
+            "copy": "업데이트된 worktree 카드 레이아웃, 메타데이터 배치, 카드 표시 메뉴 옵션 및 상태 표시를 미리 봅니다.",
+            "description": "업데이트된 worktree 카드 레이아웃, 메타데이터 배치, 카드 표시 메뉴 옵션 및 상태 표시를 미리 봅니다.",
+            "title": "새 카드 스타일",
+            "toggleLabel": "새 카드 스타일 전환"
           }
         },
         "FloatingWorkspacePane": {
@@ -6719,6 +6733,17 @@
               "sleep": "절전",
               "terminal": "터미널",
               "title": "Agent 최대 절전"
+            },
+            "newWorktreeCardStyle": {
+              "card": "카드",
+              "cards": "카드",
+              "description": "업데이트된 worktree 카드 레이아웃, 메타데이터 배치, 카드 표시 메뉴 옵션 및 상태 표시를 미리 봅니다.",
+              "menu": "메뉴",
+              "metadata": "메타데이터",
+              "status": "상태",
+              "title": "새 카드 스타일",
+              "worktree": "worktree",
+              "worktrees": "worktrees"
             }
           }
         },
