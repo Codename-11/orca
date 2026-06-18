@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { copyFile, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
 import { buildAppImageCliWrapper } from './appimage-cli-wrapper'
@@ -19,7 +19,7 @@ const linuxLauncherAsset = new URL('../../../resources/linux/bin/orca-ide', impo
 const windowsLauncherAsset = new URL('../../../resources/win32/bin/orca.cmd', import.meta.url)
 
 function normalizeResourceTarget(target: string | undefined): string | undefined {
-  return target?.replaceAll('\\', '/')
+  return target?.replace(/[\\/]/g, sep)
 }
 
 describe('packaged CLI assets', () => {
@@ -34,14 +34,15 @@ describe('packaged CLI assets', () => {
 
     expect([...runtimeResourceTargets]).toEqual(
       expect.arrayContaining([
-        'node_modules/ws',
-        'node_modules/tweetnacl',
-        'node_modules/zod',
-        'node_modules/yaml',
-        'node_modules/node-pty',
-        'node_modules/sherpa-onnx-darwin-${arch}',
-        'node_modules/sherpa-onnx-linux-${arch}',
-        'node_modules/sherpa-onnx-win-x64'
+        join('node_modules', 'ws'),
+        join('node_modules', 'tweetnacl'),
+        join('node_modules', 'zod'),
+        join('node_modules', 'yaml'),
+        join('node_modules', 'jsonc-parser'),
+        join('node_modules', 'node-pty'),
+        join('node_modules', 'sherpa-onnx-darwin-${arch}'),
+        join('node_modules', 'sherpa-onnx-linux-${arch}'),
+        join('node_modules', 'sherpa-onnx-win-x64')
       ])
     )
   })

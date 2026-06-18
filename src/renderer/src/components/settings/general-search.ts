@@ -3,8 +3,12 @@ import { getGeneralEditorSearchEntries } from './general-editor-search'
 import { translate } from '@/i18n/i18n'
 import { searchKeywords, translateSearchKeyword } from './settings-search-keywords'
 import { createLocalizedCatalog } from '@/i18n/localized-catalog'
+import { getGeneralProjectRuntimeSearchEntries } from './general-project-runtime-search'
+import { getGeneralDataSearchEntries } from './general-data-search'
 
 export { getGeneralEditorSearchEntries } from './general-editor-search'
+export { getGeneralAgentSearchEntries } from './general-agent-search'
+export { getGeneralDataSearchEntries } from './general-data-search'
 
 export const getGeneralWorkspaceSearchEntries = createLocalizedCatalog(() => [
   {
@@ -147,6 +151,23 @@ export const getGeneralNavigationSearchEntries = createLocalizedCatalog(() => [
       ...translateSearchKeyword('auto.components.settings.general.search.f8f0ac213a', 'sequential'),
       ...translateSearchKeyword('auto.components.settings.general.search.fb84767421', 'switch')
     ]
+  },
+  {
+    title: translate(
+      'auto.components.settings.general.search.161a86a9da',
+      'Confirm before closing pinned tabs'
+    ),
+    description: translate(
+      'auto.components.settings.general.search.8e593f04fc',
+      'Show a confirmation dialog before a pinned tab is closed.'
+    ),
+    keywords: [
+      ...translateSearchKeyword('auto.components.settings.general.search.867dddea41', 'pinned'),
+      ...translateSearchKeyword('auto.components.settings.general.search.5250cf0e48', 'pin'),
+      ...translateSearchKeyword('auto.components.settings.general.search.2a254b725e', 'tab'),
+      ...translateSearchKeyword('auto.components.settings.general.search.9f8558233a', 'confirm'),
+      ...translateSearchKeyword('auto.components.settings.general.search.afa37a34e1', 'close')
+    ]
   }
 ])
 
@@ -190,25 +211,6 @@ export const getGeneralCliSearchEntries = createLocalizedCatalog(() => [
 ])
 
 
-export const getGeneralDataSearchEntries = createLocalizedCatalog(() => [
-  {
-    title: translate('auto.components.settings.general.search.2a60252831', 'Profile Import / Export'),
-    description: translate(
-      'auto.components.settings.general.search.7f5d7c3d28',
-      'Move Orca settings, repositories, workspaces, automations, and UI preferences.'
-    ),
-    keywords: [
-      ...translateSearchKeyword('auto.components.settings.general.search.0b30d8b3f1', 'profile'),
-      ...translateSearchKeyword('auto.components.settings.general.search.89ebf1c5b9', 'import'),
-      ...translateSearchKeyword('auto.components.settings.general.search.9dcf523e7b', 'export'),
-      ...translateSearchKeyword('auto.components.settings.general.search.95cc113f38', 'backup'),
-      ...translateSearchKeyword('auto.components.settings.general.search.50a0ee37bb', 'restore'),
-      ...translateSearchKeyword('auto.components.settings.general.search.7556bf114f', 'migration'),
-      ...translateSearchKeyword('auto.components.settings.general.search.e7e6b7e9f0', 'axiom')
-    ]
-  }
-])
-
 export const getGeneralUpdateSearchEntries = createLocalizedCatalog(() => [
   {
     title: translate('auto.components.settings.general.search.e15af4eb64', 'Check for Updates'),
@@ -247,34 +249,6 @@ export const getGeneralCacheTimerSearchEntries = createLocalizedCatalog(() => [
   }
 ])
 
-export const getGeneralAgentSearchEntries = createLocalizedCatalog(() => [
-  {
-    title: translate('auto.components.settings.general.search.db11502270', 'Default Agent'),
-    description: translate(
-      'auto.components.settings.general.search.e2da948f59',
-      'Pre-select an AI coding agent in the new-workspace composer.'
-    ),
-    keywords: [
-      ...translateSearchKeyword('auto.components.settings.general.search.8ea37a05bc', 'agent'),
-      ...translateSearchKeyword('auto.components.settings.general.search.41c2f9a025', 'default'),
-      ...translateSearchKeyword('auto.components.settings.general.search.95b63edde7', 'claude'),
-      ...translateSearchKeyword('auto.components.settings.general.search.aea7d2cccb', 'openclaude'),
-      ...translateSearchKeyword(
-        'auto.components.settings.general.search.5baf51c4d9',
-        'open claude'
-      ),
-      ...translateSearchKeyword('auto.components.settings.general.search.27d9b996ba', 'codex'),
-      ...translateSearchKeyword('auto.components.settings.general.search.882c4896fd', 'opencode'),
-      ...translateSearchKeyword('auto.components.settings.general.search.9b0bc30160', 'pi'),
-      ...translateSearchKeyword('auto.components.settings.general.search.5fdf1dc2d1', 'omp'),
-      ...translateSearchKeyword('auto.components.settings.general.search.3c30fe2d51', 'gemini'),
-      ...translateSearchKeyword('auto.components.settings.general.search.f472e97440', 'aider'),
-      ...translateSearchKeyword('auto.components.settings.general.search.5d9ba08673', 'copilot'),
-      ...translateSearchKeyword('auto.components.settings.general.search.c61b14be7c', 'grok')
-    ]
-  }
-])
-
 export const getGeneralSupportSearchEntries = createLocalizedCatalog(() => [
   {
     title: translate('auto.components.settings.general.search.36a72f0d9e', 'Star Orca on GitHub'),
@@ -292,14 +266,23 @@ export const getGeneralSupportSearchEntries = createLocalizedCatalog(() => [
   }
 ])
 
-export const getGeneralPaneSearchEntries = createLocalizedCatalog((): SettingsSearchEntry[] => [
-  ...getGeneralWorkspaceSearchEntries(),
-  ...getGeneralNetworkSearchEntries(),
-  ...getGeneralNavigationSearchEntries(),
-  ...getGeneralEditorSearchEntries(),
-  ...getGeneralCliSearchEntries(),
-  ...getGeneralDataSearchEntries(),
-  ...getGeneralCacheTimerSearchEntries(),
-  ...getGeneralUpdateSearchEntries(),
-  ...getGeneralSupportSearchEntries()
-])
+type GeneralPaneSearchOptions = {
+  includeProjectRuntime?: boolean
+}
+
+export function getGeneralPaneSearchEntries(
+  options: GeneralPaneSearchOptions = {}
+): SettingsSearchEntry[] {
+  return [
+    ...getGeneralWorkspaceSearchEntries(),
+    ...getGeneralNetworkSearchEntries(),
+    ...getGeneralNavigationSearchEntries(),
+    ...(options.includeProjectRuntime === false ? [] : getGeneralProjectRuntimeSearchEntries()),
+    ...getGeneralEditorSearchEntries(),
+    ...getGeneralCliSearchEntries(),
+    ...getGeneralDataSearchEntries(),
+    ...getGeneralCacheTimerSearchEntries(),
+    ...getGeneralUpdateSearchEntries(),
+    ...getGeneralSupportSearchEntries()
+  ]
+}
