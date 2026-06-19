@@ -870,12 +870,14 @@ const WORKTREE_ID_KEYED_MAP_KEYS = [
   'layoutByWorktree',
   'activeGroupIdByWorktree',
   'gitStatusByWorktree',
+  'gitStatusHeadByWorktree',
   'gitIgnoredPathsByWorktree',
   'gitConflictOperationByWorktree',
   'trackedConflictPathsByWorktree',
   'gitBranchChangesByWorktree',
   'gitBranchCompareSummaryByWorktree',
   'gitBranchCompareRequestKeyByWorktree',
+  'gitBranchCompareRequestStatusHeadByWorktree',
   'showDotfilesByWorktree',
   'expandedDirs',
   'lastVisitedAtByWorktreeId',
@@ -1179,18 +1181,29 @@ function buildWorktreePurgeState(s: AppState, worktreeIds: string[]): Partial<Ap
     activeGroupIdByWorktree: omitByWorktree(s.activeGroupIdByWorktree),
     // Git status caches
     gitStatusByWorktree: omitByWorktree(s.gitStatusByWorktree),
+    gitStatusHeadByWorktree: omitByWorktree(s.gitStatusHeadByWorktree),
     gitIgnoredPathsByWorktree: omitByWorktree(s.gitIgnoredPathsByWorktree),
     gitConflictOperationByWorktree: omitByWorktree(s.gitConflictOperationByWorktree),
     trackedConflictPathsByWorktree: omitByWorktree(s.trackedConflictPathsByWorktree),
     gitBranchChangesByWorktree: omitByWorktree(s.gitBranchChangesByWorktree),
     gitBranchCompareSummaryByWorktree: omitByWorktree(s.gitBranchCompareSummaryByWorktree),
     gitBranchCompareRequestKeyByWorktree: omitByWorktree(s.gitBranchCompareRequestKeyByWorktree),
+    gitBranchCompareRequestStatusHeadByWorktree: omitByWorktree(
+      s.gitBranchCompareRequestStatusHeadByWorktree
+    ),
+    // Why: keyed by worktreeId; without this it leaks a huge-status marker per
+    // removed worktree for the rest of the session.
+    gitStatusHugeByWorktree: omitByWorktree(s.gitStatusHugeByWorktree),
     showDotfilesByWorktree: omitByWorktree(s.showDotfilesByWorktree),
     expandedDirs: omitByWorktree(s.expandedDirs),
     // Per-file editor state for removed files
     editorDrafts: omitByFileId(s.editorDrafts),
     markdownViewMode: omitByFileId(s.markdownViewMode),
     markdownFrontmatterVisible: omitByFileId(s.markdownFrontmatterVisible),
+    // Why: keyed by fileId; the bulk reconcile path previously kept these,
+    // leaking a cursor-line / view-mode entry per file of every removed worktree.
+    editorCursorLine: omitByFileId(s.editorCursorLine),
+    editorViewMode: omitByFileId(s.editorViewMode),
     // Top-level actives
     openFiles: nextOpenFiles,
     everActivatedWorktreeIds: nextEverActivatedWorktreeIds,
@@ -1584,8 +1597,10 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
     linkedBitbucketPR,
     linkedAzureDevOpsPR,
     linkedGiteaPR,
-    compareBaseRef
+    compareBaseRef,
+    options
   ) => {
+    const automationProvenanceRequest = options?.automationProvenanceRequest
     const retryableConflictPatterns = [
       /already exists locally/i,
       /already exists on a remote/i,
@@ -1646,7 +1661,8 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
             ...(linkedAzureDevOpsPR !== undefined ? { linkedAzureDevOpsPR } : {}),
             ...(linkedGiteaPR !== undefined ? { linkedGiteaPR } : {}),
             ...(startup ? { startup } : {}),
-            ...(creationId ? { creationId } : {})
+            ...(creationId ? { creationId } : {}),
+            ...(automationProvenanceRequest ? { automationProvenanceRequest } : {})
           }
           const target = getActiveRuntimeTarget(settingsForRepoOwner(get(), repoId))
           const result =
@@ -1687,6 +1703,7 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
                     ...(linkedBitbucketPR !== undefined ? { linkedBitbucketPR } : {}),
                     ...(linkedAzureDevOpsPR !== undefined ? { linkedAzureDevOpsPR } : {}),
                     ...(linkedGiteaPR !== undefined ? { linkedGiteaPR } : {}),
+                    ...(automationProvenanceRequest ? { automationProvenanceRequest } : {}),
                     ...(startup
                       ? {
                           startupCommand: startup.command,
@@ -1959,6 +1976,8 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
         // request keys indefinitely in a long-lived renderer session.
         const nextGitStatusByWorktree = { ...s.gitStatusByWorktree }
         delete nextGitStatusByWorktree[worktreeId]
+        const nextGitStatusHeadByWorktree = { ...s.gitStatusHeadByWorktree }
+        delete nextGitStatusHeadByWorktree[worktreeId]
         const nextGitIgnoredPathsByWorktree = { ...s.gitIgnoredPathsByWorktree }
         delete nextGitIgnoredPathsByWorktree[worktreeId]
         const nextGitConflictOperationByWorktree = { ...s.gitConflictOperationByWorktree }
@@ -1973,6 +1992,10 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
           ...s.gitBranchCompareRequestKeyByWorktree
         }
         delete nextGitBranchCompareRequestKeyByWorktree[worktreeId]
+        const nextGitBranchCompareRequestStatusHeadByWorktree = {
+          ...s.gitBranchCompareRequestStatusHeadByWorktree
+        }
+        delete nextGitBranchCompareRequestStatusHeadByWorktree[worktreeId]
         // Why: clean up per-file editor state for files belonging to the removed
         // worktree so stale drafts and view modes never accumulate in memory.
         const removedFileIds = new Set<string>()
@@ -1994,18 +2017,27 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
           removedFileIds.size > 0
             ? { ...s.markdownFrontmatterVisible }
             : s.markdownFrontmatterVisible
+        // Why: editorCursorLine is keyed by fileId and must be cleared with the
+        // other per-file editor state so it does not leak per removed file.
+        const nextEditorCursorLine =
+          removedFileIds.size > 0 ? { ...s.editorCursorLine } : s.editorCursorLine
         if (removedFileIds.size > 0) {
           for (const fileId of removedFileIds) {
             delete nextEditorDrafts[fileId]
             delete nextMarkdownViewMode[fileId]
             delete nextEditorViewMode[fileId]
             delete nextMarkdownFrontmatterVisible[fileId]
+            delete nextEditorCursorLine[fileId]
           }
         }
         const nextExpandedDirs = { ...s.expandedDirs }
         delete nextExpandedDirs[worktreeId]
         const nextShowDotfilesByWorktree = { ...s.showDotfilesByWorktree }
         delete nextShowDotfilesByWorktree[worktreeId]
+        // Why: keyed by worktreeId; clear the huge-status marker so it does not
+        // linger after the worktree is gone.
+        const nextGitStatusHugeByWorktree = { ...s.gitStatusHugeByWorktree }
+        delete nextGitStatusHugeByWorktree[worktreeId]
         const nextRightSidebarExplorerViewByWorktree = {
           ...s.rightSidebarExplorerViewByWorktree
         }
@@ -2073,15 +2105,20 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
           markdownViewMode: nextMarkdownViewMode,
           editorViewMode: nextEditorViewMode,
           markdownFrontmatterVisible: nextMarkdownFrontmatterVisible,
+          editorCursorLine: nextEditorCursorLine,
           showDotfilesByWorktree: nextShowDotfilesByWorktree,
           expandedDirs: nextExpandedDirs,
+          gitStatusHugeByWorktree: nextGitStatusHugeByWorktree,
           gitStatusByWorktree: nextGitStatusByWorktree,
+          gitStatusHeadByWorktree: nextGitStatusHeadByWorktree,
           gitIgnoredPathsByWorktree: nextGitIgnoredPathsByWorktree,
           gitConflictOperationByWorktree: nextGitConflictOperationByWorktree,
           trackedConflictPathsByWorktree: nextTrackedConflictPathsByWorktree,
           gitBranchChangesByWorktree: nextGitBranchChangesByWorktree,
           gitBranchCompareSummaryByWorktree: nextGitBranchCompareSummaryByWorktree,
           gitBranchCompareRequestKeyByWorktree: nextGitBranchCompareRequestKeyByWorktree,
+          gitBranchCompareRequestStatusHeadByWorktree:
+            nextGitBranchCompareRequestStatusHeadByWorktree,
           activeFileId: activeFileCleared ? null : s.activeFileId,
           activeBrowserTabId: removedActiveWorktree ? null : s.activeBrowserTabId,
           activeTabType: removedActiveWorktree || activeFileCleared ? 'terminal' : s.activeTabType,
@@ -2091,6 +2128,19 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
         }
       })
       get().removeWorkspaceSpaceWorktrees?.([worktreeId])
+      // Why: PR/commit-message generation records are keyed by worktree and were
+      // never evicted on removal — they leaked one record (title/body text) per
+      // worktree for the session. Prune to the surviving worktree set, reusing
+      // the generation slices' tested prune actions.
+      const liveWorktreeKeys = new Set(
+        get()
+          .allWorktrees()
+          .map((w) => w.id)
+      )
+      // Optional-chained like removeWorkspaceSpaceWorktrees above: minimal store
+      // assemblies (some unit tests) omit the generation slices.
+      get().prunePullRequestGenerationRecords?.(liveWorktreeKeys)
+      get().pruneCommitMessageGenerationRecords?.(liveWorktreeKeys)
       const preservedBranch = removalResult?.preservedBranch
       if (preservedBranch) {
         showPreservedBranchToast(removalResult, worktreeBeforeRemoval, (branch, expectedHead) => {

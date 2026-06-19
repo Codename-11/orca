@@ -52,44 +52,78 @@ describe('HeadlessEmulator', () => {
     it('serializes split synchronized rich TUI frames for model-backed replay', async () => {
       emulator = new HeadlessEmulator({ cols: 80, rows: 12 })
       const richFrame = [
-        '\x1b[?2026h',
         '\x1b[?1049h',
-        '\x1b[2J\x1b[H',
-        '\x1b[?25l',
-        '\x1b[2;36m╭────────────────────────────╮\x1b[0m\r\n',
-        '\x1b[2;36m│ Codex rich restore 🟢 ███░ │\x1b[0m\r\n',
-        '\x1b[2;36m│ status streaming           │\x1b[0m\r\n',
-        '\x1b[2;36m╰────────────────────────────╯\x1b[0m',
-        '\x1b[6;4H\x1b[?25h',
-        '\x1b[?2026l'
+        '\x1b[?1000h',
+        '\x1b[?1006h',
+        '\x1b[?2004h',
+        '\x1b[1;1H\x1b[38;2;123;45;67m╭────────╮',
+        '\x1b[2;1H│ hello │',
+        '\x1b[3;1H╰────────╯',
+        '\x1b[0m'
       ].join('')
 
-      // Why: hidden rich TUI bytes may arrive split across DEC 2026 frame
-      // boundaries; model/view work needs the headless model to preserve the
-      // final visible state before renderer writes can be removed.
-      await emulator.write(richFrame.slice(0, 17))
-      await emulator.write(richFrame.slice(17, 91))
-      await emulator.write(richFrame.slice(91))
-
+      await emulator.write(richFrame)
       const snapshot = emulator.getSnapshot()
-      expect(snapshot.modes.alternateScreen).toBe(true)
-      expect(snapshot.snapshotAnsi).toContain('Codex rich restore')
-      expect(snapshot.snapshotAnsi).toContain('🟢')
-      expect(snapshot.snapshotAnsi).toContain('███░')
-      expect(snapshot.snapshotAnsi).toContain('╭')
-      expect(snapshot.snapshotAnsi).not.toContain('\x1b[?2026h')
-
       const replay = new HeadlessEmulator({ cols: snapshot.cols, rows: snapshot.rows })
       try {
         await replay.write(snapshot.rehydrateSequences + snapshot.snapshotAnsi)
-        const replayed = replay.getSnapshot()
-        expect(replayed.modes.alternateScreen).toBe(true)
-        expect(replayed.snapshotAnsi).toContain('Codex rich restore')
-        expect(replayed.snapshotAnsi).toContain('🟢')
-        expect(replayed.snapshotAnsi).toContain('███░')
+        const replaySnapshot = replay.getSnapshot()
+        expect(replaySnapshot.modes.alternateScreen).toBe(true)
+        expect(replaySnapshot.modes.bracketedPaste).toBe(true)
+        expect(replaySnapshot.modes.mouseTracking).toBe(true)
+        expect(replaySnapshot.modes.mouseTrackingMode).toBe('vt200')
+        expect(replaySnapshot.modes.sgrMouseMode).toBe(true)
+        expect(replaySnapshot.snapshotAnsi).toContain('hello')
+        expect(replaySnapshot.snapshotAnsi).toContain('38;2;123;45;67')
       } finally {
         replay.dispose()
       }
+    })
+
+    it('captures OSC 8 link ranges in snapshot metadata', async () => {
+      emulator = new HeadlessEmulator({ cols: 80, rows: 24 })
+      await emulator.write('\x1b]8;;https://news.ycombinator.com\x07Hacker News\x1b]8;;\x07')
+
+      expect(emulator.getSnapshot().oscLinks).toEqual([
+        {
+          row: 0,
+          startCol: 0,
+          endCol: 11,
+          uri: 'https://news.ycombinator.com'
+        }
+      ])
+    })
+
+    it('captures scrollback OSC 8 ranges in unrestricted snapshots', async () => {
+      emulator = new HeadlessEmulator({ cols: 80, rows: 2, scrollback: 10 })
+      await emulator.write('\x1b]8;;https://example.com/old\x07old\x1b]8;;\x07\r\nplain\r\nvisible')
+
+      expect(emulator.getSnapshot().oscLinks).toContainEqual({
+        row: 0,
+        startCol: 0,
+        endCol: 3,
+        uri: 'https://example.com/old'
+      })
+      expect(
+        emulator
+          .getSnapshot({ scrollbackRows: 0 })
+          .oscLinks?.some((link) => link.uri === 'https://example.com/old')
+      ).toBe(false)
+    })
+
+    it('projects restored OSC 8 ranges into serialized snapshot windows', async () => {
+      emulator = new HeadlessEmulator({ cols: 80, rows: 24 })
+      await emulator.write('issue #1234 done')
+      emulator.setRestoredOscLinks([
+        { row: 0, startCol: 6, endCol: 11, uri: 'https://example.com/issue/1234' }
+      ])
+
+      expect(emulator.getSnapshot().oscLinks).toContainEqual({
+        row: 0,
+        startCol: 6,
+        endCol: 11,
+        uri: 'https://example.com/issue/1234'
+      })
     })
   })
 

@@ -58,6 +58,13 @@
     "window": "Window",
     "help": "Help"
   },
+  "tray": {
+    "openOrca": "Open Orca",
+    "quit": "Quit",
+    "minimizeNotice": {
+      "body": "Orca is still running in the system tray"
+    }
+  },
   "worktreeJumpPalette": {
     "matchLabel": {
       "comment": "Comment",
@@ -1017,6 +1024,8 @@
         "d71cd3003e": "+ Assignee"
       },
       "NewWorkspaceComposerCard": {
+        "reuseExistingBranch": "Reuse branch",
+        "reuseExistingBranchHint": "Check out the existing branch instead of creating a new one from it.",
         "cbb47ee0dc": "Only available for local Git projects.",
         "d861de981b": "Sparse checkout",
         "090cfedeb4": "Write a note",
@@ -1651,7 +1660,7 @@
         "1628fd7dfa": "No active worktrees, settings, actions, or open tabs",
         "b781ae05e3": "Type to search worktrees, settings, tabs, and actions.",
         "f60f8730be": "No other worktrees to switch to",
-        "c4afa68159": "Try a worktree, setting, action, page title, emulator, URL, PR, or port.",
+        "c4afa68159": "Try a worktree, setting, action, tab title, agent prompt, URL, PR, or port.",
         "dbd9d87eec": "No results match your search",
         "2c38630a01": "Workspace no longer exists",
         "7726ce9970": "Mobile emulator tab no longer exists",
@@ -1668,7 +1677,8 @@
         "recentWorktreesHeader": "Recent Worktrees",
         "settingsBadge": "Settings",
         "actionBadge": "Action",
-        "paletteHostBadge": "Host: {{value0}}"
+        "paletteHostBadge": "Host: {{value0}}",
+        "workspaceTabMissing": "Tab no longer exists"
       },
       "github": {
         "pr": {
@@ -2665,13 +2675,11 @@
             "runtime_checking": "Checking",
             "runtime_online": "Connected",
             "runtime_unavailable": "Disconnected",
-            "runtime_available": "Available",
             "runtime_connect_unavailable": "Remote host is not reachable",
             "runtime_disconnect_failed": "Disconnect failed",
             "runtime_reconnecting": "Reconnecting",
             "runtime_last_close_reason": "Closed: {{value0}}",
-            "runtime_reconnect_attempt": "Attempt {{value0}}",
-            "runtime_channel_counts": "{{value0}} pending · {{value1}} streams"
+            "runtime_reconnect_attempt": "Attempt {{value0}}"
           },
           "StatusBar": {
             "9659e38343": "Ports",
@@ -3545,7 +3553,8 @@
           "f506a1262a": "Filter workspaces",
           "75405270ed": "Edit filters ({{value0}} active)",
           "489d1c8c9f": "Search projects...",
-          "ee240a39eb": "Edit filters"
+          "ee240a39eb": "Edit filters",
+          "automationCreated": "Hide automation-created"
         },
         "SidebarHeader": {
           "25a95899c9": "Add Project",
@@ -3607,7 +3616,8 @@
         "SidebarWorkspaceFilterSection": {
           "c3fa13dc2e": "Hide default branch",
           "ed1611b65b": "Hide sleeping",
-          "82594419ba": "Filters"
+          "82594419ba": "Filters",
+          "automationCreated": "Hide automation-created"
         },
         "sidebarHostOptions": {
           "3e102f111c": "All hosts",
@@ -3649,6 +3659,7 @@
           "2a81e07366": "Full list",
           "25105b28cb": "Compact",
           "d7084e8bc8": "Agent activity",
+          "automation": "Automation",
           "b64d8bcca0": "Ports",
           "26c71e536c": "Notes",
           "b8dcc6f321": "PR/MR link",
@@ -3741,7 +3752,9 @@
           "93aebe4529": "Folder",
           "0d224eff10": "Primary worktree",
           "ca74db7550": "Project on SSH host",
-          "021538e1d1": "SSH disconnected"
+          "021538e1d1": "SSH disconnected",
+          "runtimeHostDisconnected": "Server disconnected",
+          "runtimeHostProject": "Project on Orca server"
         },
         "WorktreeCardAgents": {
           "1b0a156717": "Agents"
@@ -3766,7 +3779,15 @@
           "3ea2702e62": "Linked {{value0}} #{{value1}}",
           "b105fd3057": "Linked Linear {{value0}}",
           "3f2649eeb8": "Linked issue #{{value0}}",
-          "fe075cb851": "Workspace notes"
+          "fe075cb851": "Workspace notes",
+          "automationHeader": "Automation",
+          "openAutomation": "Open automation",
+          "openAutomationRun": "Open run",
+          "automationCreated": "Created by automation",
+          "checkingAutomationAvailability": "Checking automation availability...",
+          "automationMissing": "Automation no longer available.",
+          "automationRunMissing": "Run history no longer available.",
+          "automationAvailabilityUnavailable": "Automation availability could not be checked."
         },
         "WorktreeCardMetadataStatusBadges": {
           "fe188062a1": "State: Open",
@@ -4312,15 +4333,19 @@
           "f97b986b7f": "wsl"
         },
         "AgentSkillSetupPanel": {
-          "0b810ec59f": "Press Enter to run the install command.",
+          "0b810ec59f": "Press Enter to run the command.",
           "ed197f59a2": "Copy command",
-          "817d3f9f18": "Copy install command",
+          "817d3f9f18": "Copy command",
           "5289300939": "Not installed",
           "9fcebceb2a": "Installed",
           "68a468752e": "Checking...",
           "c689392435": "Re-check",
-          "a31e2aa302": "Failed to copy install command.",
-          "378ad26865": "Copied install command."
+          "a31e2aa302": "Failed to copy command.",
+          "378ad26865": "Copied command.",
+          "copiedCommand": "Copied command.",
+          "failedToCopyCommand": "Failed to copy command.",
+          "copyCommandAria": "Copy command",
+          "runCommandDescription": "Press Enter to run the command."
         },
         "AgentsPane": {
           "d83834f5e6": "Detecting installed agents…",
@@ -4369,6 +4394,9 @@
           "5f5142a62a": "Previous icon"
         },
         "AppearancePane": {
+          "872af9556e": "System Tray",
+          "2edf606c46": "Minimize to Tray on Close",
+          "b707773a0d": "When enabled, closing the window keeps Orca running in the system tray instead of quitting.",
           "3057983501": "Unassigned",
           "0cd9b8228f": "Choose the app icon shown in the Dock and window switcher.",
           "ca1590d42f": "App Icon",
@@ -6449,6 +6477,8 @@
         },
         "appearance": {
           "search": {
+            "9a115966d3": "Minimize to Tray on Close",
+            "4d5b9427b5": "When enabled, closing the window keeps Orca running in the system tray instead of quitting.",
             "468448bba4": "watercolor",
             "f586abfa35": "blue",
             "651f35b2c6": "switcher",
@@ -11176,7 +11206,9 @@
           "d441032f7e": "pause",
           "5918020edc": "run",
           "a21f6c33ad": "Automation source refreshed.",
-          "53f06f0ad5": "Retry source"
+          "53f06f0ad5": "Retry source",
+          "pendingAutomationMissing": "Automation no longer available.",
+          "pendingAutomationRunMissing": "Run history no longer available."
         },
         "CreateFromPicker": {
           "f061f49e3f": "Search repo branches...",
@@ -11378,7 +11410,15 @@
           "openReviewExternally": "Open {{value0}} externally",
           "summary": "{{value0}} attached · {{value1}} with PR/MR · {{value2}} attention · {{value3}} pending · {{value4}} passing · {{value5}} no PR · {{value6}} unknown",
           "showDetails": "Show {{value0}} PR check details",
-          "hideDetails": "Hide {{value0}} PR check details"
+          "hideDetails": "Hide {{value0}} PR check details",
+          "reviewChecks": "Review checks",
+          "allChecksPassing": "all checks passing",
+          "oneWorktree": "1 worktree",
+          "worktreeCount": "{{value0}} worktrees",
+          "oneFailing": "1 failing",
+          "failingCount": "{{value0}} failing",
+          "onePending": "1 pending",
+          "pendingCount": "{{value0}} pending"
         },
         "parentPrChecks": {
           "rowSummary": {
