@@ -204,6 +204,11 @@ module.exports = {
   },
   win: {
     executableName: windowsExecutableName,
+    // Why: Windows installers are signed after electron-builder packaging by
+    // SignPath, so the packager cannot infer the updater publisherName.
+    signtoolOptions: {
+      publisherName: 'SignPath Foundation'
+    },
     extraResources: [
       ...commonExtraResources,
       winSpeechNativeResource,
@@ -350,12 +355,24 @@ module.exports = {
   deb: {
     packageName: linuxDebPackageName,
     artifactName: `${linuxDebPackageName}_${electronBuilderVersionMacro}_${electronBuilderArchMacro}.${electronBuilderExtMacro}`,
-    depends: ['python3', 'python3-gi', 'gir1.2-atspi-2.0', 'at-spi2-core', 'xdotool', 'xclip']
+    // Why: xvfb lets the bundled `orca serve` CLI run browser panes on a headless
+    // Linux host — Chromium needs a display server even for offscreen rendering,
+    // and serve starts Xvfb itself when present (see ensure-virtual-display.ts).
+    depends: ['python3', 'python3-gi', 'gir1.2-atspi-2.0', 'at-spi2-core', 'xdotool', 'xclip', 'xvfb']
   },
   rpm: {
     packageName: 'orca-ide',
     artifactName: 'orca-ide-${version}.${arch}.${ext}',
-    depends: ['python3', 'python3-gobject', 'at-spi2-core', 'xdotool', 'xclip']
+    // Why: see deb depends. RPM distros ship Xvfb as xorg-x11-server-Xvfb (there
+    // is no `xvfb` package), so the name differs from the deb here.
+    depends: [
+      'python3',
+      'python3-gobject',
+      'at-spi2-core',
+      'xdotool',
+      'xclip',
+      'xorg-x11-server-Xvfb'
+    ]
   },
   ...(skipElectronBuilderRebuild ? {} : { beforeBuild: electronBuilderNativeRebuild }),
   // Why: keep the default native rebuild path for dual-arch macOS packaging, but
