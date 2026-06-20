@@ -26,8 +26,8 @@ type ParsedTerminalHttpLink = {
 
 const HTTP_SCHEME_PREFIXES = ['https://', 'http://'] as const
 export const TERMINAL_HTTP_URL_MAX_LENGTH = 2048
-export const TERMINAL_HTTP_URL_REGEX =
-  /\bhttps?:\/\/[^\s"'!*(){}|\\^<>`]*[^\s"':,.!?{}|\\^~[\]`()<>]/gi
+// prettier-ignore
+export const TERMINAL_HTTP_URL_REGEX = /\bhttps?:\/\/[^\s"'!*(){}|\\^<>`]*[^\s"':,.!?{}|\\^~[\]`()<>]/gi
 
 export function extractTerminalHttpLinks(lineText: string): ParsedTerminalHttpLink[] {
   const links: ParsedTerminalHttpLink[] = []

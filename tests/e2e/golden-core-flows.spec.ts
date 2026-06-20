@@ -228,6 +228,13 @@ async function addProjectFromSidebar(
   // opening the actual Add Project dialog.
   const existingDialog = page.getByRole('dialog').first()
   if (await existingDialog.isVisible().catch(() => false)) {
+    await page.evaluate(() => {
+      const state = window.__store?.getState()
+      state?.closeModal?.()
+      state?.dismissContextualTour?.()
+      state?.setContextualToursOnboardingVisible?.(false)
+      state?.setContextualToursBlockingSurfaceVisible?.(false)
+    })
     await page.keyboard.press('Escape')
     await expect(existingDialog).toBeHidden({ timeout: 5_000 })
   }

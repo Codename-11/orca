@@ -402,7 +402,13 @@ async function closeFeatureTips(page: Page): Promise<void> {
   await page.evaluate(() => {
     const store = window.__store
     store?.getState().markFeatureTipsSeen(['orca-cli', 'cmd-j-palette', 'voice-dictation'])
-    if (store?.getState().activeModal === 'feature-tips') {
+    // Why: the rendering golden needs a terminal, not startup education
+    // surfaces. Dismiss whichever startup/modal tour is active so the terminal
+    // pane can mount on slower CI runners, especially Windows.
+    store?.getState().dismissContextualTour?.()
+    store?.getState().setContextualToursOnboardingVisible?.(false)
+    store?.getState().setContextualToursBlockingSurfaceVisible?.(false)
+    if (store?.getState().activeModal !== 'none') {
       store.getState().closeModal()
     }
   })
