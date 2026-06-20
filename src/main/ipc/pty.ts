@@ -3014,10 +3014,10 @@ export function registerPtyHandlers(
     typeof (value as { data?: unknown }).data === 'string'
 
   const isPtyWriteEventFromMainWindow = (
-    event: IpcMainEvent | IpcMainInvokeEvent,
+    event: IpcMainEvent | IpcMainInvokeEvent | null | undefined,
     mainWebContents: WebContents
   ): boolean =>
-    event.sender === mainWebContents &&
+    event?.sender === mainWebContents &&
     !mainWindow.isDestroyed() &&
     !(typeof mainWebContents.isDestroyed === 'function' && mainWebContents.isDestroyed())
 
