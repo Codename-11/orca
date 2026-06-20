@@ -5,6 +5,7 @@ import {
   ptyExitHandlers,
   ptyReplayHandlers
 } from './pty-dispatcher'
+import { clampUtf8Tail, type EagerBufferChunk } from './pty-eager-buffer-clamp'
 
 // ─── Eager PTY buffer for reconnection on restart ────────────────────
 // Why: On startup, PTYs are spawned before TerminalPane mounts. Shell output
@@ -13,13 +14,6 @@ import {
 
 export type EagerPtyHandle = { flush: () => string; dispose: () => void }
 const eagerPtyHandles = new Map<string, EagerPtyHandle>()
-const eagerBufferTextEncoder = new TextEncoder()
-const eagerBufferTextDecoder = new TextDecoder('utf-8', { ignoreBOM: true })
-
-type EagerBufferChunk = {
-  data: string
-  bytes: number
-}
 
 export function getEagerPtyBufferHandle(ptyId: string): EagerPtyHandle | undefined {
   return eagerPtyHandles.get(ptyId)
@@ -29,19 +23,6 @@ export function getEagerPtyBufferHandle(ptyId: string): EagerPtyHandle | undefin
 // serialization. Prevents unbounded memory growth if a restored shell
 // runs a long-lived command (e.g. tail -f) in a worktree the user never opens.
 const EAGER_BUFFER_MAX_BYTES = 512 * 1024
-
-function clampUtf8Tail(data: string, maxBytes: number): EagerBufferChunk {
-  const encoded = eagerBufferTextEncoder.encode(data)
-  if (encoded.byteLength <= maxBytes) {
-    return { data, bytes: encoded.byteLength }
-  }
-  let start = encoded.byteLength - maxBytes
-  while (start < encoded.byteLength && (encoded[start] & 0xc0) === 0x80) {
-    start += 1
-  }
-  const tail = eagerBufferTextDecoder.decode(encoded.subarray(start))
-  return { data: tail, bytes: encoded.byteLength - start }
-}
 
 export function registerEagerPtyBuffer(
   ptyId: string,

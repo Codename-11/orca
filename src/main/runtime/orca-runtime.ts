@@ -33,6 +33,11 @@ import {
   createAgentStatusOscProcessor,
   type ProcessedAgentStatusChunk
 } from '../../shared/agent-status-osc'
+import {
+  isTerminalInputTooLargeWithYield,
+  TERMINAL_INPUT_TOO_LARGE_ERROR,
+  iterateTerminalInputChunks
+} from '../../shared/terminal-input'
 import { gitExecFileAsync, wslAwareSpawn } from '../git/runner'
 import {
   cleanupClaimedCloneTarget,
@@ -107,12 +112,14 @@ import type {
   ProjectGroupImportMode,
   ProjectGroupImportResult,
   MemorySnapshot,
+  Tab,
   TabGroupLayoutNode,
   TerminalLayoutSnapshot,
   TerminalPaneLayoutNode,
   TerminalTab,
   TuiAgent,
   WorkspaceCreateTelemetrySource,
+  WorkspaceSessionState,
   DirEntry
 } from '../../shared/types'
 import type { RuntimeClientEvent } from '../../shared/runtime-client-events'
@@ -235,6 +242,7 @@ import type {
   RuntimeTerminalFocus,
   RuntimeTerminalClose,
   RuntimeTerminalListResult,
+  RuntimeTerminalResolvePane,
   RuntimeTerminalState,
   RuntimeStatus,
   RuntimeSyncWindowGraphResult,
@@ -248,6 +256,11 @@ import type {
   RuntimeSpeechSetupState,
   RuntimeTerminalShow,
   RuntimeTerminalSummary,
+  RuntimeTerminalVisualGroupNode,
+  RuntimeTerminalVisualLayout,
+  RuntimeTerminalVisualLayoutNode,
+  RuntimeTerminalVisualPaneNode,
+  RuntimeTerminalVisualTab,
   RuntimeSyncedLeaf,
   RuntimeSyncedTab,
   RuntimeMarkdownReadTabResult,
@@ -646,6 +659,10 @@ import type { RateLimitState } from '../../shared/rate-limit-types'
 import type { VoiceSettings } from '../../shared/speech-types'
 import { getSpeechModelManager, getSpeechSttService } from '../speech/speech-runtime-service'
 import { getCatalogModel, isLocalSpeechModel, SPEECH_MODEL_CATALOG } from '../speech/model-catalog'
+import {
+  deleteLocalSpeechModel,
+  getSpeechModelDeletionErrorCode
+} from '../speech/speech-model-deletion'
 import type { CommitMessageAgentEnvironmentResolvers } from '../text-generation/commit-message-agent-environment'
 import { scanNestedRepos } from '../project-groups/nested-repo-discovery'
 import {
@@ -833,6 +850,7 @@ type RuntimeLeafRecord = RuntimeSyncedLeaf & {
   tailBuffer: string[]
   tailPartialLine: string
   tailPendingAnsi: string
+  tailRedrawCursor: RetainedTailRedrawCursor | null
   tailTruncated: boolean
   tailLinesTotal: number
   preview: string
@@ -894,6 +912,7 @@ type RuntimePtyWorktreeRecord = {
   tailBuffer: string[]
   tailPartialLine: string
   tailPendingAnsi: string
+  tailRedrawCursor: RetainedTailRedrawCursor | null
   tailTruncated: boolean
   tailLinesTotal: number
   preview: string
@@ -2625,6 +2644,7 @@ export class OrcaRuntimeService {
         tailBuffer: tailSource?.tailBuffer ?? [],
         tailPartialLine: tailSource?.tailPartialLine ?? '',
         tailPendingAnsi: tailSource?.tailPendingAnsi ?? '',
+        tailRedrawCursor: tailSource?.tailRedrawCursor ?? null,
         tailTruncated: tailSource?.tailTruncated ?? false,
         tailLinesTotal: tailSource?.tailLinesTotal ?? 0,
         preview: tailSource?.preview ?? '',
@@ -3066,7 +3086,9 @@ export class OrcaRuntimeService {
       .map((group) => {
         const tabOrder = retainedOrder.get(group.id) ?? []
         const keptActive =
-          group.activeTabId && tabOrder.includes(group.activeTabId) && liveTabIds.has(group.activeTabId)
+          group.activeTabId &&
+          tabOrder.includes(group.activeTabId) &&
+          liveTabIds.has(group.activeTabId)
             ? group.activeTabId
             : null
         return {
@@ -3248,20 +3270,38 @@ export class OrcaRuntimeService {
     if (!this.offscreenBrowserBackend || !this.agentBrowserBridge?.tabList) {
       return []
     }
-    return this.agentBrowserBridge.tabList(worktreeId).tabs.map((tab) => ({
-      type: 'browser' as const,
-      // Why: an offscreen page has no separate workspace identity, so the page id
-      // is its own workspace id (matches the server's browserWorkspaceId fallback).
-      id: tab.browserPageId,
-      title: tab.title || tab.url || 'Browser',
-      browserWorkspaceId: tab.browserPageId,
-      browserPageId: tab.browserPageId,
-      url: tab.url || 'about:blank',
-      loading: false,
-      canGoBack: false,
-      canGoForward: false,
-      isActive: tab.active === true
-    }))
+    return this.agentBrowserBridge.tabList(worktreeId).tabs.map((tab) => {
+      const persistedProps = this.getPersistedUnifiedSessionTabProps(worktreeId, tab.browserPageId)
+      return {
+        type: 'browser' as const,
+        // Why: an offscreen page has no separate workspace identity, so the page id
+        // is its own workspace id (matches the server's browserWorkspaceId fallback).
+        id: tab.browserPageId,
+        title: tab.title || tab.url || 'Browser',
+        browserWorkspaceId: tab.browserPageId,
+        browserPageId: tab.browserPageId,
+        url: tab.url || 'about:blank',
+        loading: false,
+        canGoBack: false,
+        canGoForward: false,
+        ...(persistedProps ? { color: persistedProps.color } : {}),
+        ...(persistedProps ? { isPinned: persistedProps.isPinned === true } : {}),
+        isActive: tab.active === true
+      }
+    })
+  }
+
+  private getPersistedUnifiedSessionTabProps(
+    worktreeId: string,
+    tabId: string
+  ): Pick<Tab, 'color' | 'isPinned'> | null {
+    const tab =
+      this.store
+        ?.getWorkspaceSession?.()
+        ?.unifiedTabs?.[worktreeId]?.find(
+          (candidate) => candidate.id === tabId || candidate.entityId === tabId
+        ) ?? null
+    return tab ? { color: tab.color, isPinned: tab.isPinned } : null
   }
 
   private collectPersistedTerminalLeafIds(layout: TerminalLayoutSnapshot | undefined): string[] {
@@ -3456,8 +3496,7 @@ export class OrcaRuntimeService {
       groupIdByTabId.set(newTabAssignment!.tabId, newTabAssignment!.groupId)
     }
     const activeGroupId =
-      (activeTopLevelId ? groupIdByTabId.get(activeTopLevelId) : undefined) ??
-      existingGroups[0]!.id
+      (activeTopLevelId ? groupIdByTabId.get(activeTopLevelId) : undefined) ?? existingGroups[0]!.id
     const orderByGroup = new Map<string, string[]>(existingGroups.map((group) => [group.id, []]))
     for (const tabId of tabOrder) {
       const groupId = groupIdByTabId.get(tabId) ?? activeGroupId
@@ -4072,12 +4111,12 @@ export class OrcaRuntimeService {
     const hostTabId = snapshot
       ? (this.resolveMobileSessionHostTabId(snapshot, args.tabId) ?? args.tabId)
       : args.tabId
-    this.persistHeadlessTerminalTabProps(worktreeId, hostTabId, args)
-    this.applyHeadlessTerminalTabPropsToSnapshot(worktreeId, hostTabId, args)
+    this.persistHeadlessSessionTabProps(worktreeId, hostTabId, args)
+    this.applyHeadlessSessionTabPropsToSnapshot(worktreeId, hostTabId, args)
     return { updated: true }
   }
 
-  private persistHeadlessTerminalTabProps(
+  private persistHeadlessSessionTabProps(
     worktreeId: string,
     tabId: string,
     props: { color?: string | null; isPinned?: boolean }
@@ -4087,12 +4126,11 @@ export class OrcaRuntimeService {
       return
     }
     const tabs = session.tabsByWorktree[worktreeId]
-    if (!tabs?.some((tab) => tab.id === tabId)) {
-      return
-    }
-    this.store.setWorkspaceSession({
-      ...session,
-      tabsByWorktree: {
+    const nextSession: WorkspaceSessionState = { ...session }
+    let changed = false
+    if (tabs?.some((tab) => tab.id === tabId)) {
+      changed = true
+      nextSession.tabsByWorktree = {
         ...session.tabsByWorktree,
         [worktreeId]: tabs.map((tab) =>
           tab.id === tabId
@@ -4104,10 +4142,32 @@ export class OrcaRuntimeService {
             : tab
         )
       }
-    })
+    }
+
+    const unifiedTabs = session.unifiedTabs?.[worktreeId]
+    if (unifiedTabs?.some((tab) => tab.id === tabId || tab.entityId === tabId)) {
+      changed = true
+      nextSession.unifiedTabs = {
+        ...session.unifiedTabs,
+        [worktreeId]: unifiedTabs.map((tab) =>
+          tab.id === tabId || tab.entityId === tabId
+            ? {
+                ...tab,
+                ...(props.color !== undefined ? { color: props.color } : {}),
+                ...(props.isPinned !== undefined ? { isPinned: props.isPinned } : {})
+              }
+            : tab
+        )
+      }
+    }
+
+    if (!changed) {
+      return
+    }
+    this.store.setWorkspaceSession(nextSession)
   }
 
-  private applyHeadlessTerminalTabPropsToSnapshot(
+  private applyHeadlessSessionTabPropsToSnapshot(
     worktreeId: string,
     tabId: string,
     props: { color?: string | null; isPinned?: boolean }
@@ -4116,12 +4176,9 @@ export class OrcaRuntimeService {
     if (!snapshot) {
       return
     }
-    // Why: only terminal tabs persist color/pin today (browser/editor are
-    // tracked in #5729). Applying to a browser surface here would show a
-    // transient that reverts on the next rebuild — apply only what we persist.
     let changed = false
     const tabs = snapshot.tabs.map((tab) => {
-      if (tab.type !== 'terminal' || tab.parentTabId !== tabId) {
+      if (this.getMobileSessionTopLevelTabId(tab) !== tabId) {
         return tab
       }
       changed = true
@@ -4144,17 +4201,19 @@ export class OrcaRuntimeService {
     this.emitMobileSessionTabsSnapshot(nextSnapshot)
   }
 
+  private getMobileSessionTopLevelTabId(tab: RuntimeMobileSessionSnapshotTab): string {
+    return tab.type === 'terminal' ? tab.parentTabId : tab.id
+  }
+
   // Merge the client's pane structure into the persisted tab layout. PTY
   // bindings and active leaf stay host-owned; only ratios/expand/titles change.
   // terminalLayoutsByTabId is keyed by tab id (worktree-independent).
-  private persistHeadlessTerminalPaneLayout(
-    args: {
-      tabId: string
-      root: TerminalPaneLayoutNode | null
-      expandedLeafId: string | null
-      titlesByLeafId?: Record<string, string>
-    }
-  ): void {
+  private persistHeadlessTerminalPaneLayout(args: {
+    tabId: string
+    root: TerminalPaneLayoutNode | null
+    expandedLeafId: string | null
+    titlesByLeafId?: Record<string, string>
+  }): void {
     const session = this.store?.getWorkspaceSession?.()
     if (!session || !this.store?.setWorkspaceSession) {
       return
@@ -4253,11 +4312,7 @@ export class OrcaRuntimeService {
     })
     const active = nextTabs.find((candidate) => candidate.isActive) ?? nextTabs[0] ?? null
     const reorderedTargetActiveTabId =
-      active?.type === 'terminal'
-        ? active.parentTabId
-        : active
-          ? active.id
-          : (tabOrder[0] ?? null)
+      active?.type === 'terminal' ? active.parentTabId : active ? active.id : (tabOrder[0] ?? null)
     // Why: reorder only changes ONE group's order. Preserve every other group so
     // a multi-group split isn't deleted by re-sorting tabs in one of its groups.
     const existingGroups = snapshot.tabGroups ?? []
@@ -4409,9 +4464,7 @@ export class OrcaRuntimeService {
       ...session,
       tabsByWorktree: {
         ...session.tabsByWorktree,
-        [worktreeId]: tabs.map((tab) =>
-          tab.id === tabId ? { ...tab, customTitle: title } : tab
-        )
+        [worktreeId]: tabs.map((tab) => (tab.id === tabId ? { ...tab, customTitle: title } : tab))
       }
     })
   }
@@ -4781,6 +4834,7 @@ export class OrcaRuntimeService {
           lines: pty.tailBuffer,
           partialLine: pty.tailPartialLine,
           pendingAnsi: pty.tailPendingAnsi,
+          redrawCursor: pty.tailRedrawCursor,
           truncated: pty.tailTruncated,
           linesTotal: pty.tailLinesTotal
         }
@@ -4795,11 +4849,13 @@ export class OrcaRuntimeService {
       const nextTail = appendNormalizedToTailBuffer(
         pty.tailBuffer,
         pty.tailPartialLine,
-        normalized.text
+        normalized.text,
+        pty.tailRedrawCursor
       )
       ptyTailAfter = nextTail
       pty.tailBuffer = nextTail.lines
       pty.tailPartialLine = nextTail.partialLine
+      pty.tailRedrawCursor = nextTail.redrawCursor
       pty.tailTruncated = pty.tailTruncated || nextTail.truncated
       pty.tailLinesTotal += nextTail.newCompleteLines
       pty.preview = buildPreview(pty.tailBuffer, pty.tailPartialLine)
@@ -4824,6 +4880,7 @@ export class OrcaRuntimeService {
           leaf.tailBuffer,
           leaf.tailPartialLine,
           leaf.tailPendingAnsi,
+          leaf.tailRedrawCursor,
           leaf.tailTruncated,
           leaf.tailLinesTotal,
           ptyTailBefore
@@ -4834,6 +4891,7 @@ export class OrcaRuntimeService {
         leaf.tailBuffer = pty.tailBuffer
         leaf.tailPartialLine = pty.tailPartialLine
         leaf.tailPendingAnsi = pty.tailPendingAnsi
+        leaf.tailRedrawCursor = pty.tailRedrawCursor
         leaf.tailTruncated = pty.tailTruncated
         leaf.tailLinesTotal = pty.tailLinesTotal
         leaf.preview = pty.preview
@@ -4843,10 +4901,12 @@ export class OrcaRuntimeService {
         const nextTail = appendNormalizedToTailBuffer(
           leaf.tailBuffer,
           leaf.tailPartialLine,
-          normalized.text
+          normalized.text,
+          leaf.tailRedrawCursor
         )
         leaf.tailBuffer = nextTail.lines
         leaf.tailPartialLine = nextTail.partialLine
+        leaf.tailRedrawCursor = nextTail.redrawCursor
         leaf.tailTruncated = leaf.tailTruncated || nextTail.truncated
         leaf.tailLinesTotal += nextTail.newCompleteLines
         leaf.preview = buildPreview(leaf.tailBuffer, leaf.tailPartialLine)
@@ -6087,6 +6147,28 @@ export class OrcaRuntimeService {
     return { started: true }
   }
 
+  async deleteMobileSpeechModel(modelId: string): Promise<RuntimeSpeechSetupState> {
+    if (!this.store?.getSettings || !this.store.updateSettings) {
+      throw new Error('voice_dictation_unavailable')
+    }
+    const store = this.store
+    try {
+      // The runtime store is adapted to the minimal speech settings contract used by deletion.
+      await deleteLocalSpeechModel({
+        store: {
+          getSettings: () => store.getSettings(),
+          updateSettings: (updates, options) => store.updateSettings?.(updates, options)
+        },
+        modelManager: getSpeechModelManager(store),
+        sttService: getSpeechSttService(store),
+        modelId
+      })
+    } catch (error) {
+      throw new Error(getSpeechModelDeletionErrorCode(error) ?? 'voice_model_delete_failed')
+    }
+    return this.listMobileSpeechModels()
+  }
+
   // Enables/disables dictation and/or selects the model, merging into the
   // existing voice settings so other voice fields are preserved.
   async configureMobileDictation(params: {
@@ -6703,6 +6785,14 @@ export class OrcaRuntimeService {
     this.disposePtyTitleTracker(ptyId)
     this.oscTitleScanTailByPtyId.delete(ptyId)
     this.clearAgentRowSnapshotsForPty(ptyId)
+    // Why: a Claude agent-team leader whose PTY exits naturally (agent finished,
+    // process died, renderer reload) must release its team + nested panes map.
+    // Previously only explicit closeTerminal evicted it, so natural exits leaked
+    // one team per never-reused teamId for the runtime's lifetime.
+    const exitedTeamLeaderHandle = this.handleByPtyId.get(ptyId)
+    if (exitedTeamLeaderHandle) {
+      this.claudeAgentTeams.removeTeamForLeaderHandle(exitedTeamLeaderHandle)
+    }
     // Layout state machine: clear `layouts` and `layoutQueues`. Any
     // already-queued applyLayout work for this ptyId will run, but every
     // applyLayout re-checks `layouts.has(ptyId)` (or fresh-subscribe) and
@@ -8006,11 +8096,207 @@ export class OrcaRuntimeService {
       terminals.push(this.buildPtyTerminalSummary(pty, worktreesById))
     }
 
+    const listedTerminals = terminals.slice(0, limit)
+    const visualLayouts = this.buildTerminalVisualLayouts(
+      listedTerminals,
+      worktreesById,
+      targetWorktreeId
+    )
+
     return {
-      terminals: terminals.slice(0, limit),
+      terminals: listedTerminals,
+      ...(visualLayouts.length > 0 ? { visualLayouts } : {}),
       totalCount: terminals.length,
       truncated: terminals.length > limit
     }
+  }
+
+  private buildTerminalVisualLayouts(
+    terminals: RuntimeTerminalSummary[],
+    worktreesById: Map<string, ResolvedWorktree>,
+    targetWorktreeId: string | null
+  ): RuntimeTerminalVisualLayout[] {
+    if (terminals.length === 0) {
+      return []
+    }
+    // Why: the mobile/session snapshot supplies topology, but terminal.list
+    // must print the same handles in both the flat list and visual tree.
+    const summariesByLeafKey = new Map(
+      terminals.map((terminal) => [this.getLeafKey(terminal.tabId, terminal.leafId), terminal])
+    )
+    const summariesByWorktree = new Map<string, RuntimeTerminalSummary[]>()
+    for (const terminal of terminals) {
+      const existing = summariesByWorktree.get(terminal.worktreeId)
+      if (existing) {
+        existing.push(terminal)
+      } else {
+        summariesByWorktree.set(terminal.worktreeId, [terminal])
+      }
+    }
+    const snapshots = targetWorktreeId
+      ? [this.mobileSessionTabsByWorktree.get(targetWorktreeId)].filter(
+          (snapshot): snapshot is RuntimeMobileSessionTabsSnapshot => snapshot !== undefined
+        )
+      : [...this.mobileSessionTabsByWorktree.values()]
+    const layouts: RuntimeTerminalVisualLayout[] = []
+    for (const snapshot of snapshots) {
+      const worktreeTerminals = summariesByWorktree.get(snapshot.worktree)
+      if (!worktreeTerminals || worktreeTerminals.length === 0) {
+        continue
+      }
+      const groups = this.buildTerminalVisualGroups(snapshot, summariesByLeafKey)
+      if (groups.length === 0) {
+        continue
+      }
+      const groupsById = new Map(
+        groups
+          .filter((group): group is RuntimeTerminalVisualGroupNode & { groupId: string } =>
+            Boolean(group.groupId)
+          )
+          .map((group) => [group.groupId, group])
+      )
+      const root =
+        this.buildTerminalVisualGroupLayout(snapshot.tabGroupLayout, groupsById) ?? groups[0]
+      if (!root) {
+        continue
+      }
+      const worktree = worktreesById.get(snapshot.worktree)
+      layouts.push({
+        worktreeId: snapshot.worktree,
+        worktreePath: worktree?.path ?? worktreeTerminals[0]?.worktreePath ?? '',
+        root
+      })
+    }
+    return layouts
+  }
+
+  private buildTerminalVisualGroups(
+    snapshot: RuntimeMobileSessionTabsSnapshot,
+    summariesByLeafKey: ReadonlyMap<string, RuntimeTerminalSummary>
+  ): RuntimeTerminalVisualGroupNode[] {
+    const terminalTabs = snapshot.tabs.filter(
+      (tab): tab is RuntimeMobileSessionTerminalTab => tab.type === 'terminal'
+    )
+    if (terminalTabs.length === 0) {
+      return []
+    }
+    const tabsByParentId = new Map<string, RuntimeMobileSessionTerminalTab[]>()
+    const parentOrder: string[] = []
+    for (const tab of terminalTabs) {
+      const existing = tabsByParentId.get(tab.parentTabId)
+      if (existing) {
+        existing.push(tab)
+      } else {
+        parentOrder.push(tab.parentTabId)
+        tabsByParentId.set(tab.parentTabId, [tab])
+      }
+    }
+    const groupSources =
+      snapshot.tabGroups && snapshot.tabGroups.length > 0
+        ? snapshot.tabGroups
+        : [{ id: null, activeTabId: snapshot.activeTabId, tabOrder: parentOrder }]
+    return groupSources
+      .map((group): RuntimeTerminalVisualGroupNode | null => {
+        const tabs = group.tabOrder
+          .map((tabId) => {
+            const surfaces =
+              tabsByParentId.get(tabId) ?? terminalTabs.filter((tab) => tab.id === tabId)
+            return this.buildTerminalVisualTab(tabId, surfaces, summariesByLeafKey)
+          })
+          .filter((tab): tab is RuntimeTerminalVisualTab => tab !== null)
+        if (tabs.length === 0) {
+          return null
+        }
+        return {
+          type: 'group',
+          groupId: group.id,
+          activeTabId: group.activeTabId,
+          tabs
+        }
+      })
+      .filter((group): group is RuntimeTerminalVisualGroupNode => group !== null)
+  }
+
+  private buildTerminalVisualTab(
+    tabId: string,
+    surfaces: RuntimeMobileSessionTerminalTab[],
+    summariesByLeafKey: ReadonlyMap<string, RuntimeTerminalSummary>
+  ): RuntimeTerminalVisualTab | null {
+    const firstSurface = surfaces[0]
+    if (!firstSurface) {
+      return null
+    }
+    const parentTabId = firstSurface.parentTabId
+    const activeLeafId =
+      firstSurface.parentLayout?.activeLeafId ??
+      surfaces.find((surface) => surface.isActive)?.leafId ??
+      firstSurface.leafId
+    const root = firstSurface.parentLayout?.root ?? {
+      type: 'leaf' as const,
+      leafId: firstSurface.leafId
+    }
+    const panes = this.buildTerminalVisualPane(root, parentTabId, activeLeafId, summariesByLeafKey)
+    if (!panes) {
+      return null
+    }
+    return {
+      tabId: parentTabId || tabId,
+      title: this.tabs.get(parentTabId)?.title ?? firstSurface.title ?? null,
+      activeLeafId,
+      panes
+    }
+  }
+
+  private buildTerminalVisualPane(
+    node: TerminalPaneLayoutNode,
+    tabId: string,
+    activeLeafId: string | null,
+    summariesByLeafKey: ReadonlyMap<string, RuntimeTerminalSummary>
+  ): RuntimeTerminalVisualPaneNode | null {
+    if (node.type === 'leaf') {
+      const summary = summariesByLeafKey.get(this.getLeafKey(tabId, node.leafId))
+      if (!summary) {
+        return null
+      }
+      return {
+        type: 'terminal',
+        handle: summary.handle,
+        tabId: summary.tabId,
+        leafId: summary.leafId,
+        title: summary.title,
+        connected: summary.connected,
+        active: summary.leafId === activeLeafId
+      }
+    }
+    const first = this.buildTerminalVisualPane(node.first, tabId, activeLeafId, summariesByLeafKey)
+    const second = this.buildTerminalVisualPane(
+      node.second,
+      tabId,
+      activeLeafId,
+      summariesByLeafKey
+    )
+    if (first && second) {
+      return { type: 'pane-split', direction: node.direction, first, second }
+    }
+    return first ?? second
+  }
+
+  private buildTerminalVisualGroupLayout(
+    node: TabGroupLayoutNode | null | undefined,
+    groupsById: ReadonlyMap<string, RuntimeTerminalVisualGroupNode>
+  ): RuntimeTerminalVisualLayoutNode | null {
+    if (!node) {
+      return null
+    }
+    if (node.type === 'leaf') {
+      return groupsById.get(node.groupId) ?? null
+    }
+    const first = this.buildTerminalVisualGroupLayout(node.first, groupsById)
+    const second = this.buildTerminalVisualGroupLayout(node.second, groupsById)
+    if (first && second) {
+      return { type: 'split', direction: node.direction, first, second }
+    }
+    return first ?? second
   }
 
   // Why: when --terminal is omitted, the CLI auto-resolves to the active
@@ -8072,6 +8358,23 @@ export class OrcaRuntimeService {
     }
 
     throw new Error('no_active_terminal')
+  }
+
+  resolveTerminalPane(paneKey: string): RuntimeTerminalResolvePane {
+    // Why: the renderer context menu only knows the stable pane key; main owns
+    // the runtime terminal handle that agents and CLI commands can address.
+    const handle = this.getTerminalHandleForPaneKey(paneKey)
+    if (!handle) {
+      throw new Error('terminal_not_found')
+    }
+    const record = this.handles.get(handle)
+    const parsed = parsePaneKey(paneKey)
+    return {
+      handle,
+      tabId: record?.tabId ?? parsed?.tabId ?? '',
+      leafId: record?.leafId ?? parsed?.leafId ?? '',
+      ptyId: record?.ptyId ?? null
+    }
   }
 
   async showTerminal(handle: string): Promise<RuntimeTerminalShow> {
@@ -8141,6 +8444,7 @@ export class OrcaRuntimeService {
       if (payload === null) {
         throw new Error('invalid_terminal_send')
       }
+      await assertTerminalInputWithinLimitWithYield(action.text)
       await this.writeTerminalAction(pty.pty.ptyId, action, payload)
       return {
         handle,
@@ -8157,6 +8461,7 @@ export class OrcaRuntimeService {
     if (payload === null) {
       throw new Error('invalid_terminal_send')
     }
+    await assertTerminalInputWithinLimitWithYield(action.text)
 
     await this.writeTerminalAction(leaf.ptyId, action, payload)
 
@@ -8172,28 +8477,46 @@ export class OrcaRuntimeService {
     action: { text?: string; enter?: boolean; interrupt?: boolean },
     payload: string
   ): Promise<void> {
-    // Why: TUI apps (Claude Code, etc.) treat a single large write as a paste
-    // event. Keep Enter/interrupt as a second write for both visible and
-    // background PTYs so CLI automation behaves the same either way.
+    // Why: direct terminal.send can carry paste-sized text from RPC/mobile
+    // clients; chunk text before PTY/ConPTY while preserving suffix separation.
     const hasText = typeof action.text === 'string' && action.text.length > 0
     const hasSuffix = action.enter || action.interrupt
-    if (hasText && hasSuffix) {
-      const textWrote = this.ptyController?.write(ptyId, action.text!) ?? false
-      if (!textWrote) {
-        throw new Error('terminal_not_writable')
-      }
+    if (hasText) {
+      await this.writeTerminalInputChunks(ptyId, action.text!)
+    }
+    if (hasSuffix) {
       const suffix = (action.enter ? '\r' : '') + (action.interrupt ? '\x03' : '')
-      await new Promise((resolve) => setTimeout(resolve, 500))
+      if (hasText) {
+        await new Promise((resolve) => setTimeout(resolve, 500))
+      }
       const suffixWrote = this.ptyController?.write(ptyId, suffix) ?? false
       if (!suffixWrote) {
         throw new Error('terminal_not_writable')
       }
       return
     }
+    if (hasText) {
+      return
+    }
 
     const wrote = this.ptyController?.write(ptyId, payload) ?? false
     if (!wrote) {
       throw new Error('terminal_not_writable')
+    }
+  }
+
+  private async writeTerminalInputChunks(ptyId: string, text: string): Promise<void> {
+    const chunks = iterateTerminalInputChunks(text)
+    let chunk = chunks.next()
+    while (!chunk.done) {
+      const wrote = this.ptyController?.write(ptyId, chunk.value) ?? false
+      if (!wrote) {
+        throw new Error('terminal_not_writable')
+      }
+      chunk = chunks.next()
+      if (!chunk.done) {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      }
     }
   }
 
@@ -11119,22 +11442,48 @@ export class OrcaRuntimeService {
 
   private async ensureRemoteOrcaDirIgnored(
     fsProvider: IFilesystemProvider,
-    repoPath: string
+    repoPath: string,
+    options: { required?: boolean } = {}
   ): Promise<void> {
     const gitignorePath = joinWorktreeRelativePath(repoPath, '.gitignore')
+    let result: Awaited<ReturnType<IFilesystemProvider['readFile']>>
     try {
-      const result = await fsProvider.readFile(gitignorePath)
-      if (result.isBinary || /^\.orca\/?$/m.test(result.content)) {
+      result = await fsProvider.readFile(gitignorePath)
+    } catch (error) {
+      if (!isENOENT(error)) {
+        if (options.required) {
+          throw error
+        }
+        console.warn('[runtime] Could not inspect remote .gitignore for .orca', error)
         return
       }
-      const separator = result.content.endsWith('\n') ? '' : '\n'
-      await fsProvider.writeFile(gitignorePath, `${result.content}${separator}.orca\n`)
-    } catch {
       try {
         await fsProvider.writeFile(gitignorePath, '.orca\n')
-      } catch (error) {
-        console.warn('[runtime] Could not update remote .gitignore to exclude .orca', error)
+      } catch (writeError) {
+        if (options.required) {
+          throw writeError
+        }
+        console.warn('[runtime] Could not update remote .gitignore to exclude .orca', writeError)
       }
+      return
+    }
+    if (result.isBinary) {
+      if (options.required) {
+        throw new Error('Remote .gitignore is binary; cannot verify .orca is ignored')
+      }
+      return
+    }
+    if (/^\.orca\/?$/m.test(result.content)) {
+      return
+    }
+    const separator = result.content.endsWith('\n') ? '' : '\n'
+    try {
+      await fsProvider.writeFile(gitignorePath, `${result.content}${separator}.orca\n`)
+    } catch (writeError) {
+      if (options.required) {
+        throw writeError
+      }
+      console.warn('[runtime] Could not update remote .gitignore to exclude .orca', writeError)
     }
   }
 
@@ -13287,6 +13636,7 @@ export class OrcaRuntimeService {
       this.store.removeWorkspaceLineage?.(worktreeWorkspaceKey(worktree.id))
     } else if (lineage?.parentWorktree) {
       const parent = await this.resolveWorktreeSelector(lineage.parentWorktree)
+
       this.validateLineageParent(worktree, parent)
       if (!worktree.instanceId || !parent.instanceId) {
         throw new RuntimeLineageError(
@@ -15459,7 +15809,19 @@ export class OrcaRuntimeService {
     }
 
     if (selector.startsWith('id:')) {
-      candidates = worktrees.filter((worktree) => worktree.id === selector.slice(3))
+      const worktreeId = selector.slice(3)
+      candidates = worktrees.filter((worktree) => worktree.id === worktreeId)
+      if (candidates.length === 0) {
+        const parsed = splitWorktreeIdForFilesystem(worktreeId)
+        const repo = parsed ? this.store?.getRepo(parsed.repoId) : null
+        const fallback =
+          repo?.connectionId && this.store?.getWorktreeMeta(worktreeId)
+            ? this.buildResolvedWorktreeFromId(worktreeId)
+            : null
+        if (fallback !== null) {
+          candidates = [fallback]
+        }
+      }
     } else if (selector.startsWith('path:')) {
       candidates = worktrees.filter((worktree) =>
         runtimePathsEqual(worktree.path, selector.slice(5))
@@ -15659,8 +16021,7 @@ export class OrcaRuntimeService {
       } catch {
         warnings.push({
           code: 'LINEAGE_PARENT_CONTEXT_MISSING',
-          message:
-            'Worktree created, but Orca could not validate the environment parent context.',
+          message: 'Worktree created, but Orca could not validate the environment parent context.',
           details: { envParentWorkspace: input.envParentWorkspace }
         })
       }
@@ -16302,6 +16663,7 @@ export class OrcaRuntimeService {
         tailBuffer: [],
         tailPartialLine: '',
         tailPendingAnsi: '',
+        tailRedrawCursor: null,
         tailTruncated: false,
         tailLinesTotal: 0,
         preview: state.preview ?? ''
@@ -16421,6 +16783,7 @@ export class OrcaRuntimeService {
     pty.tailBuffer = []
     pty.tailPartialLine = ''
     pty.tailPendingAnsi = ''
+    pty.tailRedrawCursor = null
     pty.tailTruncated = false
     pty.tailLinesTotal = 0
   }
@@ -16450,6 +16813,9 @@ export class OrcaRuntimeService {
     this.clearAgentRowSnapshotsForPty(ptyId)
     const handle = this.handleByPtyId.get(ptyId)
     if (handle) {
+      // Why: pruning can remove a PTY without onPtyExit firing; release any agent
+      // team owned by this leader handle so it does not leak.
+      this.claudeAgentTeams.removeTeamForLeaderHandle(handle)
       this.handleByPtyId.delete(ptyId)
       const record = this.handles.get(handle)
       if (record?.tabId.startsWith('pty:')) {
@@ -20840,10 +21206,12 @@ function buildTerminalWaitText(lines: string[], partialLine: string, preview: st
 export function appendNormalizedToTailBuffer(
   previousLines: string[],
   previousPartialLine: string,
-  normalizedChunk: string
+  normalizedChunk: string,
+  previousRedrawCursor: RetainedTailRedrawCursor | null = null
 ): {
   lines: string[]
   partialLine: string
+  redrawCursor: RetainedTailRedrawCursor | null
   truncated: boolean
   newCompleteLines: number
 } {
@@ -20851,6 +21219,7 @@ export function appendNormalizedToTailBuffer(
     return {
       lines: previousLines,
       partialLine: previousPartialLine,
+      redrawCursor: previousRedrawCursor,
       truncated: false,
       newCompleteLines: 0
     }
@@ -20860,20 +21229,38 @@ export function appendNormalizedToTailBuffer(
   // larger line transcript for pagination, but keep partial-line work bounded.
   const previousPartialWasCapped = previousPartialLine.length > MAX_TAIL_PARTIAL_CHARS
   const boundedPreviousPartialLine = previousPartialLine.slice(-MAX_TAIL_PARTIAL_CHARS)
-  // Why: status UIs redraw a single line with CR/backspace/ANSI erase
-  // controls. Terminal previews are text, not a full screen model, so retain
-  // the latest visible redraw segment instead of appending every spinner frame.
-  const pieces = `${boundedPreviousPartialLine}${normalizedChunk}`
-    .split('\n')
-    .map(applyTerminalLineControls)
-  const nextPartialLine = (pieces.pop() ?? '').replace(/[ \t]+$/g, '')
+  const combinedChunk = `${boundedPreviousPartialLine}${normalizedChunk}`
+  if (previousRedrawCursor || containsTerminalVerticalLineControl(combinedChunk)) {
+    return appendNormalizedToMultilineTailBuffer(
+      previousLines,
+      boundedPreviousPartialLine,
+      normalizedChunk,
+      previousPartialWasCapped,
+      previousRedrawCursor
+    )
+  }
+
+  // Why: status UIs redraw a single line with CR/backspace/ANSI erase controls.
+  // Terminal previews are text, not a full screen model, so retain the latest
+  // visible redraw segment instead of appending every spinner frame.
+  const segments = splitRetainedTerminalTailSegments(combinedChunk)
+  const pieces = processTerminalTailCompleteSegments(segments.completeSegments)
+  const partialResult = applyTerminalLineControls(segments.partialSegment)
+  const nextPartialLine = trimTerminalLineRight(partialResult.text)
   const retainedPartialLine = nextPartialLine.slice(-MAX_TAIL_PARTIAL_CHARS)
-  const newCompleteLines = pieces.length
+  const newCompleteLines = segments.completeLineCount
+  const omittedNewCompleteLines = newCompleteLines - pieces.length
   let nextLines =
     newCompleteLines > 0
-      ? [...previousLines, ...pieces.map((line) => line.replace(/[ \t]+$/g, ''))]
+      ? [
+          ...(omittedNewCompleteLines > 0 ? [] : previousLines),
+          ...pieces.map((line) => line.replace(/[ \t]+$/g, ''))
+        ]
       : previousLines
-  let truncated = previousPartialWasCapped || nextPartialLine.length > MAX_TAIL_PARTIAL_CHARS
+  let truncated =
+    previousPartialWasCapped ||
+    omittedNewCompleteLines > 0 ||
+    nextPartialLine.length > MAX_TAIL_PARTIAL_CHARS
 
   if (nextLines.length > MAX_TAIL_LINES) {
     nextLines = nextLines.slice(nextLines.length - MAX_TAIL_LINES)
@@ -20897,24 +21284,332 @@ export function appendNormalizedToTailBuffer(
     }
   }
 
+  const redrawCursor =
+    !partialResult.hadControl || partialResult.cursorColumn === nextPartialLine.length
+      ? null
+      : {
+          rowFromEnd: 0,
+          column: partialResult.cursorColumn
+        }
+
   return {
     lines: nextLines,
     partialLine: retainedPartialLine,
+    redrawCursor,
     truncated,
     newCompleteLines
   }
 }
 
-function applyTerminalLineControls(line: string): string {
+function trimTerminalLineRight(line: string): string {
+  let end = line.length
+  while (end > 0) {
+    const code = line.charCodeAt(end - 1)
+    if (code !== 0x20 && code !== 0x09) {
+      break
+    }
+    end -= 1
+  }
+  return end === line.length ? line : line.slice(0, end)
+}
+
+function appendNormalizedToMultilineTailBuffer(
+  previousLines: string[],
+  boundedPreviousPartialLine: string,
+  normalizedChunk: string,
+  previousPartialWasCapped: boolean,
+  previousRedrawCursor: RetainedTailRedrawCursor | null
+): {
+  lines: string[]
+  partialLine: string
+  redrawCursor: RetainedTailRedrawCursor | null
+  truncated: boolean
+  newCompleteLines: number
+} {
+  const rows: RetainedTerminalRow[] = [
+    ...previousLines.map((line) => ({ text: line, completed: true })),
+    { text: boundedPreviousPartialLine, completed: false }
+  ]
+  let cursorRow = previousRedrawCursor
+    ? Math.max(0, rows.length - 1 - previousRedrawCursor.rowFromEnd)
+    : rows.length - 1
+  let cursorColumn = previousRedrawCursor?.column ?? boundedPreviousPartialLine.length
+  let newCompleteLines = 0
+  let truncated = previousPartialWasCapped
+
+  const ensureCursorRow = (): void => {
+    while (cursorRow >= rows.length) {
+      rows.push({ text: '', completed: false })
+    }
+  }
+  const trimRows = (): void => {
+    const maxRows = MAX_TAIL_LINES + 1
+    if (rows.length <= maxRows) {
+      return
+    }
+    const removeCount = rows.length - maxRows
+    rows.splice(0, removeCount)
+    cursorRow = Math.max(0, cursorRow - removeCount)
+    truncated = true
+  }
+  const moveCursorToColumn = (nextColumn: number): void => {
+    cursorColumn = clampTerminalPreviewCursor(nextColumn)
+  }
+  const markCursorRowRewritten = (): void => {
+    ensureCursorRow()
+    rows[cursorRow]!.completed = false
+  }
+  const writeChar = (char: string): void => {
+    ensureCursorRow()
+    markCursorRowRewritten()
+    const row = rows[cursorRow]!
+    if (cursorColumn > row.text.length) {
+      row.text = `${row.text}${' '.repeat(cursorColumn - row.text.length)}`
+    }
+    row.text =
+      cursorColumn >= row.text.length
+        ? `${row.text}${char}`
+        : `${row.text.slice(0, cursorColumn)}${char}${row.text.slice(cursorColumn + 1)}`
+    cursorColumn += 1
+  }
+  const eraseLine = (mode: number): void => {
+    ensureCursorRow()
+    markCursorRowRewritten()
+    const row = rows[cursorRow]!
+    if (mode === 0) {
+      row.text = row.text.slice(0, cursorColumn)
+    } else if (mode === 1) {
+      const deleteCount = Math.min(cursorColumn + 1, row.text.length)
+      row.text = `${' '.repeat(deleteCount)}${row.text.slice(deleteCount)}`
+    } else if (mode === 2) {
+      row.text = ''
+    }
+  }
+
+  for (let index = 0; index < normalizedChunk.length; index += 1) {
+    const char = normalizedChunk[index]
+    if (char === '\n') {
+      ensureCursorRow()
+      rows[cursorRow]!.completed = true
+      newCompleteLines += 1
+      cursorRow += 1
+      cursorColumn = 0
+      ensureCursorRow()
+      trimRows()
+      continue
+    }
+    if (char === '\r') {
+      cursorColumn = 0
+      continue
+    }
+    if (char === '\u0008') {
+      cursorColumn = Math.max(0, cursorColumn - 1)
+      continue
+    }
+    if (char === '\u001b') {
+      const parsed = parseAnsiControlSequence(normalizedChunk, index)
+      if (!parsed) {
+        continue
+      }
+      index = parsed.endIndex
+      if (parsed.kind !== 'csi' || !hasCanonicalNumericCsiParams(parsed.params)) {
+        continue
+      }
+      const firstParam = parsed.firstParam ?? 1
+      if (parsed.final === 'A') {
+        cursorRow = Math.max(0, cursorRow - firstParam)
+        rows.splice(cursorRow + 1)
+      } else if (parsed.final === 'K') {
+        eraseLine(parsed.firstParam ?? 0)
+      } else if (parsed.final === 'G' || parsed.final === '`') {
+        moveCursorToColumn(firstParam - 1)
+      } else if (parsed.final === 'D') {
+        cursorColumn = Math.max(0, cursorColumn - firstParam)
+      } else if (parsed.final === 'C') {
+        moveCursorToColumn(cursorColumn + firstParam)
+      }
+      continue
+    }
+    writeChar(char)
+  }
+
+  return finalizeRetainedTerminalRows(rows, cursorRow, cursorColumn, truncated, newCompleteLines)
+}
+
+type RetainedTailRedrawCursor = {
+  rowFromEnd: number
+  column: number
+}
+
+type RetainedTerminalRow = {
+  text: string
+  completed: boolean
+}
+
+function finalizeRetainedTerminalRows(
+  rows: RetainedTerminalRow[],
+  cursorRow: number,
+  cursorColumn: number,
+  initialTruncated: boolean,
+  newCompleteLines: number
+): {
+  lines: string[]
+  partialLine: string
+  redrawCursor: RetainedTailRedrawCursor | null
+  truncated: boolean
+  newCompleteLines: number
+} {
+  let truncated = initialTruncated
+  let retainedRows = rows.map((row) => ({ ...row, text: row.text.replace(/[ \t]+$/g, '') }))
+
+  if (retainedRows.length > MAX_TAIL_LINES + 1) {
+    const removeCount = retainedRows.length - (MAX_TAIL_LINES + 1)
+    retainedRows = retainedRows.slice(removeCount)
+    cursorRow = Math.max(0, cursorRow - removeCount)
+    truncated = true
+  }
+
+  let totalChars = retainedRows.reduce((sum, row) => sum + row.text.length, 0)
+  let trimStartIndex = 0
+  while (trimStartIndex < retainedRows.length - 1 && totalChars > MAX_TAIL_CHARS) {
+    totalChars -= retainedRows[trimStartIndex]!.text.length
+    trimStartIndex += 1
+  }
+  if (trimStartIndex > 0) {
+    retainedRows = retainedRows.slice(trimStartIndex)
+    cursorRow = Math.max(0, cursorRow - trimStartIndex)
+    truncated = true
+  }
+  while (
+    retainedRows.length > 1 &&
+    cursorRow < retainedRows.length - 1 &&
+    retainedRows.at(-1)?.completed === false &&
+    retainedRows.at(-1)?.text.length === 0
+  ) {
+    retainedRows.pop()
+  }
+
+  const lastRow = retainedRows.at(-1)
+  let partialLine = lastRow && !lastRow.completed ? lastRow.text : ''
+  let lines = (lastRow && !lastRow.completed ? retainedRows.slice(0, -1) : retainedRows).map(
+    (row) => row.text
+  )
+
+  if (partialLine.length > MAX_TAIL_PARTIAL_CHARS) {
+    partialLine = partialLine.slice(-MAX_TAIL_PARTIAL_CHARS)
+    truncated = true
+  }
+  if (lines.length > MAX_TAIL_LINES) {
+    lines = lines.slice(lines.length - MAX_TAIL_LINES)
+    truncated = true
+  }
+  const outputRowCount = lines.length + 1
+  const defaultCursorRow = outputRowCount - 1
+  const defaultCursorColumn = partialLine.length
+  const redrawCursor =
+    cursorRow === defaultCursorRow && cursorColumn === defaultCursorColumn
+      ? null
+      : {
+          rowFromEnd: Math.max(0, outputRowCount - 1 - cursorRow),
+          column: clampTerminalPreviewCursor(cursorColumn)
+        }
+
+  return {
+    lines,
+    partialLine,
+    redrawCursor,
+    truncated,
+    newCompleteLines
+  }
+}
+
+function splitRetainedTerminalTailSegments(value: string): {
+  completeSegments: string[]
+  partialSegment: string
+  completeLineCount: number
+} {
+  let completeLineCount = 0
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] === '\n') {
+      completeLineCount += 1
+    }
+  }
+
+  const retainedCompleteCount = Math.min(completeLineCount, MAX_TAIL_LINES)
+  const omittedCompleteCount = completeLineCount - retainedCompleteCount
+  let startIndex = 0
+  if (omittedCompleteCount > 0) {
+    let seen = 0
+    for (let index = 0; index < value.length; index += 1) {
+      if (value[index] !== '\n') {
+        continue
+      }
+      seen += 1
+      if (seen === omittedCompleteCount) {
+        startIndex = index + 1
+        break
+      }
+    }
+  }
+
+  const completeSegments: string[] = []
+  let segmentStart = startIndex
+  for (let index = startIndex; index < value.length; index += 1) {
+    if (value[index] !== '\n') {
+      continue
+    }
+    completeSegments.push(value.slice(segmentStart, index))
+    segmentStart = index + 1
+  }
+
+  return {
+    completeSegments,
+    partialSegment: value.slice(segmentStart),
+    completeLineCount
+  }
+}
+
+function processTerminalTailCompleteSegments(segments: string[]): string[] {
+  const processed: string[] = []
+  let totalChars = 0
+  for (let index = segments.length - 1; index >= 0; index -= 1) {
+    const line = applyTerminalLineControls(segments[index]!).text
+    processed.push(line)
+    totalChars += line.length
+    if (totalChars > MAX_TAIL_CHARS) {
+      break
+    }
+  }
+  processed.reverse()
+  return processed
+}
+
+function applyTerminalLineControls(line: string): {
+  text: string
+  cursorColumn: number
+  hadControl: boolean
+} {
   const carriageIndex = line.lastIndexOf('\r')
   const latestRedraw = carriageIndex >= 0 ? line.slice(carriageIndex + 1) : line
   if (!latestRedraw.includes('\u0008') && !latestRedraw.includes('\u001b')) {
-    return latestRedraw
+    return {
+      text: latestRedraw,
+      cursorColumn: latestRedraw.length,
+      hadControl: carriageIndex >= 0
+    }
   }
 
   const chars: string[] = []
   let cursor = 0
+  const moveCursorTo = (nextCursor: number): void => {
+    cursor = clampTerminalPreviewCursor(nextCursor)
+  }
   const writeChar = (char: string): void => {
+    if (cursor > chars.length) {
+      const oldLength = chars.length
+      chars.length = cursor
+      chars.fill(' ', oldLength, cursor)
+    }
     if (cursor >= chars.length) {
       chars.push(char)
     } else {
@@ -20937,36 +21632,45 @@ function applyTerminalLineControls(line: string): string {
       if (parsed.kind !== 'csi') {
         continue
       }
+      if (!hasCanonicalNumericCsiParams(parsed.params)) {
+        continue
+      }
       if (parsed.final === 'K') {
         const mode = parsed.firstParam ?? 0
         if (mode === 0) {
           chars.length = cursor
         } else if (mode === 1) {
-          chars.splice(0, cursor)
-          cursor = 0
-        } else if (mode === 2 || mode === 3) {
+          const deleteCount = Math.min(cursor + 1, chars.length)
+          chars.fill(' ', 0, deleteCount)
+        } else if (mode === 2) {
           chars.length = 0
-          cursor = 0
         }
       } else if (parsed.final === 'G' || parsed.final === '`') {
-        cursor = Math.min(chars.length, Math.max(0, (parsed.firstParam ?? 1) - 1))
+        moveCursorTo((parsed.firstParam ?? 1) - 1)
       } else if (parsed.final === 'D') {
         cursor = Math.max(0, cursor - (parsed.firstParam ?? 1))
       } else if (parsed.final === 'C') {
-        cursor = Math.min(chars.length, cursor + (parsed.firstParam ?? 1))
+        moveCursorTo(cursor + (parsed.firstParam ?? 1))
       }
     } else {
       writeChar(char)
     }
   }
-  return chars.join('')
+  return { text: chars.join(''), cursorColumn: cursor, hadControl: true }
+}
+
+function clampTerminalPreviewCursor(nextCursor: number): number {
+  if (!Number.isFinite(nextCursor)) {
+    return MAX_TAIL_PARTIAL_CHARS
+  }
+  return Math.min(MAX_TAIL_PARTIAL_CHARS, Math.max(0, Math.floor(nextCursor)))
 }
 
 function parseAnsiControlSequence(
   value: string,
   escapeIndex: number
 ):
-  | { kind: 'csi'; final: string; firstParam: number | null; endIndex: number }
+  | { kind: 'csi'; final: string; params: string; firstParam: number | null; endIndex: number }
   | {
       kind: 'other'
       endIndex: number
@@ -20980,10 +21684,11 @@ function parseAnsiControlSequence(
         continue
       }
       const params = value.slice(escapeIndex + 2, index)
-      const firstParamMatch = /^\??(\d+)/.exec(params)
+      const firstParamMatch = /^(\d+)/.exec(params)
       return {
         kind: 'csi',
         final: value[index] ?? '',
+        params,
         firstParam: firstParamMatch ? Number(firstParamMatch[1]) : null,
         endIndex: index
       }
@@ -21016,16 +21721,43 @@ function isStTerminatedStringControlIntroducer(introducer: string | undefined): 
   return introducer === 'P' || introducer === 'X' || introducer === '^' || introducer === '_'
 }
 
+function hasCanonicalNumericCsiParams(params: string): boolean {
+  return /^[0-9;]*$/.test(params)
+}
+
+function containsTerminalVerticalLineControl(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] !== '\u001b') {
+      continue
+    }
+    const parsed = parseAnsiControlSequence(value, index)
+    if (!parsed) {
+      return false
+    }
+    index = parsed.endIndex
+    if (
+      parsed.kind === 'csi' &&
+      parsed.final === 'A' &&
+      hasCanonicalNumericCsiParams(parsed.params)
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
 function tailStateMatches(
   lines: string[],
   partialLine: string,
   pendingAnsi: string,
+  redrawCursor: RetainedTailRedrawCursor | null,
   truncated: boolean,
   linesTotal: number,
   snapshot: {
     lines: string[]
     partialLine: string
     pendingAnsi: string
+    redrawCursor: RetainedTailRedrawCursor | null
     truncated: boolean
     linesTotal: number
   }
@@ -21033,6 +21765,7 @@ function tailStateMatches(
   if (
     partialLine !== snapshot.partialLine ||
     pendingAnsi !== snapshot.pendingAnsi ||
+    !tailRedrawCursorsMatch(redrawCursor, snapshot.redrawCursor) ||
     truncated !== snapshot.truncated ||
     linesTotal !== snapshot.linesTotal ||
     lines.length !== snapshot.lines.length
@@ -21048,6 +21781,19 @@ function tailStateMatches(
     }
   }
   return true
+}
+
+function tailRedrawCursorsMatch(
+  left: RetainedTailRedrawCursor | null,
+  right: RetainedTailRedrawCursor | null
+): boolean {
+  if (left === right) {
+    return true
+  }
+  if (!left || !right) {
+    return false
+  }
+  return left.rowFromEnd === right.rowFromEnd && left.column === right.column
 }
 
 function buildTailLines(lines: string[], partialLine: string): string[] {
@@ -21233,6 +21979,15 @@ function buildSendPayload(action: {
   return payload.length > 0 ? payload : null
 }
 
+async function assertTerminalInputWithinLimitWithYield(text: string | undefined): Promise<void> {
+  if (!text) {
+    return
+  }
+  if (await isTerminalInputTooLargeWithYield(text)) {
+    throw new Error(TERMINAL_INPUT_TOO_LARGE_ERROR)
+  }
+}
+
 // Why: tui-idle relies on recognized agent CLIs setting OSC titles. If the
 // terminal runs an unsupported CLI (or a plain shell), no title transition
 // will ever fire. A 5-minute ceiling prevents indefinite hangs while still
@@ -21325,27 +22080,45 @@ function findAntigravityReadyPromptIndex(normalized: string): number | null {
   if (headerIndex === -1) {
     return null
   }
-  const readySegment = normalized.slice(headerIndex)
-  const lines = readySegment.split('\n')
-  let offset = 0
+  let lineStart = headerIndex
   let modelIndex: number | null = null
   let promptIndex: number | null = null
 
-  for (const line of lines) {
-    const trimmed = line.trim()
-    const lineIndex = headerIndex + offset
-    if (lineIndex > headerIndex && trimmed.length > 0) {
-      if (modelIndex === null && trimmed.startsWith('gemini')) {
-        modelIndex = lineIndex + line.indexOf(trimmed)
+  // Why: ready previews can include echoed pasted output after the header;
+  // scan line bounds directly instead of splitting the whole terminal tail.
+  for (let cursor = headerIndex; cursor <= normalized.length; cursor += 1) {
+    if (cursor < normalized.length && normalized.charCodeAt(cursor) !== 10) {
+      continue
+    }
+    let trimmedStart = lineStart
+    let trimmedEnd = cursor
+    while (trimmedStart < trimmedEnd && isTerminalWaitWhitespace(normalized, trimmedStart)) {
+      trimmedStart += 1
+    }
+    while (trimmedEnd > trimmedStart && isTerminalWaitWhitespace(normalized, trimmedEnd - 1)) {
+      trimmedEnd -= 1
+    }
+    if (lineStart > headerIndex && trimmedStart < trimmedEnd) {
+      if (modelIndex === null && normalized.startsWith('gemini', trimmedStart)) {
+        modelIndex = trimmedStart
       }
-      if (promptIndex === null && trimmed === '>') {
-        promptIndex = lineIndex + line.indexOf('>')
+      if (
+        promptIndex === null &&
+        trimmedEnd - trimmedStart === 1 &&
+        normalized.charCodeAt(trimmedStart) === 62
+      ) {
+        promptIndex = trimmedStart
       }
     }
-    offset += line.length + 1
+    lineStart = cursor + 1
   }
 
   return modelIndex !== null && promptIndex !== null ? Math.max(modelIndex, promptIndex) : null
+}
+
+function isTerminalWaitWhitespace(value: string, index: number): boolean {
+  const code = value.charCodeAt(index)
+  return code === 32 || (code >= 9 && code <= 13)
 }
 
 function findTerminalWaitBlockedSignal(
@@ -21640,36 +22413,61 @@ function normalizeTerminalChunk(
     return { text: chunk, pendingAnsi: '' }
   }
   const combined = `${pendingAnsi}${chunk}`
-  let text = ''
+  const parts: string[] = []
+  let textStart = 0
   for (let index = 0; index < combined.length; index += 1) {
     const char = combined[index]
     if (char === '\x1b') {
+      appendTerminalNormalizedSpan(parts, combined, textStart, index)
       if (index + 1 >= combined.length) {
-        return { text, pendingAnsi: combined.slice(index) }
+        return { text: parts.join(''), pendingAnsi: combined.slice(index) }
       }
       const parsed = parseAnsiControlSequence(combined, index)
       if (!parsed) {
         return {
-          text,
+          text: parts.join(''),
           pendingAnsi: trimPendingAnsiControl(combined.slice(index))
         }
       }
+      if (parsed.kind === 'csi' && isTerminalPreviewLineControl(parsed)) {
+        // Why: Codex can redraw status text with ANSI controls but no CR; keep
+        // those controls so the tail buffer overwrites the previous frame.
+        parts.push(combined.slice(index, parsed.endIndex + 1))
+      }
       index = parsed.endIndex
+      textStart = index + 1
       continue
     }
     if (char === '\r' && combined[index + 1] === '\n') {
-      text += '\n'
+      appendTerminalNormalizedSpan(parts, combined, textStart, index)
+      parts.push('\n')
       index += 1
+      textStart = index + 1
       continue
     }
     const code = combined.charCodeAt(index)
     if (code === 0x08 || code === 0x09 || code === 0x0a || code === 0x0d) {
-      text += char
-    } else if (isTerminalPreviewPrintableCodeUnit(code)) {
-      text += char
+      appendTerminalNormalizedSpan(parts, combined, textStart, index)
+      parts.push(char)
+      textStart = index + 1
+    } else if (!isTerminalPreviewPrintableCodeUnit(code)) {
+      appendTerminalNormalizedSpan(parts, combined, textStart, index)
+      textStart = index + 1
     }
   }
-  return { text, pendingAnsi: '' }
+  appendTerminalNormalizedSpan(parts, combined, textStart, combined.length)
+  return { text: parts.join(''), pendingAnsi: '' }
+}
+
+function appendTerminalNormalizedSpan(
+  parts: string[],
+  value: string,
+  start: number,
+  end: number
+): void {
+  if (end > start) {
+    parts.push(value.slice(start, end))
+  }
 }
 
 function isTerminalPreviewPrintableCodeUnit(code: number): boolean {
@@ -21700,6 +22498,27 @@ function trimPendingAnsiControl(value: string): string {
   const introducer = value.slice(0, Math.min(2, value.length))
   const suffixBudget = Math.max(0, MAX_TAIL_PENDING_ANSI_CHARS - introducer.length)
   return `${introducer}${value.slice(-suffixBudget)}`
+}
+
+function isTerminalPreviewLineControl(parsed: {
+  final: string
+  params: string
+  firstParam: number | null
+}): boolean {
+  if (!hasCanonicalNumericCsiParams(parsed.params)) {
+    return false
+  }
+  if (parsed.final === 'K') {
+    const mode = parsed.firstParam ?? 0
+    return mode === 0 || mode === 1 || mode === 2
+  }
+  return (
+    parsed.final === 'A' ||
+    parsed.final === 'G' ||
+    parsed.final === '`' ||
+    parsed.final === 'D' ||
+    parsed.final === 'C'
+  )
 }
 
 function maxTimestamp(left: number | null, right: number | null): number | null {

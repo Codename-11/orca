@@ -1,5 +1,6 @@
 /* eslint-disable max-lines */
 import React, { useMemo, useCallback, useRef, useState, useEffect, useLayoutEffect } from 'react'
+import { toast } from 'sonner'
 import {
   measureElement as measureVirtualElementSize,
   useVirtualizer
@@ -129,6 +130,7 @@ import {
   type ScrollToCurrentWorkspaceRevealRequestDetail
 } from '@/lib/scroll-to-current-workspace-status'
 import { isRepoHeaderActionTarget, useRepoHeaderDrag } from './project-header-drag'
+import { getSidebarOrderedRepoHeaderIdsByBucket } from './project-header-drop'
 import {
   buildManualOrderUpdatesForGroupDrop,
   buildManualOrderUpdatesForVisibleGroups,
@@ -214,6 +216,7 @@ import {
   showImportedWorktreesCard,
   type ImportedWorktreeCardActionState
 } from './imported-worktrees-card-actions'
+import { getEligibleWorktreeParents } from './worktree-parent-candidates'
 import { buildImportedWorktreesCardCandidates } from './imported-worktrees-card-candidates'
 import {
   WORKTREE_SECTION_HEADER_PADDING_LEFT,
@@ -230,7 +233,6 @@ import { useHostHeaderDrag } from './host-header-drag'
 import { buildSidebarHostOptions } from './sidebar-host-options'
 import { HostSectionHeaderMenu } from './HostSectionHeaderMenu'
 import { ProjectHeaderActions } from './ProjectHeaderActions'
-import { toast } from 'sonner'
 import { translate } from '@/i18n/i18n'
 import { folderWorkspaceKey } from '../../../../shared/workspace-scope'
 import { getHostDisplayLabelOverrides } from '../../../../shared/host-setting-overrides'
@@ -363,6 +365,14 @@ function stopNestedWorktreeCardBubble(event: React.SyntheticEvent<HTMLElement>):
 }
 
 function handleRepoHeaderActionPointerDown(event: React.PointerEvent<HTMLElement>): void {
+  event.stopPropagation()
+}
+
+function handleRepoHeaderCollapseAffordancePointerDown(
+  event: React.PointerEvent<HTMLElement>
+): void {
+  // Why: repo-header drag arms from the row press surface; keep collapse
+  // clicks on the hover chevron from promoting into a drag session.
   event.stopPropagation()
 }
 
@@ -800,11 +810,11 @@ function areWorktreeDragPreviewOffsetsEqual(
 
 function updateLatestWorktreeStatusDropTarget(
   drag: WorktreePointerDrag,
-  target: WorktreeSidebarStatusDropTarget,
+  target: WorktreeSidebarStatusDropTarget & { lineageParentId: string | null },
   preview: WorktreeSidebarDropPreview | null
 ): void {
   drag.latestStatusDropTarget =
-    target.status || target.isPinDrop
+    target.status || target.isPinDrop || target.lineageParentId
       ? {
           target,
           preview,
@@ -823,14 +833,19 @@ function getPointerDropStatusTarget(args: {
   container: HTMLElement
   x: number
   y: number
-}): WorktreeSidebarStatusDropTarget {
+}): WorktreeSidebarStatusDropTarget & { lineageParentId: string | null } {
   const target = document.elementFromPoint(args.x, args.y)
   if (!(target instanceof Element) || !args.container.contains(target)) {
-    return { status: null, isPinDrop: false }
+    return { status: null, isPinDrop: false, lineageParentId: null }
   }
   const pinTarget = target.closest<HTMLElement>('[data-workspace-pin-drop-target]')
   if (pinTarget && args.container.contains(pinTarget)) {
-    return { status: null, isPinDrop: true }
+    return { status: null, isPinDrop: true, lineageParentId: null }
+  }
+  const rowTarget = target.closest<HTMLElement>('[data-worktree-drag-id]')
+  let lineageParentId: string | null = null
+  if (rowTarget && args.container.contains(rowTarget)) {
+    lineageParentId = rowTarget.dataset.worktreeDragId ?? null
   }
   const statusTarget = target.closest<HTMLElement>('[data-workspace-status-drop-target]')
   return {
@@ -838,7 +853,8 @@ function getPointerDropStatusTarget(args: {
       statusTarget && args.container.contains(statusTarget)
         ? ((statusTarget.dataset.workspaceStatus as WorkspaceStatus | undefined) ?? null)
         : null,
-    isPinDrop: false
+    isPinDrop: false,
+    lineageParentId
   }
 }
 
@@ -1134,6 +1150,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   const directScrollInputUntilRef = useRef(0)
   const [dragOverStatus, setDragOverStatus] = useState<WorkspaceStatus | null>(null)
   const [pinDragOver, setPinDragOver] = useState(false)
+  const [nativeLineageDropTargetId, setNativeLineageDropTargetId] = useState<string | null>(null)
   const [worktreeDragState, setWorktreeDragState] = useState<WorktreeRowDragState>(
     WORKTREE_ROW_DRAG_INITIAL_STATE
   )
@@ -1143,6 +1160,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     null
   )
   const setRenamingWorktreeId = useAppStore((s) => s.setRenamingWorktreeId)
+  const assignWorktreeParent = useAppStore((s) => s.assignWorktreeParent)
   const worktreeDragSessionRef = useRef<WorktreeSidebarDragSession | null>(null)
   const worktreePointerDragRef = useRef<WorktreePointerDrag | null>(null)
   const worktreePointerAutoscrollFrameIdRef = useRef<number | null>(null)
@@ -1199,8 +1217,8 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   )
   const suppressWorktreeClickUntilRef = useRef(0)
   const hasProjectGroups = projectGroups.length > 0
-  const canReorderRepoHeaders =
-    groupBy === 'repo' && projectOrderBy === 'manual' && !hasProjectGroups
+  const canReorderRepoHeaders = groupBy === 'repo' && projectOrderBy === 'manual'
+  const moveProjectToGroup = useAppStore((s) => s.moveProjectToGroup)
   const lastVisibleRefreshKeyRef = useRef('')
   const reportVisibleGitHubPRRefreshCandidates = useAppStore(
     (s) => s.reportVisibleGitHubPRRefreshCandidates
@@ -1244,13 +1262,6 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     },
     [reorderRepos]
   )
-  // Drag is only meaningful when repo headers are using manual order. The
-  // controller is still constructed for hook order stability when inert.
-  const repoDrag = useRepoHeaderDrag({
-    orderedRepoIds: allRepoIds,
-    onCommit: commitRepoReorder,
-    getScrollContainer: () => scrollRef.current
-  })
   const orderedHostIds = useMemo(
     () =>
       rows
@@ -1377,6 +1388,48 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     [computeWorktreeDropForGroup]
   )
   const renderRows = useMemo(() => buildRenderableRows(rows), [rows])
+  const sidebarRepoHeaderIdsByBucket = useMemo(
+    () =>
+      getSidebarOrderedRepoHeaderIdsByBucket(
+        rows.filter((row): row is Row => row.type !== 'host-header')
+      ),
+    [rows]
+  )
+  const repoHeaderIndexByRepoId = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const repoIds of sidebarRepoHeaderIdsByBucket.values()) {
+      repoIds.forEach((repoId, index) => {
+        map.set(repoId, index)
+      })
+    }
+    return map
+  }, [sidebarRepoHeaderIdsByBucket])
+  const repoHeaderBucketByRepoId = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const [bucketKey, repoIds] of sidebarRepoHeaderIdsByBucket) {
+      for (const repoId of repoIds) {
+        map.set(repoId, bucketKey)
+      }
+    }
+    return map
+  }, [sidebarRepoHeaderIdsByBucket])
+  const commitProjectGroupOrder = useCallback(
+    (repoId: string, projectGroupId: string | null, order: number) => {
+      void moveProjectToGroup(repoId, projectGroupId, order)
+    },
+    [moveProjectToGroup]
+  )
+  // Drag is only meaningful when repo headers are using manual order. The
+  // controller is still constructed for hook order stability when inert.
+  const repoDrag = useRepoHeaderDrag({
+    orderedRepoIds: allRepoIds,
+    sidebarRepoHeaderIdsByBucket,
+    repoById: repoMap,
+    usesProjectGroupOrdering: hasProjectGroups,
+    onCommitRepoOrder: commitRepoReorder,
+    onCommitProjectGroupOrder: commitProjectGroupOrder,
+    getScrollContainer: () => scrollRef.current
+  })
   const [primaryActiveWorktreeRow, setPrimaryActiveWorktreeRow] = useState<{
     worktreeId: string
     rowKey: string
@@ -2141,6 +2194,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   const cleanupWorktreePointerDrag = useCallback(() => {
     const drag = worktreePointerDragRef.current
     cancelWorktreePointerAutoscroll()
+    setNativeLineageDropTargetId(null)
     if (!drag) {
       return
     }
@@ -2181,6 +2235,58 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
       clearRevealHighlightTimeout,
       clearWorktreeDrag
     ]
+  )
+
+  const getEligibleLineageDropTarget = useCallback(
+    (
+      target: WorktreeSidebarStatusDropTarget & { lineageParentId: string | null },
+      draggedIds: readonly string[]
+    ): WorktreeSidebarStatusDropTarget & { lineageParentId: string | null } => {
+      const parentId = target.lineageParentId
+      if (!parentId) {
+        return target
+      }
+      const canAssignAll = draggedIds.every((draggedId) => {
+        const child = worktreeMap.get(draggedId)
+        if (!child) {
+          return false
+        }
+        return getEligibleWorktreeParents({
+          child,
+          worktrees,
+          lineageById: worktreeLineageById,
+          worktreeMap,
+          repoMap
+        }).some((candidate) => candidate.id === parentId)
+      })
+      return canAssignAll ? target : { ...target, lineageParentId: null }
+    },
+    [repoMap, worktreeLineageById, worktreeMap, worktrees]
+  )
+
+  const commitWorktreeLineageParentDrop = useCallback(
+    (draggedIds: readonly string[], parentId: string): boolean => {
+      const target = getEligibleLineageDropTarget(
+        { status: null, isPinDrop: false, lineageParentId: parentId },
+        draggedIds
+      )
+      if (!target.lineageParentId) {
+        return false
+      }
+      void Promise.all(
+        draggedIds.map((id) => assignWorktreeParent(id, { parentWorktreeId: parentId }))
+      ).catch((err) => {
+        console.error('Failed to nest workspace:', err)
+        toast.error(
+          translate(
+            'auto.components.sidebar.WorktreeList.failedNestWorkspace',
+            'Failed to nest workspace'
+          )
+        )
+      })
+      return true
+    },
+    [assignWorktreeParent, getEligibleLineageDropTarget]
   )
 
   const flushWorktreePointerDrag = useCallback(() => {
@@ -2252,13 +2358,37 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     }
 
     const sidebarContainer = scrollRef.current
-    const preferredStatusTarget = sidebarContainer
-      ? getPointerDropStatusTarget({
-          container: sidebarContainer,
-          x: drag.currentX,
-          y: drag.currentY
-        })
-      : { status: null, isPinDrop: false }
+    const preferredStatusTarget = getEligibleLineageDropTarget(
+      sidebarContainer
+        ? getPointerDropStatusTarget({
+            container: sidebarContainer,
+            x: drag.currentX,
+            y: drag.currentY
+          })
+        : { status: null, isPinDrop: false, lineageParentId: null },
+      drag.draggedIds
+    )
+    if (preferredStatusTarget.lineageParentId) {
+      updateLatestWorktreeStatusDropTarget(drag, preferredStatusTarget, null)
+      clearWorkspaceKanbanSidebarDropTargetVisual()
+      setDragOverStatus(null)
+      setPinDragOver(false)
+      setWorktreeDragState((prev) =>
+        prev.dropIndex === null &&
+        prev.dropIndicatorY === null &&
+        prev.pointerY === drag.currentY &&
+        prev.previewOffsetsByWorktreeId.size === 0
+          ? prev
+          : {
+              ...prev,
+              dropIndex: null,
+              dropIndicatorY: null,
+              previewOffsetsByWorktreeId: EMPTY_WORKTREE_DRAG_PREVIEW_OFFSETS,
+              pointerY: drag.currentY
+            }
+      )
+      return
+    }
     if (
       shouldPreferSidebarStatusDropTarget({
         sourceGroupKey: drag.sourceGroupKey,
@@ -2381,6 +2511,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     refreshWorktreeDragSession,
     onWorkspaceBoardDragPreviewCommit,
     shouldShowWorkspaceBoardDropIndicator,
+    getEligibleLineageDropTarget,
     workspaceBoardOpen,
     workspaceStatuses
   ])
@@ -2614,13 +2745,21 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
           groups: getWorkspaceKanbanSidebarDropGroups()
         })
       } else {
-        const preferredStatusTarget = scrollRef.current
-          ? getPointerDropStatusTarget({
-              container: scrollRef.current,
-              x: event.clientX,
-              y: event.clientY
-            })
-          : { status: null, isPinDrop: false }
+        const preferredStatusTarget = getEligibleLineageDropTarget(
+          scrollRef.current
+            ? getPointerDropStatusTarget({
+                container: scrollRef.current,
+                x: event.clientX,
+                y: event.clientY
+              })
+            : { status: null, isPinDrop: false, lineageParentId: null },
+          drag.draggedIds
+        )
+        if (preferredStatusTarget.lineageParentId) {
+          commitWorktreeLineageParentDrop(drag.draggedIds, preferredStatusTarget.lineageParentId)
+          clearWorktreeDrag()
+          return
+        }
         if (
           shouldPreferSidebarStatusDropTarget({
             sourceGroupKey: drag.sourceGroupKey,
@@ -2680,7 +2819,9 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
             x: event.clientX,
             y: event.clientY
           })
-          if (target.isPinDrop) {
+          if (target.lineageParentId) {
+            commitWorktreeLineageParentDrop(drag.draggedIds, target.lineageParentId)
+          } else if (target.isPinDrop) {
             onPinWorktrees(drag.draggedIds)
           } else if (target.status) {
             if (statusDrop) {
@@ -2718,8 +2859,10 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   }, [
     beginWorktreePointerDrag,
     clearWorktreeDrag,
+    commitWorktreeLineageParentDrop,
     computeWorktreeDrop,
     computeWorktreeStatusDrop,
+    getEligibleLineageDropTarget,
     onMoveWorktreesToStatus,
     onMoveWorktreesToStatusAtIndex,
     onDropWorktreesOnWorkspaceBoard,
@@ -2901,13 +3044,37 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
         clearWorktreeDrag()
         return
       }
-      const drop = computeWorktreeDrop(event.clientY)
-      if (!drop) {
-        const target = getPointerDropStatusTarget({
+      const target = getEligibleLineageDropTarget(
+        getPointerDropStatusTarget({
           container: event.currentTarget,
           x: event.clientX,
           y: event.clientY
-        })
+        }),
+        session.draggedIds
+      )
+      if (target.lineageParentId) {
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'move'
+        setNativeLineageDropTargetId(target.lineageParentId)
+        setWorktreeDragState((prev) =>
+          prev.dropIndex === null &&
+          prev.dropIndicatorY === null &&
+          prev.previewOffsetsByWorktreeId.size === 0
+            ? prev
+            : {
+                ...prev,
+                dropIndex: null,
+                dropIndicatorY: null,
+                previewOffsetsByWorktreeId: EMPTY_WORKTREE_DRAG_PREVIEW_OFFSETS,
+                pointerY: event.clientY
+              }
+        )
+        return
+      }
+      setNativeLineageDropTargetId(null)
+
+      const drop = computeWorktreeDrop(event.clientY)
+      if (!drop) {
         const statusDrop = target.status
           ? computeWorktreeStatusDrop({
               pointerY: event.clientY,
@@ -2962,6 +3129,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
       clearWorktreeDrag,
       computeWorktreeDrop,
       computeWorktreeStatusDrop,
+      getEligibleLineageDropTarget,
       refreshWorktreeDragSession,
       startWorktreeNativeAutoscroll
     ]
@@ -2982,16 +3150,29 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
         clearWorktreeDrag()
         return
       }
-      const drop = computeWorktreeDrop(event.clientY)
-      if (!drop) {
-        const container = scrollRef.current
-        const target = container
+
+      const container = scrollRef.current
+      const target = getEligibleLineageDropTarget(
+        container
           ? getPointerDropStatusTarget({
               container,
               x: event.clientX,
               y: event.clientY
             })
-          : { status: null, isPinDrop: false }
+          : { status: null, isPinDrop: false, lineageParentId: null },
+        session.draggedIds
+      )
+
+      if (target.lineageParentId) {
+        event.preventDefault()
+        event.stopPropagation()
+        commitWorktreeLineageParentDrop(session.draggedIds, target.lineageParentId)
+        clearWorktreeDrag()
+        return
+      }
+
+      const drop = computeWorktreeDrop(event.clientY)
+      if (!drop) {
         const statusDrop = target.status
           ? computeWorktreeStatusDrop({
               pointerY: event.clientY,
@@ -3029,8 +3210,10 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     },
     [
       clearWorktreeDrag,
+      commitWorktreeLineageParentDrop,
       computeWorktreeDrop,
       computeWorktreeStatusDrop,
+      getEligibleLineageDropTarget,
       onMoveWorktreesToStatusAtIndex,
       onReorderWorktrees,
       refreshWorktreeDragSession,
@@ -3222,13 +3405,23 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
       const drop = computeWorktreeDrop(event.clientY)
       if (!drop) {
         const container = scrollRef.current
-        const target = container
-          ? getPointerDropStatusTarget({
-              container,
-              x: event.clientX,
-              y: event.clientY
-            })
-          : { status: null, isPinDrop: false }
+        const target = getEligibleLineageDropTarget(
+          container
+            ? getPointerDropStatusTarget({
+                container,
+                x: event.clientX,
+                y: event.clientY
+              })
+            : { status: null, isPinDrop: false, lineageParentId: null },
+          session.draggedIds
+        )
+        if (target.lineageParentId) {
+          event.preventDefault()
+          event.stopPropagation()
+          commitWorktreeLineageParentDrop(session.draggedIds, target.lineageParentId)
+          clearWorktreeDrag()
+          return
+        }
         const statusDrop = target.status
           ? computeWorktreeStatusDrop({
               pointerY: event.clientY,
@@ -3273,8 +3466,10 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     return () => document.removeEventListener('drop', handleDocumentDrop, true)
   }, [
     clearWorktreeDrag,
+    commitWorktreeLineageParentDrop,
     computeWorktreeDrop,
     computeWorktreeStatusDrop,
+    getEligibleLineageDropTarget,
     onMoveWorktreesToStatusAtIndex,
     onReorderWorktrees,
     refreshWorktreeDragSession,
@@ -3450,6 +3645,21 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
               const isRepoHeader = groupBy === 'repo' && row.repo !== undefined
               const isProjectGroupHeader = groupBy === 'repo' && row.projectGroup !== undefined
               const projectIdForHeader = isRepoHeader ? row.repo!.id : undefined
+              const repoHeaderIndex =
+                projectIdForHeader !== undefined
+                  ? repoHeaderIndexByRepoId.get(projectIdForHeader)
+                  : undefined
+              const repoHeaderBucketKey =
+                projectIdForHeader !== undefined
+                  ? repoHeaderBucketByRepoId.get(projectIdForHeader)
+                  : undefined
+              const isDraggableRepoHeader = Boolean(
+                canReorderRepoHeaders &&
+                isRepoHeader &&
+                projectIdForHeader &&
+                repoHeaderBucketKey &&
+                (sidebarRepoHeaderIdsByBucket.get(repoHeaderBucketKey)?.length ?? 0) > 1
+              )
               const isDraggingThis =
                 canReorderRepoHeaders &&
                 repoDrag.state.draggingRepoId !== null &&
@@ -3488,6 +3698,11 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                 (isConfirmedStaleFolderPathStatus(projectGroupPathStatus) ||
                   projectGroupPathStatus.reason === 'ambiguous-connection')
               const projectGroupDepth = row.projectGroupDepth ?? 0
+              const isHeaderCollapsed = collapsedGroups.has(row.key)
+              // Why: repo/project headers already reveal actions on hover; tuck
+              // the collapse chevron into that cluster instead of a new surface.
+              const showHeaderCollapseAffordance =
+                row.count > 0 && (isRepoHeader || isProjectGroupHeader)
               // Why: non-project section headers like "All" are labels for the
               // flat list, so they should not reserve project hierarchy indent.
               const headerPaddingLeft =
@@ -3500,6 +3715,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                   role="presentation"
                   data-worktree-virtual-row
                   data-worktree-virtual-row-key={String(vItem.key)}
+                  data-worktree-virtual-row-start={vItem.start}
                   data-worktree-sticky-header=""
                   data-worktree-sticky-header-active={isActiveStickyHeader ? '' : undefined}
                   data-index={vItem.index}
@@ -3525,7 +3741,10 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                   <div
                     role="button"
                     tabIndex={0}
+                    aria-expanded={showHeaderCollapseAffordance ? !isHeaderCollapsed : undefined}
                     data-repo-header-id={projectIdForHeader}
+                    data-repo-header-index={repoHeaderIndex}
+                    data-repo-header-bucket={repoHeaderBucketKey}
                     data-workspace-status-drop-target={headerWorkspaceStatus ? '' : undefined}
                     data-workspace-status={headerWorkspaceStatus ?? undefined}
                     data-workspace-pin-drop-target={isPinnedHeader ? '' : undefined}
@@ -3543,16 +3762,6 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                       row.repo && 'overflow-hidden'
                     )}
                     style={{ paddingLeft: headerPaddingLeft }}
-                    // Why: arm project-header drag from anywhere on the row, not
-                    // just the icon — users grab the name to reorder. The hook
-                    // ignores presses on nested buttons (+/chevron) and only
-                    // promotes to a drag past a 4px threshold, so a plain click
-                    // still toggles collapse via onClick.
-                    onPointerDown={
-                      canReorderRepoHeaders && isRepoHeader && projectIdForHeader
-                        ? (e) => repoDrag.onHandlePointerDown(e, projectIdForHeader)
-                        : undefined
-                    }
                     onDragOver={
                       isPinnedHeader
                         ? handleWorkspacePinDragOver
@@ -3590,10 +3799,17 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                   >
                     {row.icon ? (
                       <div
+                        data-repo-header-drag-handle={isDraggableRepoHeader ? '' : undefined}
                         className={cn(
                           'flex size-4 shrink-0 items-center justify-center rounded-[4px]',
-                          repoHeaderColor ? 'text-muted-foreground' : row.tone
+                          repoHeaderColor ? 'text-muted-foreground' : row.tone,
+                          isDraggableRepoHeader && 'hover:cursor-grab active:cursor-grabbing'
                         )}
+                        onPointerDown={
+                          isDraggableRepoHeader && projectIdForHeader
+                            ? (event) => repoDrag.onHandlePointerDown(event, projectIdForHeader)
+                            : undefined
+                        }
                       >
                         {row.repo ? (
                           <RepoIconGlyph
@@ -3619,6 +3835,27 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                     </div>
 
                     <ProjectHeaderActions>
+                      {showHeaderCollapseAffordance ? (
+                        <div
+                          className="flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
+                          data-repo-header-collapse-affordance=""
+                          aria-hidden
+                          onPointerDown={handleRepoHeaderCollapseAffordancePointerDown}
+                          onClick={(event) => {
+                            event.preventDefault()
+                            event.stopPropagation()
+                            toggleGroupWithScrollAnchor(row.key)
+                          }}
+                        >
+                          <ChevronDown
+                            className={cn(
+                              'size-3.5 transition-transform',
+                              isHeaderCollapsed && '-rotate-90'
+                            )}
+                          />
+                        </div>
+                      ) : null}
+
                       {isProjectGroupHeader && !row.repo && row.projectGroup?.id ? (
                         <DropdownMenu modal={false}>
                           <DropdownMenuTrigger asChild>
@@ -4018,6 +4255,11 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
               const worktreeDragGroupIndex = groupIndexByRowKey.get(itemRow.rowKey)
               const revealHighlightTone =
                 agentSendTargetWorktreeId === itemRow.worktree.id ? 'ai' : 'default'
+              const isLineageDropTarget =
+                worktreeDragState.draggingWorktreeId &&
+                (worktreePointerDragRef.current?.latestStatusDropTarget?.target.lineageParentId ===
+                  itemRow.worktree.id ||
+                  nativeLineageDropTargetId === itemRow.worktree.id)
               const isPinnedOverlayRow = itemRow.sectionKey === PINNED_GROUP_KEY
               const isActiveWorktree = activeWorktreeId === itemRow.worktree.id
               const activeSurfaceVariant = getActiveSurfaceVariant(itemRow)
@@ -4077,6 +4319,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                     revealHighlightTone={revealHighlightTone}
                     selectedWorktrees={selectedWorktrees}
                     nativeDragEnabled={false}
+                    isLineageDropTarget={Boolean(isLineageDropTarget)}
                     contentIndent={cardContentIndent}
                     flushSurface
                     activationRowKey={itemRow.rowKey}
