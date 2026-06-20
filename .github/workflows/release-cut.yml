@@ -913,7 +913,7 @@ jobs:
           retry_wait_seconds: 30
           command: ${{ matrix.release_command }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.AXIOM_AUTOMATION_TOKEN || github.token }}
 
       - name: Upload unsigned Windows installer for SignPath
         if: matrix.platform == 'win'
