@@ -34,7 +34,8 @@ vi.mock('../git/worktree', () => ({
       isBare: false,
       isMainWorktree: false
     }
-  ])
+  ]),
+  listWorktreesStrict: vi.fn().mockResolvedValue([])
 }))
 
 async function sendRequest(

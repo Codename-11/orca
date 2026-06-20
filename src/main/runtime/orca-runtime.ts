@@ -33,6 +33,7 @@ import {
   createAgentStatusOscProcessor,
   type ProcessedAgentStatusChunk
 } from '../../shared/agent-status-osc'
+import { buildOrchestrationTaskDisplayMetadata } from '../../shared/orchestration-task-display'
 import {
   isTerminalInputTooLargeWithYield,
   TERMINAL_INPUT_TOO_LARGE_ERROR,
@@ -344,6 +345,7 @@ import {
   listLabels,
   listAssignableUsers
 } from '../github/client'
+import type { GitHubPRBranchLookupOptions } from '../github/client'
 import { resolveGitHubPrStartPoint } from '../github/pr-start-point'
 import { fetchPrHeadTrackingRef } from '../github/pr-head-tracking-ref'
 import { getWorkItemDetails, getPRFileContents } from '../github/work-item-details'
@@ -562,6 +564,7 @@ import {
 import { hasLocalCommitObject } from '../git/commit-object-ref'
 import {
   listWorktrees,
+  listWorktreesStrict,
   addWorktree,
   addSparseWorktree,
   assertWorktreeCleanForRemoval,
@@ -9224,12 +9227,16 @@ export class OrcaRuntimeService {
       if (!worktreeId || !summaries.has(worktreeId)) {
         continue
       }
+      const taskTitle = orchestrationByPaneKey?.[src.paneKey]?.taskTitle ?? null
+      const displayName = orchestrationByPaneKey?.[src.paneKey]?.displayName ?? null
       const row: RuntimeWorktreeAgentRow = {
         paneKey: src.paneKey,
         parentPaneKey: orchestrationByPaneKey?.[src.paneKey]?.parentPaneKey ?? null,
         state: src.state,
         agentType: src.agentType,
         prompt: src.prompt,
+        taskTitle,
+        displayName,
         lastAssistantMessage: src.lastAssistantMessage,
         toolName: src.toolName,
         toolInput: src.toolInput,
@@ -10499,17 +10506,24 @@ export class OrcaRuntimeService {
     repoSelector: string,
     branch: string,
     linkedPRNumber?: number | null,
-    fallbackPRNumber?: number | null
+    fallbackPRNumber?: number | null,
+    acceptMergedFallbackPR?: boolean
   ): Promise<Awaited<ReturnType<typeof getPRForBranch>>> {
     const repo = await this.resolveRepoSelector(repoSelector)
-    const options = this.getHostedReviewExecutionOptions(repo)
+    const options: GitHubPRBranchLookupOptions = this.getHostedReviewExecutionOptions(repo) ?? {}
+    const lookupOptions = { ...options }
+    if (acceptMergedFallbackPR === true) {
+      lookupOptions.acceptMergedFallbackPR = true
+    }
+    const lookupOptionArgs: [] | [GitHubPRBranchLookupOptions] =
+      Object.keys(lookupOptions).length > 0 ? [lookupOptions] : []
     return getPRForBranch(
       repo.path,
       branch,
       linkedPRNumber ?? null,
       repo.connectionId ?? null,
       linkedPRNumber == null ? (fallbackPRNumber ?? null) : null,
-      options
+      ...lookupOptionArgs
     )
   }
 
@@ -14471,8 +14485,8 @@ export class OrcaRuntimeService {
       const registeredWorktrees = repo.connectionId
         ? await provider!.listWorktrees(repo.path)
         : hasLocalWorktreeGitOptions
-          ? await listWorktrees(repo.path, localWorktreeGitOptions)
-          : await listWorktrees(repo.path)
+          ? await listWorktreesStrict(repo.path, localWorktreeGitOptions)
+          : await listWorktreesStrict(repo.path)
       const removedMeta = store.getWorktreeMeta(removalTarget.id)
       const removedPushTarget = removedMeta?.pushTarget ?? removalTarget.pushTarget
       const registeredWorktree = findRegisteredDeletableWorktree(
@@ -14537,7 +14551,8 @@ export class OrcaRuntimeService {
               repo.path,
               removalTarget.id,
               removedPushTarget,
-              store
+              store,
+              localWorktreeGitOptions
             )
           }
           this.clearOptimisticReconcileToken(removalTarget.id)
@@ -14569,7 +14584,8 @@ export class OrcaRuntimeService {
                 repo.path,
                 removalTarget.id,
                 removedPushTarget,
-                store
+                store,
+                localWorktreeGitOptions
               ))
           this.clearOptimisticReconcileToken(removalTarget.id)
           this.removeWorktreeMetadataAndHistory(store, removalTarget.id)
@@ -14620,7 +14636,7 @@ export class OrcaRuntimeService {
           canonicalWorktreePath,
           repo,
           undefined,
-          this.getLocalGitExecutionOptionArgs(repo)[0]
+          hasLocalWorktreeGitOptions ? localWorktreeGitOptions : undefined
         )
         if (!result.success) {
           console.error(`[hooks] archive hook failed for ${canonicalWorktreePath}:`, result.output)
@@ -14681,15 +14697,15 @@ export class OrcaRuntimeService {
 
       let removalResult: RemoveWorktreeResult | undefined
       try {
-        const removeOptions = hasLocalWorktreeGitOptions
-          ? { ...(!deleteBranch ? { deleteBranch } : {}), ...localWorktreeGitOptions }
-          : !deleteBranch
-            ? { deleteBranch }
-            : undefined
+        const removeOptions = {
+          ...(!deleteBranch ? { deleteBranch } : {}),
+          // Why: removal already validated the Git row under the selected
+          // project runtime; keep branch cleanup on that same canonical row.
+          knownRemovedWorktree: registeredWorktree,
+          ...localWorktreeGitOptions
+        }
         removalResult = this.preserveBranchHeadFallback(
-          await (removeOptions
-            ? removeWorktree(repo.path, canonicalWorktreePath, force, removeOptions)
-            : removeWorktree(repo.path, canonicalWorktreePath, force)),
+          await removeWorktree(repo.path, canonicalWorktreePath, force, removeOptions),
           registeredWorktree.head
         )
       } catch (error) {
@@ -14718,10 +14734,10 @@ export class OrcaRuntimeService {
           // (`.git/worktrees/<name>`) is still intact. Without pruning, `git worktree
           // list` continues to show the stale entry and the branch it had checked out
           // remains locked — other worktrees cannot check it out.
-          await gitExecFileAsync(
-            ['worktree', 'prune'],
-            getLocalProjectGitExecOptions(this.requireStore(), repo)
-          ).catch(() => {})
+          await gitExecFileAsync(['worktree', 'prune'], {
+            cwd: repo.path,
+            ...localWorktreeGitOptions
+          }).catch(() => {})
           await cleanupUnusedWorktreePushTargetRemote(
             repo.path,
             removalTarget.id,
@@ -16777,7 +16793,13 @@ export class OrcaRuntimeService {
 
   private async listRepoWorktreesForResolution(repo: Repo): Promise<RuntimeWorktreeScanResult> {
     if (!repo.connectionId) {
-      return { ok: true, worktrees: await listRepoWorktrees(repo) }
+      return {
+        ok: true,
+        worktrees: await listRepoWorktrees(
+          repo,
+          getLocalProjectWorktreeGitOptions(this.requireStore(), repo)
+        )
+      }
     }
     const provider = getSshGitProvider(repo.connectionId)
     if (!provider) {
@@ -17759,6 +17781,14 @@ export class OrcaRuntimeService {
       return undefined
     }
     const task = db?.getTask?.(dispatch.task_id)
+    const display =
+      typeof task?.spec === 'string'
+        ? buildOrchestrationTaskDisplayMetadata({
+            spec: task.spec,
+            taskTitle: task.task_title,
+            displayName: task.display_name
+          })
+        : { taskTitle: '', displayName: '' }
     const activeRun = dispatch.status === 'completed' ? undefined : db?.getActiveCoordinatorRun?.()
     const parentTerminalHandle =
       task?.created_by_terminal_handle ??
@@ -17772,6 +17802,8 @@ export class OrcaRuntimeService {
     return {
       taskId: dispatch.task_id,
       dispatchId: dispatch.id,
+      ...(display.taskTitle ? { taskTitle: display.taskTitle } : {}),
+      ...(display.displayName ? { displayName: display.displayName } : {}),
       ...(parentTerminalHandle ? { parentTerminalHandle } : {}),
       ...(parentPaneKey ? { parentPaneKey } : {}),
       ...(activeRun?.coordinator_handle ? { coordinatorHandle: activeRun.coordinator_handle } : {}),
