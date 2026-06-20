@@ -222,6 +222,15 @@ async function addProjectFromSidebar(
   repoPath: string
 ): Promise<void> {
   await chooseFolderInNativeDialog(electronApp, repoPath)
+  // Why: startup/tour/setup-guide dialogs are not part of this flow, but they
+  // can be present for seeded existing-user states and intercept the sidebar
+  // add-project button across platforms. Dismiss one blocking modal before
+  // opening the actual Add Project dialog.
+  const existingDialog = page.getByRole('dialog').first()
+  if (await existingDialog.isVisible().catch(() => false)) {
+    await page.keyboard.press('Escape')
+    await expect(existingDialog).toBeHidden({ timeout: 5_000 })
+  }
   await page
     .getByRole('button', { name: /Add Project/i })
     .first()
