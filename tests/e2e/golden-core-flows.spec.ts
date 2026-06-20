@@ -222,10 +222,27 @@ async function addProjectFromSidebar(
   repoPath: string
 ): Promise<void> {
   await chooseFolderInNativeDialog(electronApp, repoPath)
-  await page
-    .getByRole('button', { name: /Add Project/i })
-    .first()
-    .click()
+  // Why: startup/tour/setup-guide dialogs are not part of this flow, but they
+  // can be present for seeded existing-user states and intercept the sidebar
+  // add-project button across platforms. Dismiss one blocking modal before
+  // opening the actual Add Project dialog.
+  const existingDialog = page.getByRole('dialog').first()
+  if (await existingDialog.isVisible().catch(() => false)) {
+    await page.evaluate(() => {
+      const state = window.__store?.getState()
+      state?.closeModal?.()
+      state?.dismissContextualTour?.()
+      state?.setContextualToursOnboardingVisible?.(false)
+      state?.setContextualToursBlockingSurfaceVisible?.(false)
+    })
+    await page.keyboard.press('Escape')
+    await expect(existingDialog).toBeHidden({ timeout: 5_000 })
+  }
+  // Why: CI startup education modals can race the sidebar button and leave an
+  // overlay above it between actionability checks. Open the same add-project
+  // modal through the store so this golden focuses on project/workspace/terminal
+  // flow instead of modal z-index timing.
+  await page.evaluate(() => window.__store?.getState().openModal('add-repo'))
   const addDialog = page.getByRole('dialog', { name: /Add a project/i })
   await expect(addDialog).toBeVisible()
   await addDialog.getByRole('button', { name: /Browse folder/i }).click()

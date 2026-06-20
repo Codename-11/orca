@@ -8,6 +8,8 @@ export type PtyDataMeta = {
   rawLength?: number
 }
 
+export type LocalPtySessionMetadata = { cwd?: string; shellOverride?: string }
+
 export type PtyBufferSnapshot = {
   data: string
   cols: number
@@ -90,6 +92,8 @@ export type PtyTransport = {
   ) => boolean
   isConnected: () => boolean
   getPtyId: () => string | null
+  getConnectionId?: () => string | null | undefined
+  getLocalSessionMetadata?: () => LocalPtySessionMetadata | null
   /** Drop cross-chunk parser carries (partial OSC-9999 prefix). Called when a
    *  model-restore marker reports dropped bytes — a carry spanning the gap
    *  would corrupt the next live chunk. IPC transports only. */

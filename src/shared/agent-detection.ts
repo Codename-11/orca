@@ -22,7 +22,11 @@ export {
   detectAgentStatusFromTitle,
   normalizeTerminalTitle
 } from './agent-title-status'
-export { extractAllOscTitles, extractLastOscTitle } from './terminal-osc-title'
+export {
+  extractAllOscTitles,
+  extractLastOscTitle,
+  MAX_OSC_TITLE_CHARS
+} from './osc-title-extraction'
 
 // Re-export so existing `agent-detection` importers keep working.
 export { AGENT_NAMES, titleHasAgentName } from './agent-name-token-match'

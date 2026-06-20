@@ -187,13 +187,11 @@ export function subscribeToPtyExit(ptyId: string, watcher: (code: number) => voi
   }
 }
 
-export {
-  getEagerPtyBufferHandle,
-  registerEagerPtyBuffer
-} from './pty-eager-buffer'
+export { getEagerPtyBufferHandle, registerEagerPtyBuffer } from './pty-eager-buffer'
 export type { EagerPtyHandle } from './pty-eager-buffer'
 export type {
   IpcPtyTransportOptions,
+  LocalPtySessionMetadata,
   PtyBufferSnapshot,
   PtyConnectResult,
   PtyDataMeta,
