@@ -18,6 +18,7 @@ import {
   waitForTerminalOutput
 } from './helpers/terminal'
 import { scrollActiveTerminalToText } from './artificial-opencode-active-terminal-scroll'
+import { nodeTerminalCommand } from './terminal-node-command'
 
 type BrowserTerminalPane = {
   terminal: {
@@ -525,8 +526,8 @@ test.describe('Terminal raw emoji table scroll restore repro', () => {
       const frameTailMarker = rawEmojiFixtureFrameTailMarker(runId)
       // Why: the fixture marker is the shell-readiness signal here; an extra
       // Ctrl+C/Ctrl+U preflight can race Windows ConPTY startup and eat input.
-      await sendToTerminal(orcaPage, ptyId, `node ${JSON.stringify(scriptPath)}\r`)
-// Why: Windows ConPTY can return the PowerShell prompt while xterm is
+      await sendToTerminal(orcaPage, ptyId, `${nodeTerminalCommand([scriptPath])}\r`)
+      // Why: Windows ConPTY can return the PowerShell prompt while xterm is
       // still flushing synchronized output if the pane is hidden immediately.
       // This golden is about restored table geometry, not shell-flush timing.
       await waitForTerminalOutput(orcaPage, completionMarker, 20_000, 30_000)
