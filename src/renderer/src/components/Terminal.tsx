@@ -2082,7 +2082,7 @@ function Terminal(): React.JSX.Element | null {
                     }
                     aria-hidden={!isVisible}
                   >
-                    <CodexRestartChip worktreeId={workspace.id} />
+                    <CodexRestartChip isVisible={isVisible} worktreeId={workspace.id} />
                     {(tabsByWorktree[workspace.id] ?? []).map((tab) => {
                       const activityTerminalPortal = findActivityTerminalPortal(
                         activityTerminalPortals,
@@ -2335,7 +2335,7 @@ const WorktreeSplitSurface = React.memo(function WorktreeSplitSurface({
       inert={!isVisible}
       aria-hidden={!isVisible}
     >
-      <CodexRestartChip worktreeId={worktreeId} />
+      <CodexRestartChip isVisible={isVisible} worktreeId={worktreeId} />
       <TabGroupSplitLayout
         layout={layout}
         worktreeId={worktreeId}

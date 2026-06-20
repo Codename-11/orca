@@ -194,6 +194,7 @@ export {
 export type { EagerPtyHandle } from './pty-eager-buffer'
 export type {
   IpcPtyTransportOptions,
+  LocalPtySessionMetadata,
   PtyBufferSnapshot,
   PtyConnectResult,
   PtyDataMeta,

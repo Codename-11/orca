@@ -507,9 +507,7 @@ function buildMirroredTerminalTabs(
       surfaces.find((surface) => surface.quickCommandLabel?.trim())?.quickCommandLabel?.trim() ||
       existing?.quickCommandLabel?.trim()
     const launchAgent =
-      activeSurface.launchAgent ??
-      surfaces.find((surface) => surface.launchAgent)?.launchAgent ??
-      existing?.launchAgent
+      activeSurface.launchAgent ?? surfaces.find((surface) => surface.launchAgent)?.launchAgent
     // Why: tab color/pin echo back through host snapshots, so prefer the client's
     // own record (kept authoritative in tabsByWorktree by the pin/color setters)
     // and fall back to the host value only when this client has no prior tab —
@@ -533,9 +531,8 @@ function buildMirroredTerminalTabs(
         isPinned,
         sortOrder: sortOffset + index,
         createdAt: existing?.createdAt ?? now + index,
-        // Why: runtime snapshots can omit launchAgent after the process settles;
-        // keep the client-side launch intent so completed remote tabs do not
-        // briefly lose their provider icon between host status snapshots.
+        // Why: launchAgent is host-owned lifecycle metadata. If the host stops
+        // publishing it, mirrored clients must not resurrect stale startup intent.
         ...(launchAgent ? { launchAgent } : {})
       },
       hostTabId: parentTabId,
@@ -673,26 +670,36 @@ function buildTerminalUnifiedTab(tab: TerminalTab, groupId: string): Tab {
   }
 }
 
-function buildBrowserUnifiedTab(tab: BrowserWorkspace, unifiedTabId: string, groupId: string): Tab {
+function buildBrowserUnifiedTab(
+  tab: BrowserWorkspace,
+  hostTab: RuntimeMobileSessionBrowserTab,
+  existingUnifiedTab: Tab | null,
+  groupId: string
+): Tab {
   return {
-    id: unifiedTabId,
+    id: existingUnifiedTab?.id ?? hostTab.id,
     entityId: tab.id,
     groupId,
     worktreeId: tab.worktreeId,
     contentType: 'browser',
     label: tab.title,
     customLabel: null,
-    color: null,
+    color: hostTab.color !== undefined ? hostTab.color : (existingUnifiedTab?.color ?? null),
     sortOrder: tab.createdAt,
     createdAt: tab.createdAt,
     isPreview: false,
-    isPinned: false
+    isPinned:
+      hostTab.isPinned !== undefined
+        ? hostTab.isPinned === true
+        : existingUnifiedTab?.isPinned === true
   }
 }
 
 function buildEditorUnifiedTab(
   file: OpenFile,
+  tab: ReadyEditorSurface,
   hostTabId: string,
+  existingUnifiedTab: Tab | null,
   label: string,
   groupId: string,
   sortOrder: number,
@@ -706,11 +713,12 @@ function buildEditorUnifiedTab(
     contentType: 'editor',
     label,
     customLabel: null,
-    color: null,
+    color: tab.color !== undefined ? tab.color : (existingUnifiedTab?.color ?? null),
     sortOrder,
     createdAt,
     isPreview: false,
-    isPinned: false
+    isPinned:
+      tab.isPinned !== undefined ? tab.isPinned === true : existingUnifiedTab?.isPinned === true
   }
 }
 
@@ -769,7 +777,9 @@ function buildMirroredEditorTabs(
       hostTabId: tab.id,
       unifiedTab: buildEditorUnifiedTab(
         file,
+        tab,
         tab.id,
+        existingUnifiedTab,
         tab.title.trim() || tab.relativePath || 'File',
         groupId,
         sortOffset + index,
@@ -871,7 +881,7 @@ function buildMirroredBrowserTabs(
       workspace,
       page,
       remotePageId: tab.browserPageId,
-      unifiedTab: buildBrowserUnifiedTab(workspace, existing?.unifiedTab?.id ?? tab.id, groupId),
+      unifiedTab: buildBrowserUnifiedTab(workspace, tab, existing?.unifiedTab ?? null, groupId),
       hostTabId: tab.id
     }
   })

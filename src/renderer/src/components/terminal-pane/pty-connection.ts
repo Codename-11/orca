@@ -80,11 +80,13 @@ import { createAgentCompletionCoordinator } from './agent-completion-coordinator
 import type { AgentCompletionStatusSnapshot } from './agent-completion-coordinator-types'
 import {
   markTerminalBracketedPasteInterrupted,
-  observeTerminalBracketedPasteModeOutput,
-  pasteTerminalText
+  observeTerminalBracketedPasteModeOutput
 } from './terminal-bracketed-paste'
 import { createCommandCodeOutputStatusDetector } from '../../../../shared/command-code-output-status'
 import { registerPtyModelRestoreNeededHandler } from './pty-model-restore-channel'
+import { executeTerminalStartupCommandPaste } from './terminal-startup-command-paste'
+import { getTerminalPasteSshRemotePlatform } from './terminal-paste-ssh-platform'
+import { resolveTerminalPasteRuntime } from './terminal-paste-runtime'
 import type { PtyDataMeta } from './pty-dispatcher'
 import { getEagerPtyBufferHandle } from './pty-dispatcher'
 import { createTerminalGitHubPRLinkDetector } from '../../../../shared/terminal-github-pr-link-detector'
@@ -1971,6 +1973,32 @@ export function connectPanePty(
       }
       return true
     }
+    const isStartupPasteTargetCurrent = (ptyId: string | null): boolean =>
+      !disposed &&
+      deps.paneTransportsRef.current.get(pane.id) === transport &&
+      transport.getPtyId() === ptyId
+    const runTerminalPasteStartupCommand = async (command: string): Promise<boolean> => {
+      const ptyId = transport.getPtyId()
+      const result = await executeTerminalStartupCommandPaste({
+        command,
+        pane,
+        ptyId,
+        runtime: resolveTerminalPasteRuntime({
+          platform: CLIENT_PLATFORM,
+          ptyId,
+          connectionId,
+          remotePlatform: getTerminalPasteSshRemotePlatform(connectionId),
+          transport,
+          isWindowsConpty: isNativeWindowsConpty
+        }),
+        transport,
+        isTargetCurrent: isStartupPasteTargetCurrent
+      })
+      if (result.status !== 'pasted' || !isStartupPasteTargetCurrent(ptyId)) {
+        return false
+      }
+      return transport.sendInput('\r')
+    }
     const schedulePendingStartupCommandDelivery = (): void => {
       if (!pendingStartupCommand) {
         return
@@ -2004,10 +2032,7 @@ export function connectPanePty(
             return
           }
           if (shouldDeliverStartupViaTerminalPaste) {
-            // Why: this mode must pass through xterm so bracketed-paste
-            // wrapping is applied before the submit Enter.
-            pasteTerminalText(pane.terminal, command)
-            transport.sendInput('\r')
+            await runTerminalPasteStartupCommand(command)
           } else {
             transport.sendInput(`${command}\r`)
           }
