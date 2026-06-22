@@ -818,6 +818,7 @@ function openMainWindow(): BrowserWindow {
       payload,
       receivedAt,
       stateStartedAt,
+      launchToken,
       providerSession,
       isReplay
     }) => {
@@ -830,6 +831,7 @@ function openMainWindow(): BrowserWindow {
       mainWindow?.webContents.send('agentStatus:set', {
         ...payload,
         paneKey,
+        ...(launchToken ? { launchToken } : {}),
         ...(terminalHandle ? { terminalHandle } : {}),
         tabId,
         worktreeId,
@@ -1346,7 +1348,14 @@ app.whenReady().then(async () => {
   rateLimits.setClaudeAuthPreparationResolver((target) =>
     claudeRuntimeAuth!.prepareForRateLimitFetch(target)
   )
-  rateLimits.setSettingsResolver(() => store!.getSettings())
+  rateLimits.setOpenCodeGoConfigResolver(() => {
+    const settings = store!.getSettings()
+    return {
+      sessionCookie: settings.opencodeSessionCookie,
+      workspaceIdOverride: settings.opencodeWorkspaceId
+    }
+  })
+  rateLimits.setGeminiCliOAuthEnabledResolver(() => store!.getSettings().geminiCliOAuthEnabled)
   keybindings = new KeybindingService({
     homePath: app.getPath('home'),
     getLegacyOverrides: () => store!.getSettings().keybindings

@@ -2,6 +2,8 @@ import type { ParsedAgentStatusPayload } from '../../../../shared/agent-status-t
 import type { EventProps } from '../../../../shared/telemetry-events'
 import type { ProjectExecutionRuntimeResolution } from '../../../../shared/project-execution-runtime'
 import type { StartupCommandDelivery } from '../../../../shared/codex-startup-delivery'
+import type { SleepingAgentLaunchConfig } from '../../../../shared/agent-session-resume'
+import type { TuiAgent } from '../../../../shared/types'
 
 export type PtyDataMeta = {
   seq?: number
@@ -25,6 +27,7 @@ export type LocalPtySessionMetadata = { cwd?: string; shellOverride?: string }
 
 export type PtyConnectResult = {
   id: string
+  launchConfig?: SleepingAgentLaunchConfig
   snapshot?: string
   snapshotCols?: number
   snapshotRows?: number
@@ -42,6 +45,12 @@ export type PtyTransport = {
     /** Daemon session ID for reattach. When provided, the daemon reconnects
      *  to an existing session instead of creating a new one. */
     sessionId?: string
+    command?: string
+    env?: Record<string, string>
+    launchConfig?: SleepingAgentLaunchConfig
+    launchToken?: string
+    launchAgent?: TuiAgent
+    startupCommandDelivery?: StartupCommandDelivery
     /** Hidden-at-spawn declaration (terminal-query-authority.md): no visible
      *  view will consume this PTY's bytes, so main marks it hidden BEFORE the
      *  first byte and the gate + model responder own spawn-time queries.
@@ -92,7 +101,7 @@ export type PtyTransport = {
   ) => boolean
   isConnected: () => boolean
   getPtyId: () => string | null
-  getConnectionId?: () => string | null
+  getConnectionId?: () => string | null | undefined
   getLocalSessionMetadata?: () => LocalPtySessionMetadata | null
   /** Drop cross-chunk parser carries (partial OSC-9999 prefix). Called when a
    *  model-restore marker reports dropped bytes — a carry spanning the gap
@@ -110,6 +119,9 @@ export type IpcPtyTransportOptions = {
   cwd?: string
   env?: Record<string, string>
   command?: string
+  launchConfig?: SleepingAgentLaunchConfig
+  launchToken?: string
+  launchAgent?: TuiAgent
   startupCommandDelivery?: StartupCommandDelivery
   connectionId?: string | null
   /** Orca worktree identity for scoped shell history. */

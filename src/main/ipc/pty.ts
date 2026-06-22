@@ -16,7 +16,8 @@ import {
 export { getBashShellReadyRcfileContent } from '../providers/local-pty-shell-ready'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
 import type { Store } from '../persistence'
-import type { GlobalSettings } from '../../shared/types'
+import type { GlobalSettings, TuiAgent } from '../../shared/types'
+import type { SleepingAgentLaunchConfig } from '../../shared/agent-session-resume'
 import type { ProjectExecutionRuntimeResolution } from '../../shared/project-execution-runtime'
 import {
   isWslShellName,
@@ -202,6 +203,16 @@ function isValidPaneKey(paneKey: unknown): paneKey is string {
   return parseValidPaneKey(paneKey) !== null
 }
 
+function shouldRefreshNativeClaudeAgentTeamsEnv(args: {
+  command?: string
+  launchConfig?: SleepingAgentLaunchConfig
+}): boolean {
+  const capturedCommand = args.launchConfig?.agentCommand?.trim() || args.command?.trim() || ''
+  const capturedArgs = args.launchConfig?.agentArgs?.trim() ?? ''
+  const capturedLaunch = `${capturedCommand} ${capturedArgs}`.trim()
+  return /(^|\s)--teammate-mode(?:=|\s+)auto(?:\s|$)/.test(capturedLaunch)
+}
+
 function rememberPaneKeyForPty(ptyId: string, paneKey: unknown): string | null {
   const normalizedPaneKey = typeof paneKey === 'string' ? paneKey.trim() : ''
   if (!isValidPaneKey(normalizedPaneKey)) {
@@ -289,7 +300,10 @@ function stripRemotePaneEnvWhenHooksDisabled(
   }
   if (
     !env ||
-    (!('ORCA_PANE_KEY' in env) && !('ORCA_TAB_ID' in env) && !('ORCA_WORKTREE_ID' in env))
+    (!('ORCA_PANE_KEY' in env) &&
+      !('ORCA_TAB_ID' in env) &&
+      !('ORCA_WORKTREE_ID' in env) &&
+      !('ORCA_AGENT_LAUNCH_TOKEN' in env))
   ) {
     return env
   }
@@ -297,6 +311,7 @@ function stripRemotePaneEnvWhenHooksDisabled(
   delete stripped.ORCA_PANE_KEY
   delete stripped.ORCA_TAB_ID
   delete stripped.ORCA_WORKTREE_ID
+  delete stripped.ORCA_AGENT_LAUNCH_TOKEN
   return stripped
 }
 
@@ -2323,6 +2338,8 @@ export function registerPtyHandlers(
         env?: Record<string, string>
         envToDelete?: string[]
         command?: string
+        launchConfig?: SleepingAgentLaunchConfig
+        launchAgent?: TuiAgent
         startupCommandDelivery?: StartupCommandDelivery
         connectionId?: string | null
         worktreeId?: string
@@ -2460,8 +2477,46 @@ export function registerPtyHandlers(
           ? makePaneKey(args.tabId, args.leafId)
           : null
       const stablePaneKey = verifiedPaneKey ?? migrationUnsupportedPaneKey
-      const baseEnv = baseEnvWithAuth ? { ...baseEnvWithAuth } : undefined
+      let baseEnv = baseEnvWithAuth ? { ...baseEnvWithAuth } : undefined
+      const shouldRefreshAgentTeamsEnv =
+        !args.connectionId &&
+        runtime !== undefined &&
+        stablePaneKey !== null &&
+        shouldRefreshNativeClaudeAgentTeamsEnv({
+          command: args.command,
+          launchConfig: args.launchConfig
+        })
+      let effectiveLaunchConfig = args.launchConfig
+      const preAllocatedHandle =
+        runtime && (!(provider instanceof LocalPtyProvider) || shouldRefreshAgentTeamsEnv)
+          ? runtime.createPreAllocatedTerminalHandle()
+          : null
+      if (shouldRefreshAgentTeamsEnv && preAllocatedHandle) {
+        // Why: native Agent Teams team ids/tokens are process-local. A sleeping
+        // record preserves the user's native launch shape, but the team env
+        // itself must be regenerated for the new leader PTY.
+        const prepared = await runtime.prepareClaudeAgentTeamsLeaderForHandle({
+          handle: preAllocatedHandle,
+          baseEnv: baseEnv ?? {}
+        })
+        baseEnv = {
+          ...baseEnv,
+          ...prepared.env
+        }
+        if (args.launchConfig) {
+          effectiveLaunchConfig = {
+            ...args.launchConfig,
+            agentEnv: {
+              ...args.launchConfig.agentEnv,
+              ...prepared.env
+            }
+          }
+        }
+      }
       const requestedAgentTeamsPath = baseEnv?.ORCA_AGENT_TEAMS_TEAM_ID ? baseEnv.PATH : undefined
+      const agentTeamsEnvToDelete = shouldRefreshAgentTeamsEnv
+        ? ['TERM_PROGRAM', 'ORCA_ATTRIBUTION_SHIM_DIR']
+        : undefined
       if (baseEnv && stablePaneKey) {
         baseEnv.ORCA_PANE_KEY = stablePaneKey
         if (typeof args.tabId === 'string') {
@@ -2480,14 +2535,11 @@ export function registerPtyHandlers(
         delete baseEnv.ORCA_PANE_KEY
         delete baseEnv.ORCA_TAB_ID
         delete baseEnv.ORCA_WORKTREE_ID
+        delete baseEnv.ORCA_AGENT_LAUNCH_TOKEN
       }
       const validatedPaneKey = stablePaneKey
       const validatedLeafId = verifiedLeafId ?? metadataLeafId
       let env: Record<string, string> | undefined = baseEnv
-      const preAllocatedHandle =
-        runtime && !(provider instanceof LocalPtyProvider)
-          ? runtime.createPreAllocatedTerminalHandle()
-          : null
       const effectiveShellOverride = terminalRuntimeOptions.shellOverride
       const codexSelectionTarget = getCodexSelectionTargetForPty(
         effectiveShellOverride,
@@ -2559,7 +2611,10 @@ export function registerPtyHandlers(
         : undefined
       const combinedEnvToDelete = mergePtyEnvDeletions(
         mergePtyEnvDeletions(
-          mergePtyEnvDeletions(envToDelete, args.envToDelete ?? []),
+          mergePtyEnvDeletions(
+            mergePtyEnvDeletions(envToDelete, args.envToDelete ?? []),
+            agentTeamsEnvToDelete ?? []
+          ),
           isDaemonHostSpawn ? getInheritedAgentHookEnvKeysToDelete(spawnEnv) : []
         ),
         skipCodexHomeEnv ? CODEX_HOME_ENV_KEYS : []
@@ -2849,7 +2904,7 @@ export function registerPtyHandlers(
       // Why: arms main's per-PTY Command Code output detector from the launch
       // command (renderer startupCommand parity); banner detection covers
       // PTYs spawned without one.
-      runtime?.noteTerminalSpawnCommand(
+      runtime?.noteTerminalSpawnCommand?.(
         result.id,
         typeof args.command === 'string' ? args.command : null
       )
@@ -2939,7 +2994,12 @@ export function registerPtyHandlers(
           })
         }
       }
-      return result
+      return {
+        ...result,
+        ...(!result.isReattach && effectiveLaunchConfig
+          ? { launchConfig: effectiveLaunchConfig }
+          : {})
+      }
     }
   )
 
