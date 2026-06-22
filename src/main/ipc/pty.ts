@@ -2904,7 +2904,7 @@ export function registerPtyHandlers(
       // Why: arms main's per-PTY Command Code output detector from the launch
       // command (renderer startupCommand parity); banner detection covers
       // PTYs spawned without one.
-      runtime?.noteTerminalSpawnCommand(
+      runtime?.noteTerminalSpawnCommand?.(
         result.id,
         typeof args.command === 'string' ? args.command : null
       )

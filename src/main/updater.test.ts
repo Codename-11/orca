@@ -1053,6 +1053,7 @@ describe('updater', () => {
       expect(sendMock).toHaveBeenCalledWith('updater:status', {
         state: 'available',
         version: '1.0.61',
+        releaseUrl: 'https://github.com/stablyai/orca/releases/tag/v1.0.61',
         changelog: null
       })
     })
@@ -1386,13 +1387,21 @@ describe('updater', () => {
       const sendMock = vi.fn()
       const mainWindow = { webContents: { send: sendMock } }
 
-      const { setupAutoUpdater } = await import('./updater')
+      const { setupAutoUpdater, checkForUpdatesFromMenu } = await import('./updater')
+
+      autoUpdaterMock.checkForUpdates.mockImplementation(() => {
+        autoUpdaterMock.emit('checking-for-update')
+        queueMicrotask(() => {
+          autoUpdaterMock.emit('update-available', { version: '1.4.14-rc.0.axiom.1' })
+        })
+        return Promise.resolve(undefined)
+      })
 
       setupAutoUpdater(mainWindow as never, {
         getLastUpdateCheckAt: () => Date.now()
       })
 
-      autoUpdaterMock.emit('update-available', { version: '1.4.14-rc.0.axiom.1' })
+      checkForUpdatesFromMenu()
       await new Promise((resolve) => setTimeout(resolve, 0))
 
       expect(sendMock).toHaveBeenCalledWith('updater:status', {
