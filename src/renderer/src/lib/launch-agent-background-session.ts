@@ -29,13 +29,12 @@ import {
   subscribeToRuntimeTerminalData,
   toRemoteRuntimePtyId
 } from '@/runtime/runtime-terminal-stream'
-import { createAgentStatusOscProcessor } from '../../../shared/agent-status-osc'
 import type { ParsedAgentStatusPayload } from '../../../shared/agent-status-types'
 import type { RuntimeTerminalCreate } from '../../../shared/runtime-types'
-import { isMainTerminalSideEffectAuthorityForPty } from '@/components/terminal-pane/terminal-side-effect-facts-handler'
 import { translate } from '@/i18n/i18n'
 import { createSshBackgroundStartupDelivery } from '@/lib/ssh-background-startup-delivery'
 import { shouldUseShellReadyStartupDelivery } from '../../../shared/codex-startup-delivery'
+import { createBackgroundAgentStatusStream } from '@/lib/background-agent-status-stream'
 
 export type LaunchAgentBackgroundSessionArgs = {
   agent: TuiAgent
@@ -260,30 +259,18 @@ export async function launchAgentBackgroundSession(
     useAppStore.getState().clearAgentLaunchConfig(paneKey)
     onExit?.(ptyId, code)
   }
-  // Why: for local/SSH PTYs main already parses OSC 9999 and routes it through
-  // the hook server (agentStatus:set → store), so a second store write here
-  // would race/duplicate the authoritative path. Remote-runtime bytes never
-  // transit local main; the kill switch restores the legacy write. The
-  // onAgentStatus callback always fires — automation completion tracking is
-  // this sidecar's own responsibility, not a store side effect.
-  const mainOwnsAgentStatusWrites = isMainTerminalSideEffectAuthorityForPty({
+  const processAgentStatus = createBackgroundAgentStatusStream({
+    paneKey,
+    launchToken,
     settings: store.settings,
-    runtimeEnvironmentId: runtimeTarget.kind === 'environment' ? runtimeTarget.environmentId : null
+    runtimeEnvironmentId: runtimeTarget.kind === 'environment' ? runtimeTarget.environmentId : null,
+    onAgentStatus
   })
-  const processAgentStatus = createAgentStatusOscProcessor()
   const handleData = (data: string): void => {
     data = sshStartupDelivery.handleData(data)
     onData?.(data)
     sshStartupDelivery.schedule(ptyId)
-    const processed = processAgentStatus(data)
-    for (const payload of processed.payloads) {
-      if (!mainOwnsAgentStatusWrites) {
-        useAppStore.getState().setAgentStatus(paneKey, payload, undefined, undefined, undefined, {
-          launchToken
-        })
-      }
-      onAgentStatus?.(payload)
-    }
+    processAgentStatus(data)
   }
   if (runtimeTarget.kind === 'environment') {
     unsubscribeData = await subscribeToRuntimeTerminalData(
