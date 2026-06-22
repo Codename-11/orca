@@ -6,6 +6,22 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-06-22 — Remediated upstream v1.4.91 bot PR
+
+Resolved the agent-remediation merge for upstream `v1.4.91` on `bot/upstream-sync-axiom-v1.4.91-axiom.1` targeting `axiom/deploy`; no direct deploy-branch push was made. The conflict resolution keeps the fork semver at `1.4.91-axiom.1`, preserves Axiom's keep-history sleep/wake cold-restore cache while accepting upstream final teardown snapshot handling in `DaemonPtyAdapter`, and accepts upstream agent hibernation/session, shell-ready, worktree cleanup, preserved-branch toast, mobile session tab close, localization, and branch-refresh changes. Protected deletion review found no deleted files and no protected Axiom file removals.
+
+Verification:
+
+- `pnpm install --frozen-lockfile` → passed. Node engine warning only (`wanted node 24`, local `v22.22.2`).
+- `pnpm run typecheck` → passed. Node engine warning only (`wanted node 24`, local `v22.22.2`).
+- `pnpm exec vitest run --config config/vitest.config.ts src/shared/task-providers.test.ts src/main/axiom-release-hardening.test.ts src/main/updater-endpoints.test.ts src/main/app-build-identity.test.ts config/scripts/axiom-upstream-sync-release.test.mjs` → 50 tests passed.
+- `pnpm exec oxlint config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml` → 0 warnings / 0 errors.
+- `pnpm exec oxfmt --check config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml config/axiom-merge-remediation-policy.json` → passed.
+- `git diff --check` → passed.
+- `pnpm exec vitest run --config config/vitest.config.ts src/main/daemon/daemon-pty-adapter.test.ts` → 71 tests passed.
+
+---
+
 ## 2026-06-05 — Remediated upstream v1.4.47 bot PR
 
 Resolved the agent-remediation merge for upstream `v1.4.47` on `bot/upstream-sync-axiom-v1.4.47-axiom.1` targeting `axiom/deploy`; no direct deploy-branch push was made. The conflict resolution keeps the fork semver at `1.4.47-axiom.1`, preserves the Axiom profile import/export settings surface while accepting upstream General settings extraction, preserves Forge task-provider sidebar shortcuts through the upstream hideable Tasks/Automations sidebar changes, keeps Axiom terminal connection identity while accepting upstream Windows PTY OS-release compatibility context, and combines upstream default Automations/Open-in Apps settings with Axiom Forge provider defaults. Protected deletion review found only upstream deletions outside `config/axiom-merge-remediation-policy.json` protected paths (`src/renderer/src/components/repo/NestedRepoTreePreview.tsx`, `src/renderer/src/lib/pane-manager/pane-terminal-cursor-suppression.ts`).
