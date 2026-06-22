@@ -30,6 +30,16 @@ git fetch upstream main --prune
 - Upstream-compatible provider seams should be kept separate from Axiom/Forge
   service code so they can become clean upstream PRs later.
 
+## Fork Footprint Extraction
+
+When Axiom-only provider behavior must touch upstream hot files, extract the
+fork-owned surface into a clearly named Axiom/Forge module and leave only a thin
+import/props seam in the upstream-owned file. Move only code that is genuinely
+fork-only; keep upstream flow changes in place when merge conflicts are useful
+review signals. Avoid circular imports by passing stable data and callbacks
+across the seam, and name modules by their domain (for example,
+`components/forge/ForgeTaskControls.tsx`) rather than vague helper/common names.
+
 ## Release And Update Invariants
 
 Axiom desktop and mobile builds must preserve their side-by-side identity with

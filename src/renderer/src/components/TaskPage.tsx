@@ -7,10 +7,8 @@ import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import {
   AlertCircle,
-  ArrowDown,
   ArrowDownUp,
   ArrowRight,
-  ArrowUp,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -25,7 +23,6 @@ import {
   FolderKanban,
   GitMerge,
   GitPullRequest,
-  LayoutGrid,
   List,
   LoaderCircle,
   Lock,
@@ -156,11 +153,16 @@ import {
 import { ForgeIssueEmptyStatePanel } from '@/components/forge/ForgeIssueEmptyStatePanel'
 import {
   ALL_FORGE_AGENTS_FILTER,
-  UNASSIGNED_FORGE_AGENT_FILTER,
   getForgeAgentFilterLabel,
   getForgeAgentFilterOptions,
   type ForgeAgentFilterValue
 } from '@/components/forge/forge-agent-filter'
+import {
+  ForgeTaskControls,
+  FORGE_PRESETS,
+  type ForgePresetId,
+  type ForgeTaskViewMode
+} from '@/components/forge/ForgeTaskControls'
 import { getForgeIssueEmptyState } from '@/components/forge/forge-empty-state'
 import {
   LinearCollectionNotice,
@@ -245,7 +247,6 @@ import type {
   ForgeConnectionStatus,
   ForgeIssue,
   ForgeIssueSort,
-  ForgeIssueSortKey,
   ForgeIssueStatus,
   ForgeIssueUpdate,
   ForgeLabel,
@@ -363,24 +364,6 @@ const LINEAR_ITEM_LIMIT = 36
 const FORGE_ITEM_LIMIT = 50
 const JIRA_ITEM_LIMIT = 50
 const PR_CHECKS_EAGER_PREFETCH_LIMIT = 20
-
-type ForgePresetId = 'active' | 'assigned' | 'created' | 'all' | 'done'
-const FORGE_PRESETS: { id: ForgePresetId; label: string }[] = [
-  { id: 'active', label: 'Active' },
-  { id: 'assigned', label: 'Assigned' },
-  { id: 'created', label: 'Created' },
-  { id: 'all', label: 'All' },
-  { id: 'done', label: 'Done' }
-]
-
-const FORGE_SORT_OPTIONS: { id: ForgeIssueSortKey; label: string }[] = [
-  { id: 'updated', label: 'Updated' },
-  { id: 'created', label: 'Created' },
-  { id: 'priority', label: 'Priority' },
-  { id: 'identifier', label: 'Identifier' },
-  { id: 'title', label: 'Title' }
-]
-const FORGE_PROJECT_FILTER_ALL = 'all-projects'
 
 /** Display label for an issue's assignee, falling back to profile key then Unassigned. */
 function getForgeAssigneeLabel(issue: ForgeIssue): string {
@@ -3449,7 +3432,7 @@ export default function TaskPage(): React.JSX.Element {
   const [forgeUpdatingIssueIds, setForgeUpdatingIssueIds] = useState<ReadonlySet<string>>(
     () => new Set()
   )
-  const [forgeViewMode, setForgeViewMode] = useState<'list' | 'board'>(
+  const [forgeViewMode, setForgeViewMode] = useState<ForgeTaskViewMode>(
     () => settings?.defaultForgeViewMode ?? 'list'
   )
   // Why: workspace list + selection drive the optional multi-workspace picker.
@@ -8651,308 +8634,42 @@ export default function TaskPage(): React.JSX.Element {
                     })()}
                   </div>
                 ) : taskSource === 'forge' ? (
-                  <div className="min-w-0 rounded-md rounded-b-none border border-border/50 bg-muted/50 p-3 shadow-sm">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        {/* Why: only surface a workspace picker when more than one
-                            workspace is reachable; otherwise the connection badge
-                            already conveys the single active workspace. */}
-                        {forgeWorkspaces.length > 1 ? (
-                          <Select
-                            value={selectedForgeWorkspaceId ?? undefined}
-                            onValueChange={(value) => {
-                              setSelectedForgeWorkspaceId(value)
-                              setForgeRefreshNonce((n) => n + 1)
-                            }}
-                          >
-                            <SelectTrigger
-                              aria-label="Select Forge workspace"
-                              className="h-8 w-auto min-w-[150px] max-w-[220px] border-border/50 bg-background text-xs"
-                            >
-                              <SelectValue placeholder="Workspace" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {forgeWorkspaces.map((workspace) => (
-                                <SelectItem key={workspace.id} value={workspace.id}>
-                                  {workspace.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        ) : null}
-                        {FORGE_PRESETS.map((preset) => {
-                          const active = !forgeSearchInput && activeForgePreset === preset.id
-                          return (
-                            <button
-                              key={preset.id}
-                              type="button"
-                              onClick={() => handleForgePresetChange(preset.id)}
-                              className={cn(
-                                'rounded-md border px-2 py-1 text-xs transition',
-                                active
-                                  ? 'border-border/50 bg-foreground/90 text-background backdrop-blur-md'
-                                  : 'border-border/50 bg-transparent text-foreground hover:bg-muted/50'
-                              )}
-                            >
-                              {preset.label}
-                            </button>
-                          )
-                        })}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              onClick={openNewForgeIssueComposer}
-                              aria-label="New Forge issue"
-                              className="border-border/50 bg-transparent hover:bg-muted/50 backdrop-blur-md supports-[backdrop-filter]:bg-transparent"
-                            >
-                              <Plus className="size-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom" sideOffset={6}>
-                            New Forge issue
-                          </TooltipContent>
-                        </Tooltip>
-                        <div className="flex rounded-md border border-border/50 bg-transparent p-0.5">
-                          {[
-                            { id: 'list' as const, label: 'List', Icon: List },
-                            { id: 'board' as const, label: 'Board', Icon: LayoutGrid }
-                          ].map(({ id, label, Icon }) => {
-                            const active = forgeViewMode === id
-                            return (
-                              <button
-                                key={id}
-                                type="button"
-                                onClick={() => handleForgeViewModeChange(id)}
-                                aria-pressed={active}
-                                aria-label={`${label} view`}
-                                className={cn(
-                                  'flex items-center gap-1.5 rounded px-2 py-1 text-xs transition',
-                                  active
-                                    ? 'bg-foreground/90 text-background'
-                                    : 'text-foreground hover:bg-muted/50'
-                                )}
-                              >
-                                <Icon className="size-3.5" />
-                                <span className="hidden sm:inline">{label}</span>
-                              </button>
-                            )
-                          })}
-                        </div>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              onClick={() => setForgeRefreshNonce((n) => n + 1)}
-                              disabled={forgeLoading}
-                              aria-label="Refresh Forge issues"
-                              className="border-border/50 bg-transparent hover:bg-muted/50 backdrop-blur-md supports-[backdrop-filter]:bg-transparent"
-                            >
-                              {forgeLoading ? (
-                                <LoaderCircle className="size-4 animate-spin" />
-                              ) : (
-                                <RefreshCw className="size-4" />
-                              )}
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom" sideOffset={6}>
-                            Refresh Forge issues
-                          </TooltipContent>
-                        </Tooltip>
-                      </div>
-                    </div>
-                    {forgeConnectionStatus ? (
-                      <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                        <span
-                          className={cn(
-                            'rounded-full border px-2 py-0.5 font-medium',
-                            forgeConnectionStatus.connected
-                              ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-300'
-                              : 'border-destructive/35 bg-destructive/10 text-destructive'
-                          )}
-                        >
-                          {forgeConnectionStatus.connected ? 'Connected' : 'Not connected'}
-                        </span>
-                        {forgeConnectionStatus.workspaceName ? (
-                          <span>{forgeConnectionStatus.workspaceName}</span>
-                        ) : null}
-                        {forgeConnectionStatus.workspaceSlug ? (
-                          <span className="font-mono">/{forgeConnectionStatus.workspaceSlug}</span>
-                        ) : null}
-                        {forgeConnectionStatus.baseUrl ? (
-                          <span className="max-w-[260px] truncate font-mono">
-                            {forgeConnectionStatus.baseUrl}
-                          </span>
-                        ) : null}
-                        <span>
-                          Auth:{' '}
-                          {forgeConnectionStatus.hasToken
-                            ? forgeConnectionStatus.configSource === 'env'
-                              ? 'environment token'
-                              : 'saved token'
-                            : 'missing token'}
-                        </span>
-                        {forgeConnectionStatus.error ? (
-                          <span className="text-destructive">{forgeConnectionStatus.error}</span>
-                        ) : null}
-                      </div>
-                    ) : null}
-                    <div className="mt-3 flex min-w-0 flex-wrap items-center gap-3">
-                      <div className="relative min-w-0 flex-1 basis-64">
-                        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                        <Input
-                          value={forgeSearchInput}
-                          onChange={(e) => setForgeSearchInput(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              if (
-                                shouldSuppressEnterSubmit(
-                                  { isComposing: e.nativeEvent.isComposing, shiftKey: e.shiftKey },
-                                  false
-                                )
-                              ) {
-                                return
-                              }
-                              e.preventDefault()
-                              const trimmed = forgeSearchInput.trim()
-                              setForgeSearchInput(trimmed)
-                              setAppliedForgeSearch(trimmed)
-                              setForgeRefreshNonce((n) => n + 1)
-                            }
-                          }}
-                          placeholder="Search Forge issues..."
-                          className="h-8 rounded-md border-border/50 bg-background pl-8 pr-8 text-xs"
-                        />
-                        {forgeSearchInput ? (
-                          <button
-                            type="button"
-                            aria-label="Clear search"
-                            onClick={() => {
-                              setForgeSearchInput('')
-                              setAppliedForgeSearch('')
-                              setForgeRefreshNonce((n) => n + 1)
-                            }}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground transition hover:text-foreground"
-                          >
-                            <X className="size-4" />
-                          </button>
-                        ) : null}
-                      </div>
-                      <Select
-                        value={activeForgeAgentFilter}
-                        onValueChange={(value) =>
-                          handleForgeAgentFilterChange(value as ForgeAgentFilterValue)
-                        }
-                      >
-                        <SelectTrigger
-                          aria-label="Filter Forge issues by assigned agent"
-                          className="h-8 w-full min-w-[180px] max-w-[240px] border-border/50 bg-background text-xs sm:w-auto"
-                        >
-                          <Users className="mr-2 size-3.5 text-muted-foreground" />
-                          <SelectValue placeholder="All agents" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={ALL_FORGE_AGENTS_FILTER}>All agents</SelectItem>
-                          <SelectItem value={UNASSIGNED_FORGE_AGENT_FILTER}>Unassigned</SelectItem>
-                          {forgeDetailAgents.map((agent) => (
-                            <SelectItem key={agent.id} value={agent.id}>
-                              {agent.name}
-                              {agent.profileKey ? (
-                                <span className="ml-1 text-muted-foreground">
-                                  @{agent.profileKey}
-                                </span>
-                              ) : null}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <Select
-                        value={activeForgeProjectFilter ?? FORGE_PROJECT_FILTER_ALL}
-                        onValueChange={(value) =>
-                          handleForgeProjectFilterChange(
-                            value === FORGE_PROJECT_FILTER_ALL ? null : value
-                          )
-                        }
-                      >
-                        <SelectTrigger
-                          aria-label="Filter Forge issues by project"
-                          className="h-8 w-full min-w-[160px] max-w-[220px] border-border/50 bg-background text-xs sm:w-auto"
-                        >
-                          <FolderKanban className="mr-2 size-3.5 text-muted-foreground" />
-                          <SelectValue placeholder="All projects" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={FORGE_PROJECT_FILTER_ALL}>All projects</SelectItem>
-                          {forgeFilterProjects.map((project) => (
-                            <SelectItem key={project.id} value={project.id}>
-                              {project.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <div className="flex items-center gap-1">
-                        <Select
-                          value={activeForgeSort.key}
-                          onValueChange={(value) =>
-                            handleForgeSortChange({
-                              ...activeForgeSort,
-                              key: value as ForgeIssueSortKey
-                            })
-                          }
-                        >
-                          <SelectTrigger
-                            aria-label="Sort Forge issues"
-                            className="h-8 w-full min-w-[140px] max-w-[180px] border-border/50 bg-background text-xs sm:w-auto"
-                          >
-                            <ArrowDownUp className="mr-2 size-3.5 text-muted-foreground" />
-                            <SelectValue placeholder="Sort" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {FORGE_SORT_OPTIONS.map((option) => (
-                              <SelectItem key={option.id} value={option.id}>
-                                {option.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        {/* Why: a compact arrow toggle flips sort direction without a
-                            second dropdown; aria-label reflects the next action. */}
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              onClick={() =>
-                                handleForgeSortChange({
-                                  ...activeForgeSort,
-                                  direction: activeForgeSort.direction === 'asc' ? 'desc' : 'asc'
-                                })
-                              }
-                              aria-label={
-                                activeForgeSort.direction === 'asc'
-                                  ? 'Sort descending'
-                                  : 'Sort ascending'
-                              }
-                              className="h-8 w-8 shrink-0 border-border/50 bg-background hover:bg-muted/50"
-                            >
-                              {activeForgeSort.direction === 'asc' ? (
-                                <ArrowUp className="size-4" />
-                              ) : (
-                                <ArrowDown className="size-4" />
-                              )}
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom" sideOffset={6}>
-                            {activeForgeSort.direction === 'asc' ? 'Ascending' : 'Descending'}
-                          </TooltipContent>
-                        </Tooltip>
-                      </div>
-                    </div>
-                  </div>
+                  <ForgeTaskControls
+                    workspaces={forgeWorkspaces}
+                    selectedWorkspaceId={selectedForgeWorkspaceId}
+                    onWorkspaceChange={(value) => {
+                      setSelectedForgeWorkspaceId(value)
+                      setForgeRefreshNonce((n) => n + 1)
+                    }}
+                    searchInput={forgeSearchInput}
+                    activePreset={activeForgePreset}
+                    activeAgentFilter={activeForgeAgentFilter}
+                    activeProjectFilter={activeForgeProjectFilter}
+                    activeSort={activeForgeSort}
+                    agents={forgeDetailAgents}
+                    projects={forgeFilterProjects}
+                    connectionStatus={forgeConnectionStatus}
+                    loading={forgeLoading}
+                    viewMode={forgeViewMode}
+                    onSearchInputChange={setForgeSearchInput}
+                    onSearchSubmit={(trimmed) => {
+                      setForgeSearchInput(trimmed)
+                      setAppliedForgeSearch(trimmed)
+                      setForgeRefreshNonce((n) => n + 1)
+                    }}
+                    onSearchClear={() => {
+                      setForgeSearchInput('')
+                      setAppliedForgeSearch('')
+                      setForgeRefreshNonce((n) => n + 1)
+                    }}
+                    onPresetChange={handleForgePresetChange}
+                    onNewIssue={openNewForgeIssueComposer}
+                    onViewModeChange={handleForgeViewModeChange}
+                    onRefresh={() => setForgeRefreshNonce((n) => n + 1)}
+                    onAgentFilterChange={handleForgeAgentFilterChange}
+                    onProjectFilterChange={handleForgeProjectFilterChange}
+                    onSortChange={handleForgeSortChange}
+                  />
                 ) : taskSource === 'linear' && linearConnected ? (
                   <div
                     className="min-w-0 rounded-md rounded-b-none border border-border/50 bg-muted/50 p-3 shadow-sm"

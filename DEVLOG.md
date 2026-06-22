@@ -6,6 +6,27 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-06-22 — Extracted Forge task controls from TaskPage hot file
+
+Created the first fork-footprint extraction seam for the provider/Forge task surface on `feat/provider-footprint-extraction`. The Forge task control bar, Forge preset/sort metadata, project filter sentinel, workspace selector, connection badge, search handling, agent/project filters, view toggle, refresh, and new-issue action now live in fork-owned `src/renderer/src/components/forge/ForgeTaskControls.tsx`; `TaskPage.tsx` keeps only a thin `<ForgeTaskControls ... />` props seam plus upstream/fork flow state. This preserves cross-provider task-page orchestration in the hot file while reducing the Forge-only UI footprint that daily upstream merges need to reconcile.
+
+Footprint:
+
+- `src/renderer/src/components/TaskPage.tsx` line count: 13,638 before → 13,355 after (-283).
+- `TaskPage.tsx` fork delta vs `upstream/main`: 1,480 insertions / 56 deletions before → 1,147 insertions / 6 deletions after.
+- This slice's local diff vs `origin/axiom/deploy` for `TaskPage.tsx`: 43 insertions / 326 deletions.
+
+Verification:
+
+- `pnpm install --frozen-lockfile` → passed. Node engine warning only (`wanted node 24`, local `v22.22.2`).
+- `pnpm run typecheck:web` → passed. Node engine warning only (`wanted node 24`, local `v22.22.2`).
+- `pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/forge/ForgeTaskControls.test.tsx src/renderer/src/components/forge/ForgeIssueEmptyStatePanel.test.tsx src/renderer/src/components/task-providers/provider-ui-registry.test.tsx` → 3 files / 8 tests passed.
+- `pnpm exec oxlint src/renderer/src/components/TaskPage.tsx src/renderer/src/components/forge/ForgeTaskControls.tsx src/renderer/src/components/forge/ForgeTaskControls.test.tsx` → 0 warnings / 0 errors.
+- `pnpm exec oxfmt --check src/renderer/src/components/TaskPage.tsx src/renderer/src/components/forge/ForgeTaskControls.tsx src/renderer/src/components/forge/ForgeTaskControls.test.tsx FORK.md DEVLOG.md` → passed.
+- `git diff --check` → passed.
+
+---
+
 ## 2026-06-22 — Remediated upstream v1.4.91 bot PR
 
 Resolved the agent-remediation merge for upstream `v1.4.91` on `bot/upstream-sync-axiom-v1.4.91-axiom.1` targeting `axiom/deploy`; no direct deploy-branch push was made. The conflict resolution keeps the fork semver at `1.4.91-axiom.1`, preserves Axiom's keep-history sleep/wake cold-restore cache while accepting upstream final teardown snapshot handling in `DaemonPtyAdapter`, and accepts upstream agent hibernation/session, shell-ready, worktree cleanup, preserved-branch toast, mobile session tab close, localization, and branch-refresh changes. Protected deletion review found no deleted files and no protected Axiom file removals.
