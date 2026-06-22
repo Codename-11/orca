@@ -6,6 +6,28 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-06-22 — Batched upstream stable release dispatches
+
+Implemented latest-stable batching for the Hermes repository-dispatch watcher so
+Orca's unattended release lane records upstream stable tags immediately but waits
+for the newest stable tag to remain unchanged for a configurable quiet period
+before dispatching `upstream_release`. The recommended Hermes wrapper arguments
+are `--batch-latest-stable --release-min-age-hours 24`; apply them to the live
+wrapper after this branch lands on `axiom/deploy`. Manual `workflow_dispatch`
+inputs and explicit `axiom-v*` tag pushes remain handled by
+`.github/workflows/axiom-upstream-sync-release.yml` unchanged.
+
+Verification:
+
+- `pnpm install --frozen-lockfile` → passed. Node engine warning only (`wanted node 24`, local `v22.22.2`).
+- `pnpm exec vitest run --config config/vitest.config.ts config/scripts/hermes-repository-dispatch-watcher.test.mjs config/scripts/axiom-upstream-sync-release.test.mjs` → 34 tests passed.
+- `pnpm exec oxlint config/scripts/hermes-repository-dispatch-watcher.mjs config/scripts/hermes-repository-dispatch-release-policy.mjs config/scripts/hermes-repository-dispatch-watcher.test.mjs docs/reference/hermes-repository-dispatch-watcher.md docs/reference/axiom-release-readiness.md` → 0 warnings / 0 errors.
+- `pnpm exec oxfmt --check config/scripts/hermes-repository-dispatch-watcher.mjs config/scripts/hermes-repository-dispatch-release-policy.mjs config/scripts/hermes-repository-dispatch-watcher.test.mjs docs/reference/hermes-repository-dispatch-watcher.md docs/reference/axiom-release-readiness.md DEVLOG.md` → passed.
+- `node config/scripts/hermes-repository-dispatch-watcher.mjs --upstream-repo stablyai/orca --target-repo Codename-11/orca --state-file /home/bailey/.hermes/state/orca-upstream-watcher.json --stable-only --release-only --batch-latest-stable --release-min-age-hours 24 --dry-run --json` → passed; latest stable `v1.4.91`, skipped reason `already_dispatched_latest_stable`, no dispatches.
+- Live wrapper update intentionally deferred until this branch lands, because the current deployed checkout does not yet contain the batching implementation.
+
+---
+
 ## 2026-06-22 — Remediated upstream v1.4.91 bot PR
 
 Resolved the agent-remediation merge for upstream `v1.4.91` on `bot/upstream-sync-axiom-v1.4.91-axiom.1` targeting `axiom/deploy`; no direct deploy-branch push was made. The conflict resolution keeps the fork semver at `1.4.91-axiom.1`, preserves Axiom's keep-history sleep/wake cold-restore cache while accepting upstream final teardown snapshot handling in `DaemonPtyAdapter`, and accepts upstream agent hibernation/session, shell-ready, worktree cleanup, preserved-branch toast, mobile session tab close, localization, and branch-refresh changes. Protected deletion review found no deleted files and no protected Axiom file removals.

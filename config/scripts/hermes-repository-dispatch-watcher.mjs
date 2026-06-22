@@ -5,6 +5,12 @@ import { dirname, resolve } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 
+import {
+  buildBatchedReleaseDecision,
+  dateFromOption,
+  releaseBatchingEnabled
+} from './hermes-repository-dispatch-release-policy.mjs'
+
 const API_VERSION = '2022-11-28'
 const DEFAULT_STATE_FILE = '~/.hermes/state/repository-dispatch-watcher.json'
 
@@ -19,6 +25,23 @@ function envFlag(name, fallback = false) {
     return fallback
   }
   return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase())
+}
+
+function envNumber(name, fallback = 0) {
+  const value = envString(name)
+  if (!value) {
+    return fallback
+  }
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+function nonNegativeNumber(value, fallback = 0) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) {
+    return fallback
+  }
+  return Math.max(0, parsed)
 }
 
 function expandHome(path) {
@@ -47,6 +70,10 @@ function parseArgs(argv) {
     verbose: false,
     useGhToken: envFlag('WATCHER_USE_GH_TOKEN', true),
     bootstrapDispatch: envFlag('WATCHER_BOOTSTRAP_DISPATCH', true),
+    batchLatestStable: envFlag('WATCHER_BATCH_LATEST_STABLE', false),
+    releaseMinAgeHours: nonNegativeNumber(envNumber('WATCHER_RELEASE_MIN_AGE_HOURS', 0)),
+    releaseWindow: envString('WATCHER_RELEASE_WINDOW', ''),
+    recordOnly: envFlag('WATCHER_RECORD_ONLY', false),
     watchRelease: true,
     watchMain: true
   }
@@ -83,6 +110,18 @@ function parseArgs(argv) {
       args.bootstrapDispatch = false
     } else if (arg === '--bootstrap-dispatch') {
       args.bootstrapDispatch = true
+    } else if (arg === '--batch-latest-stable') {
+      args.batchLatestStable = true
+    } else if (arg === '--no-batch-latest-stable') {
+      args.batchLatestStable = false
+    } else if (arg === '--release-min-age-hours') {
+      args.releaseMinAgeHours = nonNegativeNumber(argv[++i], 0)
+      args.batchLatestStable = true
+    } else if (arg === '--release-window') {
+      args.releaseWindow = argv[++i] ?? ''
+      args.batchLatestStable = true
+    } else if (arg === '--record-only') {
+      args.recordOnly = true
     } else if (arg === '--release-only') {
       args.watchRelease = true
       args.watchMain = false
@@ -341,6 +380,7 @@ async function dispatchRepositoryEvent({ targetRepo, eventType, payload, token, 
 
 async function runWatcher(options = {}) {
   const token = options.token ?? getGhToken({ useGhToken: options.useGhToken })
+  const now = dateFromOption(options.now)
   const current = await getUpstreamSnapshot({
     upstreamRepo: options.upstreamRepo,
     upstreamBranch: options.upstreamBranch,
@@ -352,19 +392,58 @@ async function runWatcher(options = {}) {
     options.previousState === undefined ? readState(options.stateFile) : options.previousState
   const comparisonState =
     previous ?? (options.bootstrapDispatch ? { releaseTag: '', mainSha: '' } : null)
-  const dispatches = buildDispatches({
-    current,
-    previous: comparisonState,
-    watchRelease: options.watchRelease,
-    watchMain: options.watchMain,
-    releaseEventType: options.releaseEventType,
-    mainEventType: options.mainEventType,
-    source: options.source
-  })
+  const batchReleases = releaseBatchingEnabled(options)
+  const releaseDecision = batchReleases
+    ? buildBatchedReleaseDecision({
+        current,
+        previous: comparisonState,
+        watchRelease: options.watchRelease,
+        releaseEventType: options.releaseEventType,
+        source: options.source,
+        releaseMinAgeHours: options.releaseMinAgeHours,
+        releaseWindow: options.releaseWindow,
+        recordOnly: options.recordOnly,
+        now
+      })
+    : {
+        enabled: false,
+        latestStableTag: current.releaseTag,
+        previousObservedTag: previous?.releaseTag ?? '',
+        previousDispatchedTag: previous?.releaseTag ?? '',
+        candidate: null,
+        skippedReason: '',
+        dispatches: [],
+        statePatch: {}
+      }
+  const dispatches = batchReleases
+    ? [
+        ...releaseDecision.dispatches,
+        ...buildDispatches({
+          current,
+          previous: comparisonState,
+          watchRelease: false,
+          watchMain: options.watchMain,
+          releaseEventType: options.releaseEventType,
+          mainEventType: options.mainEventType,
+          source: options.source
+        })
+      ]
+    : buildDispatches({
+        current,
+        previous: comparisonState,
+        watchRelease: options.watchRelease,
+        watchMain: options.watchMain,
+        releaseEventType: options.releaseEventType,
+        mainEventType: options.mainEventType,
+        source: options.source
+      })
+  const activeDispatches = options.recordOnly
+    ? dispatches.filter((dispatch) => dispatch.kind !== 'main')
+    : dispatches
 
   if (!options.dryRun) {
-    if (previous || options.bootstrapDispatch) {
-      for (const dispatch of dispatches) {
+    if (!options.recordOnly && (previous || options.bootstrapDispatch)) {
+      for (const dispatch of activeDispatches) {
         await dispatchRepositoryEvent({
           targetRepo: options.targetRepo,
           eventType: dispatch.eventType,
@@ -376,7 +455,8 @@ async function runWatcher(options = {}) {
     }
     writeState(options.stateFile, {
       ...current,
-      updatedAt: new Date().toISOString()
+      ...releaseDecision.statePatch,
+      updatedAt: now.toISOString()
     })
   }
 
@@ -384,7 +464,8 @@ async function runWatcher(options = {}) {
     bootstrapped: !previous,
     current,
     previous,
-    dispatches,
+    releasePolicy: releaseDecision,
+    dispatches: activeDispatches,
     dryRun: Boolean(options.dryRun)
   }
 }
