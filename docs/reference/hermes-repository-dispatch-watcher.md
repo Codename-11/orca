@@ -26,8 +26,12 @@ Default behavior:
 - watches upstream `main` SHA;
 - bootstraps missing state by dispatching the current tag/main SHA once, then
   records them;
-- posts only changed surfaces to the target repo's `repository_dispatch` API;
-- writes state only after dispatches succeed;
+- can batch latest-stable release dispatches behind a quiet/min-age period and
+  optional UTC release window;
+- posts only changed eligible surfaces to the target repo's `repository_dispatch`
+  API;
+- writes state only after dispatches succeed, except batched releases that are
+  not yet eligible are recorded as pending;
 - prints nothing on successful no-op or successful dispatch;
 - prints one actionable error line and exits non-zero on failure.
 
@@ -47,8 +51,18 @@ exec node config/scripts/hermes-repository-dispatch-watcher.mjs \
   --upstream-repo stablyai/orca \
   --target-repo Codename-11/orca \
   --state-file /home/bailey/.hermes/state/orca-upstream-watcher.json \
-  --stable-only
+  --stable-only \
+  --release-only \
+  --batch-latest-stable \
+  --release-min-age-hours 24
 ```
+
+With that unattended Orca release lane, the 15-minute poll records the latest
+stable tag as soon as it appears but dispatches only after the same latest tag has
+remained newest for 24 hours. If upstream publishes more stable tags during the
+quiet period, the pending tag is replaced and only the newest stable can become
+eligible. Add `--release-window HH:MM-HH:MM` to require dispatches to occur during
+a UTC release window after the min-age gate has passed.
 
 Register it as a script-only Hermes cron so success is silent and failures page
 Discord through the configured cron delivery target:
@@ -122,16 +136,20 @@ node config/scripts/hermes-repository-dispatch-watcher.mjs \
 
 Useful flags:
 
-| Flag                         | Purpose                                                              |
-| ---------------------------- | -------------------------------------------------------------------- |
-| `--stable-only`              | Ignore prerelease tags. This is Orca's default release-watch mode.   |
-| `--include-prereleases`      | Include prerelease tags when a fork intentionally wants RC dispatch. |
-| `--release-only`             | Dispatch only tag/release changes.                                   |
-| `--main-only`                | Dispatch only upstream branch changes.                               |
-| `--upstream-branch <branch>` | Watch a branch other than `main`.                                    |
-| `--dry-run --json`           | Inspect detected changes without dispatching or writing state.       |
-| `--bootstrap-silent`         | On a first run, write current state without dispatching it.          |
-| `--no-gh-token`              | Disable `gh auth token` fallback; require env token if dispatching.  |
+| Flag                              | Purpose                                                              |
+| --------------------------------- | -------------------------------------------------------------------- |
+| `--stable-only`                   | Ignore prerelease tags. This is Orca's default release-watch mode.   |
+| `--include-prereleases`           | Include prerelease tags when a fork intentionally wants RC dispatch. |
+| `--release-only`                  | Dispatch only tag/release changes.                                   |
+| `--main-only`                     | Dispatch only upstream branch changes.                               |
+| `--batch-latest-stable`           | Record latest stable tags but dispatch only when eligible.           |
+| `--release-min-age-hours <hours>` | Require the latest stable tag to stay newest for this many hours.    |
+| `--release-window <HH:MM-HH:MM>`  | Dispatch batched releases only inside this UTC time window.          |
+| `--record-only`                   | Write current state without dispatching any repository events.       |
+| `--upstream-branch <branch>`      | Watch a branch other than `main`.                                    |
+| `--dry-run --json`                | Inspect detected changes without dispatching or writing state.       |
+| `--bootstrap-silent`              | On a first run, write current state without dispatching it.          |
+| `--no-gh-token`                   | Disable `gh auth token` fallback; require env token if dispatching.  |
 
 Before reusing, create matching `repository_dispatch` handlers in the target
 repo and make sure the target token has `repo` + `workflow` scope for private
@@ -143,6 +161,9 @@ repos or appropriate fine-grained repository Actions/write permissions.
 - First run dispatches the current tag/main SHA once by default, then records
   state; use `--bootstrap-silent` only when you intentionally want to seed state
   without triggering existing workflows.
+- Orca's unattended release lane should use `--batch-latest-stable` with a
+  min-age quiet window so frequent stable tags coalesce into the newest pending
+  release before dispatch/build.
 - Failure should be noisy through Hermes cron delivery.
 - The GitHub Actions workflows remain the source of truth for sync/build/release
   behavior; Hermes only detects changes and dispatches events.

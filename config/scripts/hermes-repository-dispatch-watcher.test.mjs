@@ -207,6 +207,152 @@ describe('Hermes repository dispatch watcher', () => {
     })
   })
 
+  it('records a new latest stable release until the quiet window elapses', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'orca-watcher-'))
+    const stateFile = join(dir, 'state.json')
+    const { fetchImpl, calls } = createFetchMock({ tags: ['v1.4.15', 'v1.4.14'], mainSha: 'sha-2' })
+
+    const result = await runWatcher({
+      upstreamRepo: 'stablyai/orca',
+      targetRepo: 'Codename-11/orca',
+      stateFile,
+      upstreamBranch: 'main',
+      includePrereleases: false,
+      releaseEventType: 'upstream_release',
+      mainEventType: 'upstream_main',
+      source: 'hermes_watcher',
+      watchRelease: true,
+      watchMain: false,
+      batchLatestStable: true,
+      releaseMinAgeHours: 24,
+      token: 'test-token',
+      now: '2026-06-22T12:00:00.000Z',
+      previousState: {
+        releaseTag: 'v1.4.14',
+        dispatchedReleaseTag: 'v1.4.14',
+        mainSha: 'sha-2'
+      },
+      fetchImpl
+    })
+
+    expect(result.dispatches).toEqual([])
+    expect(result.releasePolicy).toMatchObject({
+      latestStableTag: 'v1.4.15',
+      previousDispatchedTag: 'v1.4.14',
+      skippedReason: 'release_min_age',
+      candidate: {
+        tag: 'v1.4.15',
+        eligible: false,
+        firstSeenAt: '2026-06-22T12:00:00.000Z',
+        minAgeHours: 24
+      }
+    })
+    expect(calls.some((call) => call.url.includes('/dispatches'))).toBe(false)
+    expect(JSON.parse(readFileSync(stateFile, 'utf8'))).toMatchObject({
+      releaseTag: 'v1.4.15',
+      dispatchedReleaseTag: 'v1.4.14',
+      pendingReleaseTag: 'v1.4.15',
+      pendingReleaseFirstSeenAt: '2026-06-22T12:00:00.000Z'
+    })
+  })
+
+  it('dispatches only the newest stable tag after batching skips older pending tags', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'orca-watcher-'))
+    const stateFile = join(dir, 'state.json')
+    const { fetchImpl, calls } = createFetchMock({
+      tags: ['v1.4.16', 'v1.4.15', 'v1.4.14'],
+      mainSha: 'sha-2'
+    })
+
+    const result = await runWatcher({
+      upstreamRepo: 'stablyai/orca',
+      targetRepo: 'Codename-11/orca',
+      stateFile,
+      upstreamBranch: 'main',
+      includePrereleases: false,
+      releaseEventType: 'upstream_release',
+      mainEventType: 'upstream_main',
+      source: 'hermes_watcher',
+      watchRelease: true,
+      watchMain: false,
+      batchLatestStable: true,
+      releaseMinAgeHours: 24,
+      token: 'test-token',
+      now: '2026-06-23T12:00:00.000Z',
+      previousState: {
+        releaseTag: 'v1.4.16',
+        dispatchedReleaseTag: 'v1.4.14',
+        pendingReleaseTag: 'v1.4.16',
+        pendingReleaseFirstSeenAt: '2026-06-22T11:00:00.000Z',
+        mainSha: 'sha-2'
+      },
+      fetchImpl
+    })
+
+    expect(result.dispatches).toEqual([
+      {
+        kind: 'release',
+        eventType: 'upstream_release',
+        payload: {
+          upstream_tag: 'v1.4.16',
+          previous_upstream_tag: 'v1.4.14',
+          source: 'hermes_watcher'
+        }
+      }
+    ])
+    expect(calls.filter((call) => call.url.includes('/dispatches'))).toHaveLength(1)
+    expect(JSON.parse(readFileSync(stateFile, 'utf8'))).toMatchObject({
+      releaseTag: 'v1.4.16',
+      dispatchedReleaseTag: 'v1.4.16',
+      pendingReleaseTag: '',
+      pendingReleaseFirstSeenAt: ''
+    })
+  })
+
+  it('can hold an eligible batched release outside the configured UTC release window', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'orca-watcher-'))
+    const stateFile = join(dir, 'state.json')
+    const { fetchImpl, calls } = createFetchMock({ tags: ['v1.4.15', 'v1.4.14'], mainSha: 'sha-2' })
+
+    const result = await runWatcher({
+      upstreamRepo: 'stablyai/orca',
+      targetRepo: 'Codename-11/orca',
+      stateFile,
+      upstreamBranch: 'main',
+      includePrereleases: false,
+      releaseEventType: 'upstream_release',
+      mainEventType: 'upstream_main',
+      source: 'hermes_watcher',
+      watchRelease: true,
+      watchMain: false,
+      batchLatestStable: true,
+      releaseMinAgeHours: 1,
+      releaseWindow: '16:00-18:00',
+      token: 'test-token',
+      now: '2026-06-22T12:00:00.000Z',
+      previousState: {
+        releaseTag: 'v1.4.15',
+        dispatchedReleaseTag: 'v1.4.14',
+        pendingReleaseTag: 'v1.4.15',
+        pendingReleaseFirstSeenAt: '2026-06-22T09:00:00.000Z',
+        mainSha: 'sha-2'
+      },
+      fetchImpl
+    })
+
+    expect(result.dispatches).toEqual([])
+    expect(result.releasePolicy).toMatchObject({
+      skippedReason: 'outside_release_window',
+      candidate: {
+        tag: 'v1.4.15',
+        eligible: false,
+        releaseWindow: '16:00-18:00',
+        withinReleaseWindow: false
+      }
+    })
+    expect(calls.some((call) => call.url.includes('/dispatches'))).toBe(false)
+  })
+
   it('supports reusable watcher configuration through args', () => {
     expect(parseArgs([])).toMatchObject({ includePrereleases: false })
     expect(parseArgs(['--include-prereleases'])).toMatchObject({ includePrereleases: true })
@@ -221,6 +367,10 @@ describe('Hermes repository dispatch watcher', () => {
         '/tmp/state.json',
         '--stable-only',
         '--main-only',
+        '--release-min-age-hours',
+        '24',
+        '--release-window',
+        '16:00-18:00',
         '--release-event-type',
         'source_release',
         '--main-event-type',
@@ -233,6 +383,9 @@ describe('Hermes repository dispatch watcher', () => {
       includePrereleases: false,
       watchRelease: false,
       watchMain: true,
+      batchLatestStable: true,
+      releaseMinAgeHours: 24,
+      releaseWindow: '16:00-18:00',
       releaseEventType: 'source_release',
       mainEventType: 'source_main'
     })
