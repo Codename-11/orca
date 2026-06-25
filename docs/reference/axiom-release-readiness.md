@@ -148,13 +148,13 @@ GitHub webhook is unavailable. `config/scripts/hermes-repository-dispatch-watche
 polls the latest semver upstream tag and upstream `main` SHA, stores last-seen
 state under `~/.hermes/state/`, and dispatches only changed surfaces to the two
 workflows above. Orca's unattended release lane batches latest-stable tags behind
-a configurable min-age quiet window (and optional UTC release window), so upstream
-stable bursts record as pending state and only the newest eligible stable tag
-starts the release workflow. The watcher is silent on success, dispatches the
-current snapshot once on first run so a newly-created watcher does not miss an
-already visible upstream tag, and is documented in
-`docs/reference/hermes-repository-dispatch-watcher.md` so the pattern can be
-reused for other upstream/fork watchers.
+a configurable quiet/min-age period plus a max-wait cap, so upstream stable bursts
+record as pending state, dispatch the newest stable after a short quiet period
+when possible, and still cut the newest stable if upstream never leaves a quiet
+gap. The watcher is silent on success, dispatches the current snapshot once on
+first run so a newly-created watcher does not miss an already visible upstream
+tag, and is documented in `docs/reference/hermes-repository-dispatch-watcher.md`
+so the pattern can be reused for other upstream/fork watchers.
 
 Example dispatch payloads for a webhook bridge:
 
