@@ -13,6 +13,7 @@ function releaseBatchingEnabled(options) {
     options.batchLatestStable ||
     options.recordOnly ||
     nonNegativeNumber(options.releaseMinAgeHours, 0) > 0 ||
+    nonNegativeNumber(options.releaseMaxWaitHours, 0) > 0 ||
     options.releaseWindow
   )
 }
@@ -82,11 +83,13 @@ function buildBatchedReleaseDecision({
   releaseEventType,
   source,
   releaseMinAgeHours,
+  releaseMaxWaitHours,
   releaseWindow,
   recordOnly,
   now
 }) {
   const minAgeHours = nonNegativeNumber(releaseMinAgeHours, 0)
+  const maxWaitHours = nonNegativeNumber(releaseMaxWaitHours, 0)
   const parsedWindow = parseReleaseWindow(releaseWindow)
   const latestStableTag = current.releaseTag || ''
   const previousObservedTag = previous?.releaseTag ?? ''
@@ -108,7 +111,8 @@ function buildBatchedReleaseDecision({
       releaseTag: latestStableTag,
       dispatchedReleaseTag: previousDispatchedTag,
       pendingReleaseTag: '',
-      pendingReleaseFirstSeenAt: ''
+      pendingReleaseFirstSeenAt: '',
+      pendingReleaseBatchStartedAt: ''
     }
   }
 
@@ -138,19 +142,32 @@ function buildBatchedReleaseDecision({
     previousPendingTag === latestStableTag
       ? isoOrEmpty(previous?.pendingReleaseFirstSeenAt) || nowIso
       : nowIso
+  const batchStartedAt = previousPendingTag
+    ? isoOrEmpty(previous?.pendingReleaseBatchStartedAt) ||
+      isoOrEmpty(previous?.pendingReleaseFirstSeenAt) ||
+      firstSeenAt
+    : firstSeenAt
   const firstSeenDate = new Date(firstSeenAt)
   const firstSeenTime = Number.isNaN(firstSeenDate.getTime())
     ? now.getTime()
     : firstSeenDate.getTime()
+  const batchStartedDate = new Date(batchStartedAt)
+  const batchStartedTime = Number.isNaN(batchStartedDate.getTime())
+    ? firstSeenTime
+    : batchStartedDate.getTime()
   const ageMs = Math.max(0, now.getTime() - firstSeenTime)
+  const batchAgeMs = Math.max(0, now.getTime() - batchStartedTime)
   const minAgeMs = minAgeHours * MILLISECONDS_PER_HOUR
+  const maxWaitMs = maxWaitHours * MILLISECONDS_PER_HOUR
   const ageHours = ageMs / MILLISECONDS_PER_HOUR
+  const batchAgeHours = batchAgeMs / MILLISECONDS_PER_HOUR
+  const maxWaitElapsed = maxWaitMs > 0 && batchAgeMs >= maxWaitMs
   const withinReleaseWindow = isWithinReleaseWindow(now, parsedWindow)
 
   let skippedReason = ''
   if (recordOnly) {
     skippedReason = 'record_only'
-  } else if (ageMs < minAgeMs) {
+  } else if (ageMs < minAgeMs && !maxWaitElapsed) {
     skippedReason = 'release_min_age'
   } else if (!withinReleaseWindow) {
     skippedReason = 'outside_release_window'
@@ -165,8 +182,12 @@ function buildBatchedReleaseDecision({
     eligible,
     skippedReason,
     firstSeenAt,
+    batchStartedAt,
     ageHours,
+    batchAgeHours,
     minAgeHours,
+    maxWaitHours,
+    maxWaitElapsed,
     releaseWindow: parsedWindow?.label ?? '',
     withinReleaseWindow
   }
@@ -189,6 +210,7 @@ function buildBatchedReleaseDecision({
 
   decision.statePatch.pendingReleaseTag = latestStableTag
   decision.statePatch.pendingReleaseFirstSeenAt = firstSeenAt
+  decision.statePatch.pendingReleaseBatchStartedAt = batchStartedAt
   return decision
 }
 

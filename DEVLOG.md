@@ -6,6 +6,20 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-06-25 — Added max-wait cap to batched upstream release watcher
+
+Fixed the starvation edge in the Axiom upstream release watcher. Batched stable releases now track both the current tag's quiet age and the pending batch age: the newest stable tag dispatches after the configured quiet period, or after the batch reaches `--release-max-wait-hours`, whichever comes first. This keeps coalescing upstream bursts while preventing endless tag churn from blocking Axiom releases forever. The recommended live wrapper now uses `--release-min-age-hours 12 --release-max-wait-hours 24`.
+
+Verification:
+
+- `pnpm install --frozen-lockfile` → passed. Node engine warning only (`wanted node 24`, local `v22.22.2`).
+- `pnpm exec vitest run --config config/vitest.config.ts config/scripts/hermes-repository-dispatch-watcher.test.mjs config/scripts/axiom-upstream-sync-release.test.mjs` → 2 files / 35 tests passed.
+- `pnpm exec oxlint config/scripts/hermes-repository-dispatch-watcher.mjs config/scripts/hermes-repository-dispatch-release-policy.mjs config/scripts/hermes-repository-dispatch-watcher.test.mjs docs/reference/hermes-repository-dispatch-watcher.md docs/reference/axiom-release-readiness.md` → 0 warnings / 0 errors.
+- `pnpm exec oxfmt --check config/scripts/hermes-repository-dispatch-watcher.mjs config/scripts/hermes-repository-dispatch-release-policy.mjs config/scripts/hermes-repository-dispatch-watcher.test.mjs docs/reference/hermes-repository-dispatch-watcher.md docs/reference/axiom-release-readiness.md DEVLOG.md` → passed after formatting the watcher reference doc.
+- `git diff --check` → passed.
+
+---
+
 ## 2026-06-22 — Extracted Forge task controls from TaskPage hot file
 
 Created the first fork-footprint extraction seam for the provider/Forge task surface on `feat/provider-footprint-extraction`. The Forge task control bar, Forge preset/sort metadata, project filter sentinel, workspace selector, connection badge, search handling, agent/project filters, view toggle, refresh, and new-issue action now live in fork-owned `src/renderer/src/components/forge/ForgeTaskControls.tsx`; `TaskPage.tsx` keeps only a thin `<ForgeTaskControls ... />` props seam plus upstream/fork flow state. This preserves cross-provider task-page orchestration in the hot file while reducing the Forge-only UI footprint that daily upstream merges need to reconcile.

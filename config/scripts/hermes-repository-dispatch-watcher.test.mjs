@@ -252,7 +252,8 @@ describe('Hermes repository dispatch watcher', () => {
       releaseTag: 'v1.4.15',
       dispatchedReleaseTag: 'v1.4.14',
       pendingReleaseTag: 'v1.4.15',
-      pendingReleaseFirstSeenAt: '2026-06-22T12:00:00.000Z'
+      pendingReleaseFirstSeenAt: '2026-06-22T12:00:00.000Z',
+      pendingReleaseBatchStartedAt: '2026-06-22T12:00:00.000Z'
     })
   })
 
@@ -305,7 +306,76 @@ describe('Hermes repository dispatch watcher', () => {
       releaseTag: 'v1.4.16',
       dispatchedReleaseTag: 'v1.4.16',
       pendingReleaseTag: '',
-      pendingReleaseFirstSeenAt: ''
+      pendingReleaseFirstSeenAt: '',
+      pendingReleaseBatchStartedAt: ''
+    })
+  })
+
+  it('dispatches the newest stable tag when the batch max wait elapses', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'orca-watcher-'))
+    const stateFile = join(dir, 'state.json')
+    const { fetchImpl, calls } = createFetchMock({
+      tags: ['v1.4.16', 'v1.4.15', 'v1.4.14'],
+      mainSha: 'sha-2'
+    })
+
+    const result = await runWatcher({
+      upstreamRepo: 'stablyai/orca',
+      targetRepo: 'Codename-11/orca',
+      stateFile,
+      upstreamBranch: 'main',
+      includePrereleases: false,
+      releaseEventType: 'upstream_release',
+      mainEventType: 'upstream_main',
+      source: 'hermes_watcher',
+      watchRelease: true,
+      watchMain: false,
+      batchLatestStable: true,
+      releaseMinAgeHours: 24,
+      releaseMaxWaitHours: 24,
+      token: 'test-token',
+      now: '2026-06-23T12:00:00.000Z',
+      previousState: {
+        releaseTag: 'v1.4.15',
+        dispatchedReleaseTag: 'v1.4.14',
+        pendingReleaseTag: 'v1.4.15',
+        pendingReleaseFirstSeenAt: '2026-06-22T11:00:00.000Z',
+        pendingReleaseBatchStartedAt: '2026-06-22T11:00:00.000Z',
+        mainSha: 'sha-2'
+      },
+      fetchImpl
+    })
+
+    expect(result.dispatches).toEqual([
+      {
+        kind: 'release',
+        eventType: 'upstream_release',
+        payload: {
+          upstream_tag: 'v1.4.16',
+          previous_upstream_tag: 'v1.4.14',
+          source: 'hermes_watcher'
+        }
+      }
+    ])
+    expect(result.releasePolicy).toMatchObject({
+      skippedReason: '',
+      candidate: {
+        tag: 'v1.4.16',
+        eligible: true,
+        firstSeenAt: '2026-06-23T12:00:00.000Z',
+        batchStartedAt: '2026-06-22T11:00:00.000Z',
+        minAgeHours: 24,
+        maxWaitHours: 24,
+        maxWaitElapsed: true
+      }
+    })
+    expect(calls.filter((call) => call.url.includes('/dispatches'))).toHaveLength(1)
+    expect(JSON.parse(readFileSync(stateFile, 'utf8'))).toMatchObject({
+      releaseTag: 'v1.4.16',
+      dispatchedReleaseTag: 'v1.4.16',
+      pendingReleaseTag: '',
+      pendingReleaseFirstSeenAt: '',
+      pendingReleaseBatchStartedAt: ''
     })
   })
 
@@ -369,6 +439,8 @@ describe('Hermes repository dispatch watcher', () => {
         '--main-only',
         '--release-min-age-hours',
         '24',
+        '--release-max-wait-hours',
+        '36',
         '--release-window',
         '16:00-18:00',
         '--release-event-type',
@@ -385,6 +457,7 @@ describe('Hermes repository dispatch watcher', () => {
       watchMain: true,
       batchLatestStable: true,
       releaseMinAgeHours: 24,
+      releaseMaxWaitHours: 36,
       releaseWindow: '16:00-18:00',
       releaseEventType: 'source_release',
       mainEventType: 'source_main'

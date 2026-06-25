@@ -72,6 +72,7 @@ function parseArgs(argv) {
     bootstrapDispatch: envFlag('WATCHER_BOOTSTRAP_DISPATCH', true),
     batchLatestStable: envFlag('WATCHER_BATCH_LATEST_STABLE', false),
     releaseMinAgeHours: nonNegativeNumber(envNumber('WATCHER_RELEASE_MIN_AGE_HOURS', 0)),
+    releaseMaxWaitHours: nonNegativeNumber(envNumber('WATCHER_RELEASE_MAX_WAIT_HOURS', 0)),
     releaseWindow: envString('WATCHER_RELEASE_WINDOW', ''),
     recordOnly: envFlag('WATCHER_RECORD_ONLY', false),
     watchRelease: true,
@@ -116,6 +117,9 @@ function parseArgs(argv) {
       args.batchLatestStable = false
     } else if (arg === '--release-min-age-hours') {
       args.releaseMinAgeHours = nonNegativeNumber(argv[++i], 0)
+      args.batchLatestStable = true
+    } else if (arg === '--release-max-wait-hours') {
+      args.releaseMaxWaitHours = nonNegativeNumber(argv[++i], 0)
       args.batchLatestStable = true
     } else if (arg === '--release-window') {
       args.releaseWindow = argv[++i] ?? ''
@@ -401,6 +405,7 @@ async function runWatcher(options = {}) {
         releaseEventType: options.releaseEventType,
         source: options.source,
         releaseMinAgeHours: options.releaseMinAgeHours,
+        releaseMaxWaitHours: options.releaseMaxWaitHours,
         releaseWindow: options.releaseWindow,
         recordOnly: options.recordOnly,
         now
