@@ -94,7 +94,7 @@ describe('electron-builder config', () => {
     expect(electronBuilderConfig.linux.desktop.entry.StartupWMClass).toBe('orca')
   })
 
-  it('builds RPMs without changing existing Linux artifact names', () => {
+  it('uses Linux package targets without changing existing artifact names', () => {
     expect(electronBuilderConfig.linux.target).toEqual(['AppImage', 'deb', 'rpm'])
     expect(electronBuilderConfig.appImage.artifactName).toBe('orca-linux.${ext}')
     expect(electronBuilderConfig.deb.artifactName).toBe('orca-ide_${version}_${arch}.${ext}')
@@ -102,6 +102,12 @@ describe('electron-builder config', () => {
       packageName: 'orca-ide',
       artifactName: 'orca-ide-${version}.${arch}.${ext}'
     })
+  })
+
+  it('uses a distinct AppImage name for Linux arm64 release uploads', () => {
+    const config = loadElectronBuilderConfig({ ORCA_LINUX_ARM64_RELEASE: '1' })
+
+    expect(config.appImage.artifactName).toBe('orca-linux-arm64.${ext}')
   })
 
   it('uses Orca native rebuild hook by default', () => {

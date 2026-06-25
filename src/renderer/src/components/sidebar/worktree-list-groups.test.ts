@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { getExecutionHostLabel } from '../../../../shared/execution-host'
+import { projectHostSetupProjectionFromRepos } from '../../../../shared/project-host-setup-projection'
 import {
   ALL_GROUP_META,
   buildRows,
@@ -358,6 +359,105 @@ describe('buildRows with pinned worktrees', () => {
       { type: 'header', key: 'project:github:stablyai/orca', label: 'Orca', count: 2 },
       { type: 'item', worktree: { id: worktree.id }, hostContextLabel: LOCAL_HOST_LABEL },
       { type: 'item', worktree: { id: remoteWorktree.id }, hostContextLabel: 'gpu-vm' }
+    ])
+  })
+
+  it('renders same-project records with git remote identity as one mixed-host project header', () => {
+    const localRepo: Repo = {
+      ...repo,
+      id: 'local-sample-app',
+      path: '/Users/alice/work/sample-app',
+      displayName: 'sample-app',
+      gitRemoteIdentity: {
+        canonicalKey: 'git.company.test/team/sample-app',
+        remoteName: 'origin',
+        remoteUrl: 'git@git.company.test:team/sample-app.git'
+      }
+    }
+    const sshRepo: Repo = {
+      ...repo,
+      id: 'ssh-sample-app',
+      path: '/home/alice/src/sample-app',
+      displayName: 'sample-app',
+      connectionId: 'build server',
+      gitRemoteIdentity: {
+        canonicalKey: 'git.company.test/team/sample-app',
+        remoteName: 'origin',
+        remoteUrl: 'https://git.company.test/team/sample-app.git'
+      }
+    }
+    const runtimeRepo: Repo = {
+      ...repo,
+      id: 'runtime-sample-app',
+      path: '/workspace/sample-app',
+      displayName: 'sample-app',
+      executionHostId: 'runtime:dev-container',
+      gitRemoteIdentity: {
+        canonicalKey: 'git.company.test/team/sample-app',
+        remoteName: 'origin',
+        remoteUrl: 'ssh://git@git.company.test/team/sample-app.git'
+      }
+    }
+    const localWorktree: Worktree = {
+      ...worktree,
+      id: 'wt-local-sample-app',
+      repoId: localRepo.id,
+      path: '/Users/alice/work/sample-app-feature'
+    }
+    const sshWorktree: Worktree = {
+      ...worktree,
+      id: 'wt-ssh-sample-app',
+      repoId: sshRepo.id,
+      path: '/home/alice/src/sample-app-feature'
+    }
+    const runtimeWorktree: Worktree = {
+      ...worktree,
+      id: 'wt-runtime-sample-app',
+      repoId: runtimeRepo.id,
+      path: '/workspace/sample-app-feature'
+    }
+    const projection = projectHostSetupProjectionFromRepos([localRepo, sshRepo, runtimeRepo])
+    const rows = buildRows(
+      'repo',
+      [localWorktree, sshWorktree, runtimeWorktree],
+      new Map([
+        [localRepo.id, localRepo],
+        [sshRepo.id, sshRepo],
+        [runtimeRepo.id, runtimeRepo]
+      ]),
+      null,
+      new Set(),
+      undefined,
+      undefined,
+      undefined,
+      {},
+      new Map([
+        [localWorktree.id, localWorktree],
+        [sshWorktree.id, sshWorktree],
+        [runtimeWorktree.id, runtimeWorktree]
+      ]),
+      false,
+      undefined,
+      [],
+      new Set(),
+      new Map(),
+      [],
+      {
+        projects: projection.projects,
+        projectHostSetups: projection.setups
+      }
+    )
+
+    expect(rows).toMatchObject([
+      {
+        type: 'header',
+        key: 'project:git:git.company.test/team/sample-app',
+        label: 'sample-app',
+        count: 3
+      },
+      { type: 'item', worktree: { id: localWorktree.id }, hostContextLabel: LOCAL_HOST_LABEL },
+      { type: 'item', worktree: { id: sshWorktree.id }, hostContextLabel: 'build server' },
+      { type: 'item', worktree: { id: runtimeWorktree.id }, hostContextLabel: 'dev-container' }
     ])
   })
 
@@ -1365,6 +1465,89 @@ describe('project groups', () => {
     ])
   })
 
+  it('renders repos whose Project Group metadata is missing as top-level repo rows', () => {
+    const group: ProjectGroup = {
+      id: 'group-1',
+      name: 'Platform',
+      parentPath: '/platform',
+      parentGroupId: null,
+      createdFrom: 'folder-scan',
+      tabOrder: 0,
+      isCollapsed: false,
+      color: null,
+      createdAt: 1,
+      updatedAt: 1
+    }
+    const repoWithMissingGroup: Repo = { ...repo, projectGroupId: 'missing-group' }
+
+    const rows = buildRows(
+      'repo',
+      [worktree],
+      new Map([[repoWithMissingGroup.id, repoWithMissingGroup]]),
+      null,
+      new Set(),
+      new Map([[repoWithMissingGroup.id, 0]]),
+      undefined,
+      'manual',
+      {},
+      new Map([[worktree.id, worktree]]),
+      false,
+      undefined,
+      [group]
+    )
+
+    expect(rows.filter((row) => row.type === 'header').map((row) => row.key)).toEqual([
+      'project-group:group-1',
+      'repo:repo-1'
+    ])
+    expect(rows.find((row) => row.type === 'header' && row.key === 'repo:repo-1')).toMatchObject({
+      projectGroupDepth: 0
+    })
+  })
+
+  it('does not render collapsed child-group repos as missing metadata fallbacks', () => {
+    const parentGroup: ProjectGroup = {
+      id: 'parent-group',
+      name: 'Platform',
+      parentPath: '/platform',
+      parentGroupId: null,
+      createdFrom: 'folder-scan',
+      tabOrder: 0,
+      isCollapsed: false,
+      color: null,
+      createdAt: 1,
+      updatedAt: 1
+    }
+    const childGroup: ProjectGroup = {
+      ...parentGroup,
+      id: 'child-group',
+      name: 'Services',
+      parentPath: '/platform/services',
+      parentGroupId: parentGroup.id
+    }
+    const repoInChildGroup: Repo = { ...repo, projectGroupId: childGroup.id }
+
+    const rows = buildRows(
+      'repo',
+      [worktree],
+      new Map([[repoInChildGroup.id, repoInChildGroup]]),
+      null,
+      new Set(['project-group:parent-group']),
+      new Map([[repoInChildGroup.id, 0]]),
+      undefined,
+      'manual',
+      {},
+      new Map([[worktree.id, worktree]]),
+      false,
+      undefined,
+      [parentGroup, childGroup]
+    )
+
+    expect(rows.filter((row) => row.type === 'header').map((row) => row.key)).toEqual([
+      'project-group:parent-group'
+    ])
+  })
+
   it('disambiguates duplicate top-level repo basenames without renaming repos', () => {
     const group: ProjectGroup = {
       id: 'group-1',
@@ -2106,10 +2289,58 @@ describe('project groups', () => {
 
   it('returns both parent Project Group and repo keys for grouped repo reveals', () => {
     const groupedRepo: Repo = { ...repo, projectGroupId: 'group-1' }
+    const group: ProjectGroup = {
+      id: 'group-1',
+      name: 'Platform',
+      parentPath: '/platform',
+      parentGroupId: null,
+      createdFrom: 'folder-scan',
+      tabOrder: 0,
+      isCollapsed: false,
+      color: null,
+      createdAt: 1,
+      updatedAt: 1
+    }
 
     expect(
-      getGroupKeysForWorktree('repo', worktree, new Map([[groupedRepo.id, groupedRepo]]), null)
+      getGroupKeysForWorktree(
+        'repo',
+        worktree,
+        new Map([[groupedRepo.id, groupedRepo]]),
+        null,
+        undefined,
+        undefined,
+        [group]
+      )
     ).toEqual(['project-group:group-1', 'repo:repo-1'])
+  })
+
+  it('returns only the repo key for missing Project Group metadata reveals', () => {
+    const groupedRepo: Repo = { ...repo, projectGroupId: 'missing-group' }
+    const loadedGroup: ProjectGroup = {
+      id: 'loaded-group',
+      name: 'Loaded',
+      parentPath: '/loaded',
+      parentGroupId: null,
+      createdFrom: 'folder-scan',
+      tabOrder: 0,
+      isCollapsed: false,
+      color: null,
+      createdAt: 1,
+      updatedAt: 1
+    }
+
+    expect(
+      getGroupKeysForWorktree(
+        'repo',
+        worktree,
+        new Map([[groupedRepo.id, groupedRepo]]),
+        null,
+        undefined,
+        undefined,
+        [loadedGroup]
+      )
+    ).toEqual(['repo:repo-1'])
   })
 
   it('returns only the repo key for ungrouped repo reveals', () => {
@@ -2374,6 +2605,13 @@ describe('WorktreeList header styles', () => {
     expect(source).toContain('resolveProjectGroupHeaderColor({')
     expect(source).toContain('headerKey: row.key')
     expect(source).toContain('color={repoHeaderColor}')
+  })
+
+  it('adapts projected setup rows for sidebar project grouping', () => {
+    const source = readWorktreeListSource()
+
+    expect(source).toContain('const projectHostSetupProjection = useProjectHostSetupProjection()')
+    expect(source).toContain('projectHostSetups: projectHostSetupProjection.setups')
   })
 })
 

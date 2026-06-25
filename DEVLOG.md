@@ -6,6 +6,20 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-06-25 — Remediated upstream v1.4.98 release sync
+
+Resolved the Axiom upstream sync remediation branch for `v1.4.98` after the forced release dispatch hit merge conflicts. Preserved Axiom fork release invariants (`1.4.98-axiom.1`, env-driven electron-builder identity/artifact names, platform-scoped asset verification) while accepting upstream Linux arm64 release assets and renderer/terminal split updates. Reintroduced MiMo title labeling and kept hidden startup renderer-query parsing for agent launches so OSC 10/11 / terminal query replies still flow through xterm while hidden.
+
+Verification:
+
+- `git grep -n -E '^(<<<<<<<|=======|>>>>>>>)' -- . ':!node_modules'` — no real merge markers.
+- `node --check config/electron-builder.config.cjs`
+- `node --check config/scripts/electron-builder-config.test.mjs`
+- `node --check config/scripts/verify-release-required-assets.mjs`
+- `pnpm exec vitest run --config config/vitest.config.ts config/scripts/electron-builder-config.test.mjs config/scripts/verify-release-required-assets.test.mjs src/shared/agent-detection.test.ts src/renderer/src/lib/pane-manager/windows-pty-compatibility.test.ts src/renderer/src/components/terminal-pane/pty-connection.test.ts src/renderer/src/components/terminal-pane/pty-dispatcher-pi-routing.test.ts config/scripts/axiom-upstream-sync-release.test.mjs` — 281 passed.
+
+---
+
 ## 2026-06-25 — Added max-wait cap to batched upstream release watcher
 
 Fixed the starvation edge in the Axiom upstream release watcher. Batched stable releases now track both the current tag's quiet age and the pending batch age: the newest stable tag dispatches after the configured quiet period, or after the batch reaches `--release-max-wait-hours`, whichever comes first. This keeps coalescing upstream bursts while preventing endless tag churn from blocking Axiom releases forever. The recommended live wrapper now uses `--release-min-age-hours 12 --release-max-wait-hours 24`.

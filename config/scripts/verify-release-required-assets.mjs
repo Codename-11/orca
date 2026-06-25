@@ -27,15 +27,20 @@ export function getRequiredReleaseAssetNames(
   { platforms = releasePlatformsFromEnv(), artifactBasename = artifactBasenameFromEnv() } = {}
 ) {
   const version = tag.replace(/^v/i, '')
+
   const names = []
   const selectedPlatforms = new Set(platforms)
 
   if (selectedPlatforms.has('linux')) {
     names.push(
       'latest-linux.yml',
-      'orca-linux.AppImage',
+      'latest-linux-arm64.yml',
+      `${artifactBasename}-linux.AppImage`,
+      `${artifactBasename}-linux-arm64.AppImage`,
       `orca-ide_${version}_amd64.deb`,
-      `orca-ide-${version}.x86_64.rpm`
+      `orca-ide_${version}_arm64.deb`,
+      `orca-ide-${version}.x86_64.rpm`,
+      `orca-ide-${version}.aarch64.rpm`
     )
   }
 
@@ -66,6 +71,7 @@ export function getRequiredReleaseAssetNames(
   }
 
   return names
+
 }
 
 export function extractManifestAssetNames(manifestText) {
@@ -128,7 +134,12 @@ export async function verifyRequiredReleaseAssets({ repo, tag, token }) {
   const assetsByName = new Map(release.assets.map((asset) => [asset.name, asset]))
 
   const requiredNames = new Set(getRequiredReleaseAssetNames(tag))
-  const manifestNames = ['latest-linux.yml', 'latest-mac.yml', 'latest.yml']
+  const manifestNames = [
+    'latest-linux.yml',
+    'latest-linux-arm64.yml',
+    'latest-mac.yml',
+    'latest.yml'
+  ]
 
   for (const manifestName of manifestNames) {
     const manifestAsset = assetsByName.get(manifestName)

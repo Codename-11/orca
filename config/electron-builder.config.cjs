@@ -9,6 +9,7 @@ const {
 } = require('./packaged-runtime-node-modules.cjs')
 
 const isMacRelease = process.env.ORCA_MAC_RELEASE === '1'
+const isLinuxArm64Release = process.env.ORCA_LINUX_ARM64_RELEASE === '1'
 const skipElectronBuilderRebuild = process.env.ORCA_SKIP_ELECTRON_BUILDER_REBUILD === '1'
 
 function envString(name, fallback) {
@@ -350,7 +351,9 @@ module.exports = {
     category: 'Utility'
   },
   appImage: {
-    artifactName: `${artifactBaseName}-linux.${electronBuilderExtMacro}`
+    artifactName: isLinuxArm64Release
+      ? `${artifactBaseName}-linux-arm64.${electronBuilderExtMacro}`
+      : `${artifactBaseName}-linux.${electronBuilderExtMacro}`
   },
   deb: {
     packageName: linuxDebPackageName,

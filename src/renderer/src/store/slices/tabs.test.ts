@@ -850,6 +850,48 @@ describe('TabsSlice', () => {
   // on that group's active terminal tab. Without this, the bell lingers
   // until the tab is clicked a second time.
   describe('focusGroup', () => {
+    it('does not broadcast active-surface writes when the focused group is already current', () => {
+      const editorFileId = '/tmp/feature/src/main.ts'
+      const tab = store.getState().createUnifiedTab(WT, 'editor', {
+        id: 'editor-tab-1',
+        entityId: editorFileId,
+        label: 'main.ts'
+      })
+      const groupId = store.getState().groupsByWorktree[WT][0].id
+      store.setState({
+        activeWorktreeId: WT,
+        openFiles: [makeOpenFile({ id: editorFileId, worktreeId: WT })],
+        activeGroupIdByWorktree: { [WT]: groupId },
+        activeFileId: editorFileId,
+        activeFileIdByWorktree: { [WT]: editorFileId },
+        activeBrowserTabId: null,
+        activeBrowserTabIdByWorktree: { [WT]: null },
+        activeTabId: null,
+        activeTabIdByWorktree: { [WT]: null },
+        activeTabType: 'editor',
+        activeTabTypeByWorktree: { [WT]: 'editor' },
+        groupsByWorktree: {
+          [WT]: [
+            {
+              ...store.getState().groupsByWorktree[WT][0],
+              activeTabId: tab.id
+            }
+          ]
+        }
+      })
+      const before = store.getState()
+      const listener = vi.fn()
+      const unsubscribe = store.subscribe(listener)
+
+      store.getState().focusGroup(WT, groupId)
+      unsubscribe()
+
+      expect(listener).not.toHaveBeenCalled()
+      expect(store.getState().activeGroupIdByWorktree).toBe(before.activeGroupIdByWorktree)
+      expect(store.getState().activeFileIdByWorktree).toBe(before.activeFileIdByWorktree)
+      expect(store.getState().activeTabTypeByWorktree).toBe(before.activeTabTypeByWorktree)
+    })
+
     // Why: focusGroup is fired on every pointerdown within a split group's
     // chrome (onPointerDown + onFocusCapture in TabGroupPanel). Clearing the
     // tab-level bell here is fine — the user is now looking at this group.
@@ -974,9 +1016,7 @@ describe('TabsSlice', () => {
       const state = store.getState()
       const moved = state.unifiedTabsByWorktree[WT].find((item) => item.id === tab.id)
       expect(moved?.groupId).toBe(targetGroupId)
-      expect(
-        state.groupsByWorktree[WT].find((group) => group.id === sourceGroupId)?.tabOrder
-      ).toEqual([])
+      expect(state.groupsByWorktree[WT].find((group) => group.id === sourceGroupId)).toBeUndefined()
       expect(
         state.groupsByWorktree[WT].find((group) => group.id === targetGroupId)?.tabOrder
       ).toEqual([tab.id])
@@ -1198,6 +1238,40 @@ describe('TabsSlice', () => {
       expect(state.groupsByWorktree[WT]).toHaveLength(1)
       expect(state.groupsByWorktree[WT][0].tabOrder).toEqual([onlyTab.id])
       expect(state.layoutByWorktree[WT]).toEqual({ type: 'leaf', groupId: sourceGroupId })
+    })
+
+    it('treats splitting the only tab onto the adjacent sibling edge as a no-op', () => {
+      store.getState().createUnifiedTab(WT, 'editor', {
+        id: 'file-a.ts',
+        label: 'file-a.ts'
+      })
+      const right = store.getState().createUnifiedTab(WT, 'terminal', {
+        id: 'terminal-1',
+        label: 'Terminal 1'
+      })
+      const leftGroupId = store.getState().groupsByWorktree[WT][0].id
+
+      expect(
+        store.getState().dropUnifiedTab(right.id, {
+          groupId: leftGroupId,
+          splitDirection: 'right'
+        })
+      ).toBe(true)
+
+      const rightGroupId = store
+        .getState()
+        .unifiedTabsByWorktree[WT].find((tab) => tab.id === right.id)?.groupId
+      expect(rightGroupId).toBeTruthy()
+
+      const moved = store.getState().dropUnifiedTab(right.id, {
+        groupId: leftGroupId,
+        splitDirection: 'right'
+      })
+
+      expect(moved).toBe(false)
+      expect(
+        store.getState().unifiedTabsByWorktree[WT].find((tab) => tab.id === right.id)?.groupId
+      ).toBe(rightGroupId)
     })
   })
 
