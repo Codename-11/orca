@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import type { Page, TestInfo } from '@stablyai/playwright-test'
 import { test, expect } from './helpers/orca-app'
@@ -23,6 +23,14 @@ import {
 } from './terminal-column-probes'
 import { nodeTerminalCommand } from './terminal-node-command'
 import { waitForPtyShellEcho } from './terminal-pty-readiness'
+import {
+  EMOJI_TABLE_FIXTURE,
+  NARROW_TERMINAL_MAX_COLS,
+  emojiFixtureMarkdownTableScript,
+  emojiFixtureTableWidthMarker,
+  longMarkdownTableScript,
+  narrowSignerMarkdownTableScript
+} from './terminal-long-table-fixtures'
 
 type TerminalRenderDiagnostics = {
   cols: number
