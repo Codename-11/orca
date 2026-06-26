@@ -6,6 +6,32 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-06-26 — Remediated upstream v1.4.101 release sync
+
+Resolved the Axiom upstream sync remediation branch for `v1.4.101` / `axiom-v1.4.101-axiom.1` via the bot PR lane. Preserved the fork version (`1.4.101-axiom.1`), Axiom release identity/updater guards, side-by-side install assumptions, profile portability, Forge provider surfaces, and renderer-scoped terminal/PTY behavior while accepting upstream's work-item, runtime, sidebar, mobile PR, browser/editor, and terminal lifecycle updates.
+
+Conflict notes:
+
+- Kept Axiom's hidden renderer PTY delivery, pane spawn reservation cleanup, native Windows ConPTY detection, terminal spawn-command metadata, and stable pane-key migration aliases while accepting upstream runtime-owned spawn/Agent Teams/env changes.
+- Preserved background agent status stream handling and fork profile-portability startup delivery in `launch-agent-background-session.ts`.
+- Extended the sidebar fallback path-status cache key to cover upstream's new direct `path` request scope.
+- Reviewed staged deletions against `config/axiom-merge-remediation-policy.json`; only upstream tab-strip pointer activation files were deleted, with no protected deletion path hits.
+
+Verification:
+
+- `CI=true pnpm install --frozen-lockfile` → passed. Node engine warning only (`wanted node 24`, local `v22.22.2`).
+- `pnpm run typecheck` → passed. Node engine warning only (`wanted node 24`, local `v22.22.2`).
+- `pnpm exec vitest run --config config/vitest.config.ts src/shared/task-providers.test.ts src/main/axiom-release-hardening.test.ts src/main/updater-endpoints.test.ts src/main/app-build-identity.test.ts config/scripts/axiom-upstream-sync-release.test.mjs` → 5 files / 50 tests passed.
+- `pnpm exec oxlint config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml` → 0 warnings / 0 errors.
+- `pnpm exec oxfmt --check config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml config/axiom-merge-remediation-policy.json` → passed.
+- `pnpm exec vitest run --config config/vitest.config.ts src/main/ipc/pty.test.ts src/renderer/src/components/terminal-pane/pty-connection.test.ts src/renderer/src/components/terminal-pane/use-terminal-pane-lifecycle.test.ts src/renderer/src/components/sidebar/WorktreeList.test.tsx` → 3 matched files / 411 tests passed.
+- `pnpm exec oxlint src/main/ipc/pty.ts src/renderer/src/components/terminal-pane/pty-connection-types.ts src/renderer/src/components/terminal-pane/pty-connection.ts src/renderer/src/components/terminal-pane/use-terminal-pane-lifecycle.ts src/renderer/src/lib/launch-agent-background-session.ts src/main/github/work-item-details.test.ts src/renderer/src/components/sidebar/WorktreeList.tsx` → 0 warnings / 0 errors.
+- `pnpm exec oxfmt --check src/main/ipc/pty.ts src/renderer/src/components/terminal-pane/pty-connection-types.ts src/renderer/src/components/terminal-pane/pty-connection.ts src/renderer/src/components/terminal-pane/use-terminal-pane-lifecycle.ts src/renderer/src/lib/launch-agent-background-session.ts src/main/github/work-item-details.test.ts src/renderer/src/components/sidebar/WorktreeList.tsx` → passed.
+- `git grep -n -E '^(<<<<<<<|=======|>>>>>>>)' -- . ':!node_modules'` → no merge markers.
+- `git diff --check` → passed.
+
+---
+
 ## 2026-06-25 — Remediated upstream v1.4.98 release sync
 
 Resolved the Axiom upstream sync remediation branch for `v1.4.98` after the forced release dispatch hit merge conflicts. Preserved Axiom fork release invariants (`1.4.98-axiom.1`, env-driven electron-builder identity/artifact names, platform-scoped asset verification) while accepting upstream Linux arm64 release assets and renderer/terminal split updates. Reintroduced MiMo title labeling and kept hidden startup renderer-query parsing for agent launches so OSC 10/11 / terminal query replies still flow through xterm while hidden.

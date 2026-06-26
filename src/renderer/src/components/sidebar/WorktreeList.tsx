@@ -284,9 +284,13 @@ const USER_SCROLL_MEASUREMENT_ADJUSTMENT_SUPPRESS_MS = 500
 function getFallbackFolderWorkspacePathStatusCacheKey(
   request: FolderWorkspacePathStatusRequest
 ): string {
-  return request.scope === 'folder-workspace'
-    ? `folder-workspace:${request.folderWorkspaceId}`
-    : `project-group:${request.projectGroupId}`
+  if (request.scope === 'project-group') {
+    return `project-group:${request.projectGroupId}`
+  }
+  if (request.scope === 'path') {
+    return `path:${request.connectionId ?? ''}:${request.path}`
+  }
+  return `folder-workspace:${request.folderWorkspaceId}`
 }
 
 const EMPTY_FOLDER_WORKSPACE_PATH_STATUSES = {}
