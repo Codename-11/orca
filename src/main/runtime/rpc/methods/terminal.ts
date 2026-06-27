@@ -2171,7 +2171,10 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
         // Undefined when the PTY has never transitioned (filter is fail-open).
         // See docs/mobile-terminal-layout-state-machine.md.
         const layoutSeq = runtime.getLayout(ptyId)?.seq
-        const snapshotFrameSeq = serialized?.seq ?? layoutSeq
+        const snapshotFrameSeq =
+          typeof serialized?.seq === 'number' && serialized.seq > 0
+            ? serialized.seq
+            : (layoutSeq ?? serialized?.seq)
         const snapshotOutputSeq = serialized?.seq
         emit({
           type: 'subscribed',
