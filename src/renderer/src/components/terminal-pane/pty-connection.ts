@@ -25,7 +25,11 @@ import { safeFit } from '@/lib/pane-manager/pane-tree-ops'
 import { getFitOverrideForPty, bindPanePtyId } from '@/lib/pane-manager/mobile-fit-overrides'
 import { isPtyLocked } from '@/lib/pane-manager/mobile-driver-state'
 import { isPaneReplaying, replayIntoTerminal, replayIntoTerminalAsync } from './replay-guard'
-import { terminalOutputPrefersRenderRefresh } from '@/lib/pane-manager/terminal-complex-script'
+import {
+  terminalOutputPrefersRenderRefresh,
+  terminalRewriteOutputRenderRefreshDecision,
+  terminalRewriteOutputPrefersRenderRefresh
+} from '@/lib/pane-manager/terminal-complex-script'
 import {
   PANE_PTY_RESIZE_HOLD_FLUSH_EVENT,
   queuePanePtyResizeIfHeld,
@@ -1302,6 +1306,7 @@ export function connectPanePty(
     // we must republish when a pane loses its PTY instead of waiting for a
     // broader layout change that may never happen.
     scheduleRuntimeGraphSync()
+
     manager.setPaneGpuRendering(pane.id, true)
     const panes = manager.getPanes()
     if (panes.length <= 1) {
@@ -2333,9 +2338,6 @@ export function connectPanePty(
         return false
       }
       const state = useAppStore.getState()
-      if (startup.hasSleepingRecord) {
-        showSessionRestoredBanner()
-      }
       state.registerAgentLaunchConfig(cacheKey, startup.launchConfig, {
         agentType: startup.agent,
         launchToken: startup.launchToken,
@@ -2495,6 +2497,9 @@ export function connectPanePty(
             })
           }
           if (resolvedPtyId) {
+            if (coldRestoreOverride?.hasSleepingRecord) {
+              showSessionRestoredBanner()
+            }
             clearSleepingRecordAfterColdRestoreSpawn(coldRestoreOverride)
           } else if (
             paneStartup?.launchConfig ||
@@ -2697,6 +2702,8 @@ export function connectPanePty(
     }
     let foregroundImmediateBudgetChars = 0
     let foregroundImmediateBudgetWindowStart = 0
+    let foregroundRewriteChunkEndedWithCarriageReturn = false
+    let foregroundRewriteCsiScanTail = ''
 
     function canUseMainBufferSnapshot(ptyId: string | null): ptyId is string {
       return Boolean(ptyId) && !isRemoteRuntimePtyId(ptyId)
@@ -2898,33 +2905,29 @@ export function connectPanePty(
     }
 
     function containsWindowsRewriteControl(data: string): boolean {
-      if (data.includes('\r') || data.includes('\b')) {
-        return true
-      }
-      let escapeIndex = data.indexOf('\x1b[')
-      while (escapeIndex !== -1) {
-        for (let index = escapeIndex + 2; index < data.length; index++) {
-          const char = data[index]
-          if (char >= '0' && char <= '9') {
-            continue
-          }
-          if (char === ';' || char === '?') {
-            continue
-          }
-          if (char === 'J' || char === 'K') {
-            return true
-          }
-          break
-        }
-        escapeIndex = data.indexOf('\x1b[', escapeIndex + 2)
-      }
-      return false
+      return data.includes('\r') || terminalRewriteOutputPrefersRenderRefresh(data)
+    }
+
+    function foregroundRewriteOutputPrefersRenderRefresh(data: string): boolean {
+      const decision = terminalRewriteOutputRenderRefreshDecision(data, {
+        previousChunkEndsWithCarriageReturn: foregroundRewriteChunkEndedWithCarriageReturn,
+        previousRewriteCsiScanTail: foregroundRewriteCsiScanTail
+      })
+      foregroundRewriteChunkEndedWithCarriageReturn = decision.nextChunkEndsWithCarriageReturn
+      foregroundRewriteCsiScanTail = decision.nextRewriteCsiScanTail
+      return decision.prefersRenderRefresh
     }
 
     function shouldForceForegroundRenderRefresh(data: string): boolean {
+      const rewriteOutputPrefersRenderRefresh = foregroundRewriteOutputPrefersRenderRefresh(data)
       if (foregroundAnsiOutputPrefersRenderRefresh(data)) {
         // Why: Codex-style background SGR panels can paint cell fills while
         // glyphs lag behind; refresh only renderer-risk ANSI chunks, not all output.
+        return true
+      }
+      if (rewriteOutputPrefersRenderRefresh) {
+        // Why: resize fixes these panes because xterm's buffer is right but
+        // in-place redraw cells can remain stale in the renderer until repaint.
         return true
       }
       return (
@@ -2958,6 +2961,7 @@ export function connectPanePty(
       // cursor-only restores need row invalidation even outside DEC 2026.
       const nativeWindowsCursorRestore =
         shouldProtectNativeWindowsSynchronizedOutput && foreground && containsCursorRestore(data)
+      const foregroundRenderRefreshNeeded = foreground && shouldForceForegroundRenderRefresh(data)
       synchronizedForegroundOutputActive = nextSynchronizedForegroundOutputActive
       writeTerminalOutput(pane.terminal, data, {
         foreground,
@@ -2971,7 +2975,7 @@ export function connectPanePty(
           foreground &&
           (synchronizedForegroundOutput ||
             nativeWindowsCursorRestore ||
-            shouldForceForegroundRenderRefresh(data)),
+            foregroundRenderRefreshNeeded),
         followupForegroundRefresh: nativeWindowsCursorRestore,
         stripTransientCursorShows: shouldProtectNativeWindowsSynchronizedOutput && foreground,
         coalesceForeground: synchronizedForegroundOutput && synchronizedOutputEnded,
@@ -3200,6 +3204,31 @@ export function connectPanePty(
       hiddenOutputRestoreDeferredRetryAttempts = 0
     }
 
+    function drainPendingLiveChunksWithoutSnapshot(): void {
+      if (hiddenOutputRestorePendingOverflow) {
+        hiddenOutputRestorePendingChunks = []
+        hiddenOutputRestorePendingChars = 0
+        hiddenOutputRestorePendingOverflow = false
+        return
+      }
+      // Why: once snapshot retries are exhausted, these bounded chunks are the
+      // only known visible-era PTY bytes; replay them without overlap trimming.
+      while (hiddenOutputRestorePendingChunks.length > 0) {
+        const chunks = hiddenOutputRestorePendingChunks
+        hiddenOutputRestorePendingChunks = []
+        hiddenOutputRestorePendingChars = 0
+        for (const chunk of chunks) {
+          writePtyOutputToXterm(chunk.data, true)
+        }
+        if (hiddenOutputRestorePendingOverflow) {
+          hiddenOutputRestorePendingChunks = []
+          hiddenOutputRestorePendingChars = 0
+          hiddenOutputRestorePendingOverflow = false
+          return
+        }
+      }
+    }
+
     function clearHiddenOutputRestoreDeferredRetryTimer(): void {
       if (hiddenOutputRestoreDeferredRetryTimer === null) {
         return
@@ -3218,8 +3247,9 @@ export function connectPanePty(
         return
       }
       if (hiddenOutputRestoreDeferredRetryAttempts >= HIDDEN_OUTPUT_RESTORE_DEFERRED_RETRY_MAX) {
-        clearHiddenOutputRestoreState()
         writeRestoreUnavailableWarning()
+        drainPendingLiveChunksWithoutSnapshot()
+        clearHiddenOutputRestoreState()
         return
       }
       hiddenOutputRestoreDeferredRetryAttempts += 1
@@ -3699,6 +3729,9 @@ export function connectPanePty(
         const preparedStartup = coldRestoreStartup ?? buildColdRestoreAgentResumeStartup()
         const didPrepareResume = applyColdRestoreAgentResumeStartup(preparedStartup)
         if (didPrepareResume) {
+          if (preparedStartup?.hasSleepingRecord) {
+            showSessionRestoredBanner()
+          }
           clearSleepingRecordAfterColdRestoreSpawn(preparedStartup)
         }
         // Cold-restore means the daemon lost the session and spawned a
@@ -4220,7 +4253,11 @@ export function connectPanePty(
                   `Pending PTY spawn for tab ${deps.tabId} resolved without a PTY id, retrying fresh spawn`
                 )
               }
-              startFreshSpawn()
+              if (sleptRemoteColdRestoreStartup || hasSleepingAgentSession) {
+                startFreshColdRestoreAgentResume(sleptRemoteColdRestoreStartup ?? undefined)
+              } else {
+                startFreshSpawn()
+              }
               return
             }
             // Why: this attach path reuses a PTY spawned by an earlier mount.
@@ -4251,7 +4288,11 @@ export function connectPanePty(
           })
       } else {
         recordPtyConnectDiagnostic(`pane=${pane.id} -> FRESH SPAWN`)
-        startFreshColdRestoreAgentResume(sleptRemoteColdRestoreStartup)
+        if (sleptRemoteColdRestoreStartup || hasSleepingAgentSession) {
+          startFreshColdRestoreAgentResume(sleptRemoteColdRestoreStartup ?? undefined)
+        } else {
+          startFreshSpawn()
+        }
       }
     }
     scheduleRuntimeGraphSync()

@@ -4867,7 +4867,7 @@ describe('registerPtyHandlers', () => {
     const env = spawnCall[2].env as Record<string, string>
     expect(spawnCall[0]).toBe('wsl.exe')
     expect(env.ORCA_TERMINAL_HANDLE).toBe('term_wsl')
-    expect(env.WSLENV).toBe('ORCA_TERMINAL_HANDLE/u')
+    expect(env.WSLENV).toBe('ORCA_TERMINAL_HANDLE/u:POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD')
   })
 
   describe('Windows UTF-8 code page', () => {
@@ -7870,10 +7870,10 @@ describe('registerPtyHandlers', () => {
   })
 
   describe('main buffer snapshot dispatch', () => {
-    it('returns a sequenced main-owned terminal snapshot with clamped scrollback', async () => {
+    it('returns a hidden-output recovery snapshot with clamped scrollback', async () => {
       const runtime = {
         setPtyController: vi.fn(),
-        serializeMainTerminalBuffer: vi.fn().mockResolvedValue({
+        serializeHiddenOutputRecoveryBuffer: vi.fn().mockResolvedValue({
           data: 'snapshot\r\n',
           cols: 120,
           rows: 40,
@@ -7890,7 +7890,7 @@ describe('registerPtyHandlers', () => {
         opts: { scrollbackRows: 999_999 }
       })
 
-      expect(runtime.serializeMainTerminalBuffer).toHaveBeenCalledWith('pty-1', {
+      expect(runtime.serializeHiddenOutputRecoveryBuffer).toHaveBeenCalledWith('pty-1', {
         scrollbackRows: 50_000
       })
       // Why pendingDeliveryStartSeq === seq: the pending renderer-delivery

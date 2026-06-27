@@ -22,6 +22,7 @@ import {
   isPiTerminalTitle
 } from './agent-title-core'
 import type { AgentStatus } from './agent-title-core'
+import { getPiCompatibleSyntheticAgentStatus } from './pi-compatible-synthetic-title'
 
 /**
  * Strip working-status indicators so stale exit titles stop reporting working.
@@ -140,6 +141,13 @@ export function detectAgentStatusFromTitle(title: string): AgentStatus | null {
   }
   if (title.includes(GEMINI_IDLE)) {
     return 'idle'
+  }
+
+  // Why: resolve synthetic Pi/OMP permission/idle labels before the broader
+  // Pi and braille-spinner checks below.
+  const piCompatibleSyntheticAgentStatus = getPiCompatibleSyntheticAgentStatus(title)
+  if (piCompatibleSyntheticAgentStatus) {
+    return piCompatibleSyntheticAgentStatus
   }
 
   if (title.startsWith(`${CLAUDE_IDLE} `) || title === CLAUDE_IDLE) {
