@@ -4481,7 +4481,9 @@
           "copiedCommand": "已复制命令。",
           "failedToCopyCommand": "复制命令失败。",
           "copyCommandAria": "复制命令",
-          "runCommandDescription": "按 Enter 运行命令。"
+          "runCommandDescription": "按 Enter 运行命令。",
+          "5f818f12ab": "正在准备...",
+          "4c05b9d7cb": "正在准备设置终端。"
         },
         "AgentsPane": {
           "d83834f5e6": "检测已安装的智能体...",
@@ -5264,7 +5266,10 @@
           "4f2205f3b6": "启用 Orca CLI",
           "ff4b7e65d6": "让编码智能体使用 Orca CLI 命令控制活动手机模拟器。",
           "2a674aa810": "智能体手机模拟器控制",
-          "cdeaed9e37": "在 PATH 中注册 Orca CLI。"
+          "cdeaed9e37": "在 PATH 中注册 Orca CLI。",
+          "3d34423e88": "正在注册 Orca CLI",
+          "3be27641c9": "以便智能体 shell 可以运行模拟器命令。",
+          "3941719a56": "打开技能设置前正在检查 Orca CLI。"
         },
         "MobileEmulatorExamples": {
           "edf13dd03b": "复制",
@@ -9116,6 +9121,8 @@
                   "2d8f185fbc": "在提交部分暂存的文件之前暂存所有更改",
                   "a6457b46a7": "提交前解决冲突",
                   "484f45c439": "{{value0}} 正在进行中...",
+                  "6f7a8b9c0d": "Remote operation in progress…",
+                  "7f8a9b0c1d": "Remote operation in progress — try again once it finishes",
                   "74fc171e99": "强制推送正在进行中...",
                   "16aee3a5c1": "正在进行中……",
                   "e61b0d7a3c": "请先检出分支再发布 commits。",
@@ -9135,6 +9142,7 @@
                   "d8a4c0e369": "Authenticate before creating a {{value0}}.",
                   "e9b5d1f470": "Check out a branch before creating a {{value0}}.",
                   "f0c6e2a581": "This branch is not ready for a {{value0}} yet.",
+                  "8f9a0b1c2d": "Nothing to commit. Branch is up to date.",
                   "h3i4j5k607": "Checking whether this branch can create a {{value0}}…"
                 }
               }
@@ -10457,7 +10465,10 @@
             "21f5687c07": "Orca CLI 技能",
             "64fb057667": "教授智能体此工作区的 orca 模拟器命令。",
             "5c59ea96ca": "移动端模拟器 Orca CLI 技能设置",
-            "bff5341ac3": "移动端模拟器 Orca CLI 技能安装终端"
+            "bff5341ac3": "移动端模拟器 Orca CLI 技能安装终端",
+            "3d34423e88": "正在注册 Orca CLI",
+            "3be27641c9": "以便智能体 shell 可以运行模拟器命令。",
+            "3941719a56": "打开技能设置前正在检查 Orca CLI。"
           },
           "MobileEmulatorTabIntroCallout": {
             "1924982130": "关闭",

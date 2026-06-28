@@ -6,6 +6,27 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-06-28 — Remediated upstream v1.4.103 release sync
+
+Resolved the Axiom upstream sync remediation branch for `v1.4.103` / `axiom-v1.4.103-axiom.1` through the bot PR lane. Preserved the fork version (`1.4.103-axiom.1`), Axiom release/updater identity assumptions, side-by-side installer contract, profile-portability safeguards, and Forge provider surfaces while accepting upstream's mobile source-control, runtime/worktree/session-tab, hosted-review, browser/webview, terminal foreground-tab, hibernation, and source-control cache updates.
+
+Conflict notes:
+
+- Kept Axiom's terminal cold-parking and parked-tab watcher imports in `Terminal.tsx` while accepting upstream's foreground terminal visibility migration from worktree IDs to terminal tab IDs.
+- Preserved the intended fork semver in `package.json` while accepting upstream `v1.4.103` dependency and xterm patch updates.
+- Reviewed staged deletions against `config/axiom-merge-remediation-policy.json`; only superseded terminal foreground/visible worktree helper files were deleted, with no protected deletion path hits.
+
+Verification:
+
+- `pnpm install --frozen-lockfile` → passed. Node engine warning only (`wanted node 24`, local `v25.6.0`).
+- `pnpm run typecheck` → passed. Node engine warning only (`wanted node 24`, local `v25.6.0`).
+- `pnpm exec vitest run --config config/vitest.config.ts src/shared/task-providers.test.ts src/main/axiom-release-hardening.test.ts src/main/updater-endpoints.test.ts src/main/app-build-identity.test.ts config/scripts/axiom-upstream-sync-release.test.mjs` → 5 files / 50 tests passed.
+- `pnpm exec oxlint config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml` → 0 warnings / 0 errors.
+- `pnpm exec oxfmt --check config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml config/axiom-merge-remediation-policy.json` → passed.
+- `git diff --check` → passed.
+
+---
+
 ## 2026-06-26 — Remediated upstream v1.4.101 release sync
 
 Resolved the Axiom upstream sync remediation branch for `v1.4.101` / `axiom-v1.4.101-axiom.1` via the bot PR lane. Preserved the fork version (`1.4.101-axiom.1`), Axiom release identity/updater guards, side-by-side install assumptions, profile portability, Forge provider surfaces, and renderer-scoped terminal/PTY behavior while accepting upstream's work-item, runtime, sidebar, mobile PR, browser/editor, and terminal lifecycle updates.
