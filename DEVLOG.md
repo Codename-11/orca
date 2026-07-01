@@ -6,6 +6,21 @@ merges into `axiom/deploy`.
 
 ---
 
+---
+
+## 2026-07-01 — Fixed oversized remediation PR body failure
+
+Repaired the Axiom upstream sync remediation request path after latest stable `v1.4.114` hit GitHub's issue body limit while trying to create the bot remediation PR. The remediation script now caps captured `git status --porcelain` output in PR bodies and webhook prompts, preserving the conflict/check context with an omitted-count marker so large upstream churn still opens a valid agent-remediation PR.
+
+Verification:
+
+- `node --check config/scripts/axiom-request-merge-remediation.mjs`
+- `pnpm exec vitest run --config config/vitest.config.ts config/scripts/axiom-request-merge-remediation.test.mjs` → 1 test passed.
+- `pnpm exec oxlint config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-request-merge-remediation.test.mjs` → 0 warnings / 0 errors.
+- `pnpm exec oxfmt --check config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-request-merge-remediation.test.mjs` → passed.
+- `git diff --check` → passed.
+- `gh workflow run axiom-upstream-sync-release.yml --ref axiom/deploy -f upstream_tag=v1.4.114 ...` produced successful run `28535453762` and opened remediation PR `#87` with body length `14589` instead of failing at GitHub's `65536` character body cap.
+
 ## 2026-06-28 — Remediated upstream v1.4.103 release sync
 
 Resolved the Axiom upstream sync remediation branch for `v1.4.103` / `axiom-v1.4.103-axiom.1` through the bot PR lane. Preserved the fork version (`1.4.103-axiom.1`), Axiom release/updater identity assumptions, side-by-side installer contract, profile-portability safeguards, and Forge provider surfaces while accepting upstream's mobile source-control, runtime/worktree/session-tab, hosted-review, browser/webview, terminal foreground-tab, hibernation, and source-control cache updates.
