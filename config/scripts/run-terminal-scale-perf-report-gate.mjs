@@ -2,7 +2,6 @@ import { spawnSync } from 'node:child_process'
 import { closeSync, copyFileSync, mkdirSync, mkdtempSync, openSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 const DEFAULT_REPORT_PATH = 'test-results/terminal-scale-perf-report.json'
 const DEFAULT_HTML_REPORT_PATH = 'test-results/terminal-perf-impact-report.html'
@@ -132,6 +131,6 @@ export function runTerminalScalePerfReportGate({
   return exitCode(htmlResult)
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (process.argv[1] === import.meta.filename) {
   process.exit(runTerminalScalePerfReportGate())
 }
