@@ -1,0 +1,300 @@
+## Axiom Orca upstream sync remediation
+
+- Original Actions run: https://github.com/Codename-11/orca/actions/runs/28535453762
+- Upstream ref/tag: v1.4.114
+- Intended Axiom version/tag: 1.4.114-axiom.1 / axiom-v1.4.114-axiom.1
+- Target branch: `axiom/deploy`
+- Bot branch: `bot/upstream-sync-axiom-v1.4.114-axiom.1`
+- Classification: `auto_remediate` — Conflicts are eligible for agent PR remediation.
+
+## Conflicted files
+- `.github/workflows/release-cut.yml`
+- `package.json`
+- `src/main/daemon/daemon-pty-adapter.ts`
+- `src/main/index.ts`
+- `src/main/ipc/pty.ts`
+- `src/main/ipc/register-core-handlers.test.ts`
+- `src/main/runtime/orca-runtime.ts`
+- `src/main/ssh/ssh-relay-session.ts`
+- `src/preload/api-types.ts`
+- `src/preload/index.ts`
+- `src/renderer/src/App.tsx`
+- `src/renderer/src/components/NewWorkspaceComposerCard.test.tsx`
+- `src/renderer/src/components/NewWorkspaceComposerCard.tsx`
+- `src/renderer/src/components/terminal-pane/TerminalPaneOverlayLayer.tsx`
+- `src/renderer/src/components/terminal-pane/pty-connection.test.ts`
+- `src/renderer/src/components/terminal-pane/pty-connection.ts`
+- `src/renderer/src/components/terminal-pane/pty-dispatcher.ts`
+- `src/renderer/src/components/terminal-pane/pty-transport-types.ts`
+- `src/renderer/src/components/terminal-pane/pty-transport.ts`
+- `src/renderer/src/hooks/useComposerState.ts`
+- `src/renderer/src/store/slices/terminals.ts`
+
+## Captured git status
+```
+A  .github/workflows/linux-wayland-gpu-sandbox.yml
+M  .github/workflows/mobile-ios-release.yml
+M  .github/workflows/pr.yml
+M  .github/workflows/pullfrog.yml
+UU .github/workflows/release-cut.yml
+A  .github/workflows/release-mac-build.yml
+M  .oxlintrc.json
+D  .visual-evidence/sidebar-nav/after.png
+D  .visual-evidence/sidebar-nav/before.png
+M  README.md
+M  config/electron-builder.config.cjs
+M  config/packaged-runtime-node-modules.cjs
+A  config/patches/@xterm__addon-webgl@0.20.0-beta.286.patch
+M  config/scripts/build-computer-macos.mjs
+M  config/scripts/build-relay.mjs
+M  config/scripts/check-feature-wall-assets.mjs
+M  config/scripts/computer-e2e-workflow.test.mjs
+M  config/scripts/computer-use-skill-guidance.test.mjs
+M  config/scripts/electron-builder-config.test.mjs
+M  config/scripts/ensure-native-runtime.mjs
+A  config/scripts/hibernation-output-epoch-leak-benchmark.mjs
+M  config/scripts/install-dev-cli.mjs
+M  config/scripts/install-electron-package-binary.mjs
+A  config/scripts/linux-wayland-renderer-diagnostics.mjs
+A  config/scripts/linux-wayland-terminal-exercise.mjs
+A  config/scripts/linux-wayland-validation-watchdog.mjs
+M  config/scripts/locale-ko-key-overrides.mjs
+M  config/scripts/locale-phrase-fixes.mjs
+A  config/scripts/locale-translation-policy.es-pr.test.mjs
+M  config/scripts/locale-translation-policy.mjs
+A  config/scripts/markdown-toc-parse-benchmark.mjs
+A  config/scripts/mjpeg-frame-parser-alloc-benchmark.mjs
+M  config/scripts/orca-cli-skill-guidance.test.mjs
+M  config/scripts/orca-dev.mjs
+M  config/scripts/orca-linear-skill-guidance.test.mjs
+M  config/scripts/orchestration-skill-guidance.test.mjs
+M  config/scripts/package-electron-runtime-contract.test.mjs
+A  config/scripts/release-mac-build-workflow-dispatch.test.mjs
+M  config/scripts/run-electron-vite-dev.mjs
+M  config/scripts/run-idle-cpu-benchmark.mjs
+M  config/scripts/run-internal-dev-setup.mjs
+A  config/scripts/run-release-mac-build-workflow.mjs
+M  config/scripts/run-terminal-scale-perf-report-gate.mjs
+A  config/scripts/serve-sim-seen-keys-leak-benchmark.mjs
+M  config/scripts/terminal-e2e-helpers.mjs
+A  config/scripts/trim-windows-icon-source.mjs
+A  config/scripts/trim-windows-icon-source.test.mjs
+M  config/scripts/vendor-feature-wall-assets.mjs
+M  config/scripts/verify-cli-bin.mjs
+M  config/scripts/verify-cli-bin.test.mjs
+A  config/scripts/verify-linux-wayland-gpu-sandbox.mjs
+M  config/scripts/verify-macos-entitlements.mjs
+M  config/scripts/verify-telemetry-constants.mjs
+M  config/scripts/verify-web-build.mjs
+M  config/tsconfig.cli.json
+M  config/vitest.config.ts
+A  docs/android-emulation-streaming.md
+A  docs/android-emulation.md
+M  docs/assets/readme-downloads.svg
+A  docs/native-chat-codex-tui-parity.md
+M  docs/readme/README.es.md
+M  docs/readme/README.ja.md
+M  docs/readme/README.ko.md
+M  docs/readme/README.zh-CN.md
+A  docs/reference/2026-06-27-orca-mobile-manual-network-address-design.md
+M  docs/reference/README.md
+A  docs/reference/headless-linux-server.md
+A  docs/reference/plans/2026-06-27-orca-mobile-manual-network-address.md
+M  electron.vite.config.ts
+M  mobile/.oxlintrc.json
+M  mobile/app.json
+M  mobile/app/h/[hostId]/index.tsx
+M  mobile/app/h/[hostId]/pr/[worktreeId].tsx
+M  mobile/app/h/[hostId]/review/[worktreeId].tsx
+M  mobile/app/h/[hostId]/session/[worktreeId].tsx
+M  mobile/app/h/[hostId]/session/mobile-session-command-input-styles.ts
+M  mobile/app/h/[hostId]/session/mobile-session-route-types.ts
+M  mobile/app/h/_layout.tsx
+M  mobile/fastlane/Fastfile
+A  mobile/metro.config.js
+A  mobile/mobile-terminal-direct-input-default.md
+M  mobile/package.json
+M  mobile/packages/expo-two-way-audio/src/core.ts
+M  mobile/pnpm-lock.yaml
+A  mobile/scripts/mobile-expo-cli.mjs
+A  mobile/scripts/start-emulator-pairing-runtime.mjs
+M  mobile/scripts/start-emulator.mjs
+A  mobile/scripts/start-expo.mjs
+M  mobile/src/browser/MobileBrowserPane.tsx
+M  mobile/src/components/ActionSheetModal.tsx
+M  mobile/src/components/MobileDiffReviewHeader.tsx
+M  mobile/src/components/MobileDiffReviewScreenView.tsx
+M  mobile/src/components/MobilePRSidebar.tsx
+A  mobile/src/components/NewWorkspaceFab.tsx
+M  mobile/src/components/pr-sidebar/MobilePrComposeForm.tsx
+M  mobile/src/components/pr-sidebar/MobilePrViewPanel.tsx
+M  mobile/src/components/pr-sidebar/PRActionsSection.tsx
+M  mobile/src/components/pr-sidebar/PrSidebarCreateEmptyState.tsx
+M  mobile/src/components/pr-sidebar/pr-actions-state.test.ts
+M  mobile/src/components/pr-sidebar/pr-actions-state.ts
+M  mobile/src/components/pr-sidebar/pr-actions-styles.ts
+M  mobile/src/hooks/use-mobile-dictation.ts
+A  mobile/src/session/MobileTerminalInputActions.tsx
+A  mobile/src/session/MobileTerminalLiveInputStatus.tsx
+M  mobile/src/session/SessionDockColumn.tsx
+A  mobile/src/session/mobile-diff-review-positioning.test.ts
+A  mobile/src/session/mobile-diff-review-positioning.ts
+M  mobile/src/session/mobile-image-source-picker.ts
+M  mobile/src/session/mobile-pr-sidebar-state.ts
+A  mobile/src/session/mobile-terminal-tab-agent.test.ts
+A  mobile/src/session/mobile-terminal-tab-agent.ts
+M  mobile/src/session/opened-mobile-session-tab.test.ts
+M  mobile/src/session/opened-mobile-session-tab.ts
+M  mobile/src/session/pr-ai-triage-prompt.ts
+M  mobile/src/session/use-mobile-diff-review-controller.ts
+M  mobile/src/session/use-mobile-pr-branch-context.test.ts
+M  mobile/src/session/use-mobile-pr-branch-context.ts
+M  mobile/src/session/use-mobile-pr-sidebar-controller.test.ts
+A  mobile/src/source-control/MobileCommitFailurePanel.tsx
+M  mobile/src/source-control/MobileSourceControlContent.tsx
+A  mobile/src/source-control/MobileSourceControlCreatePrEntry.tsx
+M  mobile/src/source-control/MobileSourceControlFileRows.tsx
+M  mobile/src/source-control/MobileSourceControlModals.tsx
+M  mobile/src/source-control/MobileSourceControlPanel.tsx
+A  mobile/src/source-control/mobile-commit-failure-recovery.test.ts
+A  mobile/src/source-control/mobile-commit-failure-recovery.ts
+A  mobile/src/source-control/mobile-create-pr-action.test.ts
+A  mobile/src/source-control/mobile-create-pr-action.ts
+A  mobile/src/source-control/mobile-hosted-review-create-intent-runner.test.ts
+A  mobile/src/source-control/mobile-hosted-review-create-intent-runner.ts
+A  mobile/src/source-control/mobile-hosted-review-create-intent.test.ts
+A  mobile/src/source-control/mobile-hosted-review-create-intent.ts
+A  mobile/src/source-control/mobile-hosted-review-git-preparation.ts
+A  mobile/src/source-control/mobile-hosted-review-remote-prerequisite.ts
+A  mobile/src/source-control/mobile-hosted-review-service.ts
+M  mobile/src/source-control/mobile-open-pr-prefill.test.ts
+M  mobile/src/source-control/mobile-open-pr-prefill.ts
+A  mobile/src/source-control/mobile-pr-create-flow.test.ts
+M  mobile/src/source-control/mobile-pr-create.test.ts
+M  mobile/src/source-control/mobile-pr-create.ts
+A  mobile/src/source-control/mobile-review-route.test.ts
+A  mobile/src/source-control/mobile-review-route.ts
+M  mobile/src/source-control/mobile-source-control-list-styles.ts
+D  mobile/src/source-control/mobile-source-control-review-entry.tsx
+M  mobile/src/source-control/mobile-source-control-screen-state.ts
+M  mobile/src/source-control/mobile-source-control-styles.ts
+A  mobile/src/source-control/use-mobile-commit-failure-recovery.ts
+A  mobile/src/source-control/use-mobile-create-pr-runner.ts
+A  mobile/src/source-control/use-mobile-hosted-review-eligibility.test.ts
+A  mobile/src/source-control/use-mobile-hosted-review-eligibility.ts
+M  mobile/src/source-control/use-mobile-source-control-action-sheet.ts
+A  mobile/src/source-control/use-mobile-source-control-commit-failure.ts
+M  mobile/src/source-control/use-mobile-source-control-commit-runners.ts
+A  mobile/src/source-control/use-mobile-source-control-create-pr-action.ts
+A  mobile/src/source-control/use-mobile-source-control-keyboard-lift.ts
+M  mobile/src/source-control/use-mobile-source-control-loaders.ts
+M  mobile/src/source-control/use-mobile-source-control-openers.ts
+M  mobile/src/source-control/use-mobile-source-control-runners.ts
+M  mobile/src/source-control/use-mobile-source-control-state.ts
+M  mobile/src/tasks/mobile-agent-catalog.test.ts
+M  mobile/src/tasks/mobile-tui-agents.ts
+M  mobile/src/terminal/terminal-accessory-layout.test.ts
+A  mobile/src/terminal/terminal-live-dictation-routing.test.ts
+A  mobile/src/terminal/terminal-live-dictation-routing.ts
+M  mobile/src/terminal/terminal-live-input.test.ts
+M  mobile/src/terminal/terminal-live-input.ts
+M  mobile/src/theme/mobile-theme.ts
+M  mobile/src/transport/rpc-client.test.ts
+M  mobile/src/transport/rpc-client.ts
+A  mobile/src/transport/rpc-response-shape.test.ts
+A  mobile/src/transport/rpc-response-shape.ts
+A  mobile/src/transport/websocket-payload-bytes.test.ts
+A  mobile/src/transport/websocket-payload-bytes.ts
+M  mobile/vitest.config.ts
+UU package.json
+M  pnpm-lock.yaml
+M  resources/build/icon.ico
+M  resources/icon-source/generate.sh
+M  skills/orca-cli/SKILL.md
+A  skills/orca-emulator-android/SKILL.md
+M  skills/orca-emulator/SKILL.md
+A  skills/orca-per-workspace-env/SKILL.md
+M  skills/orchestration/SKILL.md
+M  src/cli/args.test.ts
+M  src/cli/args.ts
+M  src/cli/computer-format.ts
+M  src/cli/dispatch.ts
+A  src/cli/emulator-logcat-format.test.ts
+A  src/cli/emulator-logcat-format.ts
+A  src/cli/emulator-permissions-args.ts
+M  src/cli/format.test.ts
+M  src/cli/handlers/agent-hooks.test.ts
+M  src/cli/handlers/agent-hooks.ts
+M  src/cli/handlers/core.ts
+A  src/cli/handlers/emulator.test.ts
+M  src/cli/handlers/emulator.ts
+M  src/cli/handlers/terminal.ts
+A  src/cli/handlers/vm.ts
+M  src/cli/help.ts
+M  src/cli/index.test.ts
+M  src/cli/index.ts
+M  src/cli/repo-path-arguments.ts
+M  src/cli/runtime-client.test.ts
+M  src/cli/runtime/client-timeout-policy.test.ts
+M  src/cli/runtime/environments.test.ts
+M  src/cli/runtime/launch.test.ts
+M  src/cli/runtime/launch.ts
+M  src/cli/runtime/metadata.ts
+M  src/cli/runtime/status.test.ts
+M  src/cli/runtime/transport.test.ts
+M  src/cli/runtime/transport.ts
+M  src/cli/runtime/websocket-transport.test.ts
+M  src/cli/selectors.ts
+M  src/cli/specs/core.ts
+M  src/cli/specs/emulator.ts
+M  src/cli/specs/index.ts
+A  src/cli/specs/serve.ts
+A  src/cli/specs/vm.ts
+M  src/cli/terminal-format.ts
+M  src/main/agent-hooks/installer-utils-remote.ts
+M  src/main/agent-hooks/installer-utils.test.ts
+M  src/main/agent-hooks/installer-utils.ts
+M  src/main/agent-hooks/managed-hook-timeout.test.ts
+M  src/main/agent-hooks/server.test.ts
+M  src/main/agent-hooks/server.ts
+M  src/main/ai-vault/session-scanner-accumulator.ts
+M  src/main/ai-vault/session-scanner-codex-parser.test.ts
+M  src/main/ai-vault/session-scanner-codex-parser.ts
+M  src/main/ai-vault/session-scanner-codex-paths.ts
+M  src/main/ai-vault/session-scanner-codex-workers.test.ts
+M  src/main/ai-vault/session-scanner-devin-parser.test.ts
+M  src/main/ai-vault/session-scanner-devin-parser.ts
+M  src/main/ai-vault/session-scanner-discovery.ts
+M  src/main/ai-vault/session-scanner-droid-kimi-sources.ts
+M  src/main/ai-vault/session-scanner-graph-parsers.ts
+M  src/main/ai-vault/session-scanner-grok-parser.ts
+M  src/main/ai-vault/session-scanner-kimi-parser.test.ts
+M  src/main/ai-vault/session-scanner-kimi-parser.ts
+M  src/main/ai-vault/session-scanner-kimi-paths.ts
+M  src/main/ai-vault/session-scanner-opencode-sources.ts
+M  src/main/ai-vault/session-scanner-opencode-sqlite-coexistence.test.ts
+M  src/main/ai-vault/session-scanner-opencode-sqlite-discovery.ts
+M  src/main/ai-vault/session-scanner-opencode-sqlite-paths.ts
+M  src/main/ai-vault/session-scanner-opencode-sqlite.test.ts
+M  src/main/ai-vault/session-scanner-primary-parsers.ts
+M  src/main/ai-vault/session-scanner-scope-discovery.ts
+M  src/main/ai-vault/session-scanner-scope.test.ts
+M  src/main/ai-vault/session-scanner-secondary-parsers.ts
+M  src/main/ai-vault/session-scanner-source-discovery.ts
+M  src/main/ai-vault/session-scanner-values.ts
+... omitted 1598 additional status records to keep remediation payloads within GitHub limits.
+```
+
+## Axiom safety notes
+- Bot branch PR only; do not push conflict remediation directly to `axiom/deploy`.
+- Preserve side-by-side identity, updater feed, fork semver, profile portability, and Forge provider/task-registry additions.
+- Protected-file deletion or fork identity/update-feed changes require explicit review before merge.
+
+## Verification checklist
+- [ ] `pnpm install --frozen-lockfile`
+- [ ] `pnpm run typecheck`
+- [ ] `pnpm exec vitest run --config config/vitest.config.ts src/shared/task-providers.test.ts src/main/axiom-release-hardening.test.ts src/main/updater-endpoints.test.ts src/main/app-build-identity.test.ts config/scripts/axiom-upstream-sync-release.test.mjs`
+- [ ] `pnpm exec oxlint config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml`
+- [ ] `pnpm exec oxfmt --check config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml config/axiom-merge-remediation-policy.json`
+- [ ] `git diff --check`
+
