@@ -81,8 +81,8 @@ describe('getRuntimeProjectRefreshEnvironmentIds', () => {
   })
 })
 
-function expectWorktreeRouting(worktreeId: string): unknown {
-  return expect.objectContaining({ tabId: undefined, worktreeId, terminalHandle: undefined })
+function expectWorktreeRouting(worktreeId: string, tabId?: string): unknown {
+  return expect.objectContaining({ tabId, worktreeId, terminalHandle: undefined })
 }
 
 function makeTarget(args: { hasXtermClass?: boolean; editorClosest?: boolean }): {
@@ -5032,7 +5032,7 @@ describe('useIpcEvents agent status snapshot integration', () => {
       }),
       'Codex - action required',
       { updatedAt: 1_700_000_000_400, stateStartedAt: 1_699_999_999_400 },
-      expectWorktreeRouting('wt-1'),
+      expectWorktreeRouting('wt-1', 'tab-future'),
       undefined
     )
     expect(updateTabTitle).toHaveBeenCalledWith('tab-future', 'Codex - action required')
