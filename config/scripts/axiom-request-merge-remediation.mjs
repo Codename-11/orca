@@ -6,6 +6,10 @@ import { pathToFileURL } from 'node:url'
 
 const API_VERSION = '2022-11-28'
 const POLICY_PATH = 'config/axiom-merge-remediation-policy.json'
+const REMEDIATION_STATUS_BODY_MAX_LINES = 250
+const REMEDIATION_STATUS_BODY_MAX_CHARS = 24000
+const REMEDIATION_STATUS_PROMPT_MAX_LINES = 500
+const REMEDIATION_STATUS_PROMPT_MAX_CHARS = 48000
 
 function envString(name, fallback = '') {
   const value = process.env[name]
@@ -69,6 +73,29 @@ function getStatusRecords() {
   })
 }
 
+function summarizeStatusRecords(statusRecords, { maxLines, maxChars }) {
+  const lines = statusRecords.map((record) => `${record.status} ${record.path}`)
+  const selected = []
+  let chars = 0
+  let omitted = 0
+
+  for (const line of lines) {
+    const nextChars = chars + line.length + (selected.length ? 1 : 0)
+    if (selected.length >= maxLines || nextChars > maxChars) {
+      omitted += 1
+      continue
+    }
+    selected.push(line)
+    chars = nextChars
+  }
+
+  const text = selected.join('\n') || 'No status records captured.'
+  if (!omitted) {
+    return text
+  }
+  return `${text}\n... omitted ${omitted} additional status record${omitted === 1 ? '' : 's'} to keep remediation payloads within GitHub limits.`
+}
+
 export function classifyMergeRemediation({ conflicts, statusRecords, policy }) {
   if (!conflicts.length) {
     return { action: 'none', reason: 'No conflicted files were captured for remediation.' }
@@ -120,7 +147,10 @@ function buildPrompt({ classification, conflicts, statusRecords, policy, branchN
   const forkVersion = envString('AXIOM_FORK_VERSION', 'unknown')
   const deployBranch = envString('AXIOM_DEPLOY_BRANCH', policy.targetBranch ?? 'axiom/deploy')
   const checks = (policy.requiredChecks ?? []).map((check) => `- ${check}`).join('\n')
-  const status = statusRecords.map((record) => `${record.status} ${record.path}`).join('\n')
+  const status = summarizeStatusRecords(statusRecords, {
+    maxLines: REMEDIATION_STATUS_PROMPT_MAX_LINES,
+    maxChars: REMEDIATION_STATUS_PROMPT_MAX_CHARS
+  })
 
   return `Resolve the Axiom Orca upstream merge conflict with an agent PR, not a direct push.
 
@@ -151,13 +181,16 @@ ${checks}
 5. Push only ${branchName} and open/update a PR into ${deployBranch}; do not push directly to ${deployBranch}.
 6. Auto-merge only after checks are green and fork invariant guards pass.`
 }
-function remediationBody({ classification, conflicts, statusRecords, policy, branchName }) {
+export function remediationBody({ classification, conflicts, statusRecords, policy, branchName }) {
   const upstreamRef = envString('AXIOM_UPSTREAM_REF', envString('AXIOM_UPSTREAM_TAG', 'unknown'))
   const forkTag = envString('AXIOM_FORK_TAG', 'unknown')
   const forkVersion = envString('AXIOM_FORK_VERSION', 'unknown')
   const deployBranch = envString('AXIOM_DEPLOY_BRANCH', policy.targetBranch ?? 'axiom/deploy')
   const checks = (policy.requiredChecks ?? []).map((check) => `- [ ] \`${check}\``).join('\n')
-  const status = statusRecords.map((record) => `${record.status} ${record.path}`).join('\n')
+  const status = summarizeStatusRecords(statusRecords, {
+    maxLines: REMEDIATION_STATUS_BODY_MAX_LINES,
+    maxChars: REMEDIATION_STATUS_BODY_MAX_CHARS
+  })
   return `## Axiom Orca upstream sync remediation
 
 - Original Actions run: ${getRunUrl() || 'unknown'}
