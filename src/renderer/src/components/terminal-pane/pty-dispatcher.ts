@@ -206,7 +206,6 @@ export function subscribeToPtyExit(ptyId: string, watcher: (code: number) => voi
   }
 }
 
-
 export {
   getEagerPtyBufferHandle,
   registerEagerPtyBuffer

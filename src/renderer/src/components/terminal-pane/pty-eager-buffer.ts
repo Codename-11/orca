@@ -1,4 +1,5 @@
 import { acquirePtyDeliveryInterest } from './pty-delivery-interest'
+import { TERMINAL_SCROLLBACK_SESSION_BUFFER_BYTE_LIMIT } from '../../../../shared/terminal-scrollback-limits'
 import {
   ensurePtyDispatcher,
   ptyDataHandlers,
@@ -6,6 +7,11 @@ import {
   ptyReplayHandlers
 } from './pty-dispatcher'
 import { clampUtf8Tail, type EagerBufferChunk } from './pty-eager-buffer-clamp'
+import {
+  clearPreHandlerPtyState,
+  drainPreHandlerPtyData,
+  drainPreHandlerPtyExit
+} from './pty-pre-handler-buffer'
 
 // ─── Eager PTY buffer for reconnection on restart ────────────────────
 // Why: On startup, PTYs are spawned before TerminalPane mounts. Shell output
@@ -22,7 +28,7 @@ export function getEagerPtyBufferHandle(ptyId: string): EagerPtyHandle | undefin
 // Why: 512 KB matches the scrollback buffer cap used by TerminalPane's
 // serialization. Prevents unbounded memory growth if a restored shell
 // runs a long-lived command (e.g. tail -f) in a worktree the user never opens.
-const EAGER_BUFFER_MAX_BYTES = 512 * 1024
+const EAGER_BUFFER_MAX_BYTES = TERMINAL_SCROLLBACK_SESSION_BUFFER_BYTE_LIMIT
 
 export function registerEagerPtyBuffer(
   ptyId: string,
@@ -101,6 +107,16 @@ export function registerEagerPtyBuffer(
   }
 
   eagerPtyHandles.set(ptyId, handle)
+  drainPreHandlerPtyData(ptyId, dataHandler)
+  // Why: launcher callbacks often capture the returned handle so they can
+  // flush output on exit. Defer a pre-handler exit by one microtask so the
+  // caller receives that handle before onExit fires.
+  queueMicrotask(() => {
+    if (ptyExitHandlers.get(ptyId) === exitHandler) {
+      drainPreHandlerPtyExit(ptyId, exitHandler)
+    } else {
+      clearPreHandlerPtyState(ptyId)
+    }
+  })
   return handle
 }
-
