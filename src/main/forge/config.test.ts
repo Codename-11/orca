@@ -4,10 +4,10 @@
  * safeStorage), config + token clearing, and the resolveForgeConfig source
  * tag the IPC handler echoes back to the renderer.
  */
-import { mkdtempSync, rmSync } from 'fs'
-import { tmpdir } from 'os'
-import type * as Os from 'os'
-import { join } from 'path'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import type * as Os from 'node:os'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 let tempHome = ''

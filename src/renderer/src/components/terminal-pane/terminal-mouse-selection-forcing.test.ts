@@ -99,7 +99,7 @@ class FakeElement {
         return !event.defaultPrevented
       }
     }
-    const bubblePath = event.bubbles ? [...path].reverse() : [this]
+    const bubblePath = event.bubbles ? path.toReversed() : [this]
     for (const node of bubblePath) {
       node.emit(event, false)
       if (event.stopped) {

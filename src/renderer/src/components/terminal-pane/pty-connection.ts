@@ -400,12 +400,17 @@ function isCursorPositionReportQuery(sequence: string): boolean {
   return sequence === '\x1b[6n'
 }
 
+const CURSOR_POSITION_STATE_PRIMER_RE = new RegExp(
+  String.raw`^\x1b\[(?:\d+(?:;\d*)?|\d*;\d+)?[Hf]$`
+)
+const MODE_2031_PRIVATE_MODE_RE = new RegExp(String.raw`^\x1b\[\?([0-9;]+)([hl])$`)
+
 function isCursorPositionStatePrimer(sequence: string): boolean {
-  return /^\x1b\[(?:\d+(?:;\d*)?|\d*;\d+)?[Hf]$/.test(sequence)
+  return CURSOR_POSITION_STATE_PRIMER_RE.test(sequence)
 }
 
 function getMode2031PrivateModeState(sequence: string): 'subscribed' | 'unsubscribed' | null {
-  const match = /^\x1b\[\?([0-9;]+)([hl])$/.exec(sequence)
+  const match = MODE_2031_PRIVATE_MODE_RE.exec(sequence)
   if (!match) {
     return null
   }
@@ -3796,10 +3801,9 @@ export function connectPanePty(
         // scheduler swaps the backlog for this restore latch and the reveal
         // repaints from the model snapshot (the pre-grammar fallback).
         onBackgroundBacklogDropped: markHiddenOutputRestoreNeeded,
-        latencySensitive:
-          !foreground
-            ? true
-            : synchronizedFrameLatencySensitive || isLatencySensitiveForegroundOutput(data),
+        latencySensitive: !foreground
+          ? true
+          : synchronizedFrameLatencySensitive || isLatencySensitiveForegroundOutput(data),
         forceForegroundRefresh:
           foreground &&
           (synchronizedForegroundOutput ||
@@ -3941,9 +3945,8 @@ export function connectPanePty(
         hiddenStartupRendererStateDirty || extracted.hasNonQueryData
           ? ''
           : extracted.unsafeStatefulQueryData
-      const wroteUnsafeStatefulQueryData = writeHiddenStartupQueryDataToXterm(
-        unsafeStatefulQueryData
-      )
+      const wroteUnsafeStatefulQueryData =
+        writeHiddenStartupQueryDataToXterm(unsafeStatefulQueryData)
       const handledUnsafeStatefulQuery = Boolean(extracted.unsafeStatefulQueryData)
       if (extracted.hasNonQueryData) {
         hiddenStartupRendererStateDirty = true
@@ -4016,7 +4019,6 @@ export function connectPanePty(
         requestHiddenOutputRestoreIfNeeded()
       }
     }
-
 
     function queueLiveChunkDuringRestore(data: string, meta?: PtyDataMeta): void {
       if (!data) {
