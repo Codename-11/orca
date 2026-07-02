@@ -137,6 +137,10 @@ export function ensurePtyDispatcher(): void {
         meta ??= {}
         meta.rawLength = payload.rawLength
       }
+      if (payload.background === true) {
+        meta ??= {}
+        meta.background = true
+      }
       const handler = ptyDataHandlers.get(payload.id)
       if (handler) {
         handler(payload.data, meta)
@@ -205,7 +209,6 @@ export function subscribeToPtyExit(ptyId: string, watcher: (code: number) => voi
     }
   }
 }
-
 
 export {
   getEagerPtyBufferHandle,

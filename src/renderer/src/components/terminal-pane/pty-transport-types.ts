@@ -3,11 +3,13 @@ import type { EventProps } from '../../../../shared/telemetry-events'
 import type { ProjectExecutionRuntimeResolution } from '../../../../shared/project-execution-runtime'
 import type { StartupCommandDelivery } from '../../../../shared/codex-startup-delivery'
 import type { SleepingAgentLaunchConfig } from '../../../../shared/agent-session-resume'
+import type { TerminalOscColorQueryReplyColors } from '../../../../shared/terminal-osc-color-reply'
 import type { TuiAgent } from '../../../../shared/types'
 
 export type PtyDataMeta = {
   seq?: number
   rawLength?: number
+  background?: boolean
 }
 
 export type PtyBufferSnapshot = {
@@ -21,6 +23,11 @@ export type PtyBufferSnapshot = {
    *  this seq can never be a duplicate the snapshot already covers. */
   pendingDeliveryStartSeq?: number
   source?: 'headless' | 'renderer'
+  /** True when the snapshot captures an alternate-screen TUI (Claude Code,
+   *  vim). Restore must NOT clear xterm's buffer in that case — the TUI's
+   *  scrollback lives in xterm and a clear destroys scroll-up after a tab
+   *  return. Mirrors the attach-time guard in pty-transport.ts. */
+  alternateScreen?: boolean
 }
 
 export type LocalPtySessionMetadata = { cwd?: string; shellOverride?: string }
@@ -35,6 +42,20 @@ export type PtyConnectResult = {
   sessionExpired?: boolean
   coldRestore?: { scrollback: string; cwd: string }
   replay?: string
+}
+
+type PtyCallbacks = {
+  onConnect?: () => void
+  onDisconnect?: () => void
+  onData?: (data: string, meta?: PtyDataMeta) => void
+  /** Replay bytes from a prior session (eager buffers, attach-time screen
+   *  clears). Routed separately from onData so the renderer can engage
+   *  the replay guard — otherwise xterm auto-replies to embedded query
+   *  sequences leak into the shell. See replay-guard.ts. */
+  onReplayData?: (data: string, meta?: { clearBeforeReplay?: boolean }) => void
+  onStatus?: (shell: string) => void
+  onError?: (message: string, errors?: string[]) => void
+  onExit?: (code: number) => void
 }
 
 export type PtyTransport = {
@@ -56,19 +77,7 @@ export type PtyTransport = {
      *  first byte and the gate + model responder own spawn-time queries.
      *  Ignored by remote-runtime transports (not gate-markable). */
     initiallyHidden?: boolean
-    callbacks: {
-      onConnect?: () => void
-      onDisconnect?: () => void
-      onData?: (data: string, meta?: PtyDataMeta) => void
-      /** Replay bytes from a prior session (eager buffers, attach-time screen
-       *  clears). Routed separately from onData so the renderer can engage
-       *  the replay guard — otherwise xterm auto-replies to embedded query
-       *  sequences leak into the shell. See replay-guard.ts. */
-      onReplayData?: (data: string) => void
-      onStatus?: (shell: string) => void
-      onError?: (message: string, errors?: string[]) => void
-      onExit?: (code: number) => void
-    }
+    callbacks: PtyCallbacks
   }) => void | Promise<void | string | PtyConnectResult>
   /** Attach to an existing PTY that was eagerly spawned during startup.
    *  Skips pty:spawn — registers handlers and replays buffered data instead. */
@@ -80,16 +89,7 @@ export type PtyTransport = {
      *  Skips the delayed double-resize since a single resize already triggers
      *  a full TUI repaint without content loss. */
     isAlternateScreen?: boolean
-    callbacks: {
-      onConnect?: () => void
-      onDisconnect?: () => void
-      onData?: (data: string, meta?: PtyDataMeta) => void
-      /** See note on connect.callbacks.onReplayData. */
-      onReplayData?: (data: string) => void
-      onStatus?: (shell: string) => void
-      onError?: (message: string, errors?: string[]) => void
-      onExit?: (code: number) => void
-    }
+    callbacks: PtyCallbacks
   }) => void
   disconnect: () => void
   sendInput: (data: string) => boolean
@@ -137,6 +137,7 @@ export type IpcPtyTransportOptions = {
   /** Why: mirrors PtySpawnOptions.shellOverride — see types.ts for rationale. */
   shellOverride?: string
   projectRuntime?: ProjectExecutionRuntimeResolution
+  terminalColorQueryReplies?: TerminalOscColorQueryReplyColors
   /** Telemetry metadata for the `agent_started` event. Forwarded verbatim
    *  to `pty:spawn` so main can fire the event after confirmed launch. The
    *  IPC handler re-validates the schema; this type is the renderer-side

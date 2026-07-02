@@ -13,8 +13,10 @@ import TerminalPane from './TerminalPane'
 import { closeTerminalTab } from '../terminal/terminal-tab-actions'
 import { shouldDeferParkedPtyExitTabClose } from './terminal-parked-tab-watchers'
 import { useTerminalTabColdParking } from './use-terminal-tab-cold-parking'
+import { useNativeChatToggleShortcut } from '../native-chat/use-native-chat-toggle-shortcut'
 
 type TerminalOverlayAssignment = {
+  unifiedTabId: string
   groupId: string
   isActiveInGroup: boolean
 }
@@ -271,6 +273,9 @@ const TerminalOverlaySlot = memo(function TerminalOverlaySlot({
       onFocusCapture={focusGroup}
     >
       {terminalPane}
+      {/* The chat/terminal toggle now lives in the pane header's action cluster
+          (TerminalPaneHeaderOverlay), beside split/close — not as a separate
+          floating overlay. */}
     </div>
   )
 })
@@ -303,6 +308,8 @@ const TerminalPaneOverlayLayer = memo(function TerminalPaneOverlayLayer({
   const closeTab = useAppStore((state) => state.closeTab)
   const setActiveWorktree = useAppStore((state) => state.setActiveWorktree)
   const reconcileWorktreeTabModel = useAppStore((state) => state.reconcileWorktreeTabModel)
+
+  useNativeChatToggleShortcut(worktreeId, isWorktreeActive)
 
   // Why: legacy TabGroupPanel routed terminal closes through
   // commands.closeItem → leaveWorktreeIfEmpty, which deselected the worktree
@@ -341,6 +348,7 @@ const TerminalPaneOverlayLayer = memo(function TerminalPaneOverlayLayer({
         continue
       }
       entries.set(tab.entityId, {
+        unifiedTabId: tab.id,
         groupId: tab.groupId,
         isActiveInGroup: groupActiveTabById[tab.groupId] === tab.id
       })
