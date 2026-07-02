@@ -6,6 +6,11 @@ import {
   ptyReplayHandlers
 } from './pty-dispatcher'
 import { clampUtf8Tail, type EagerBufferChunk } from './pty-eager-buffer-clamp'
+import {
+  clearPreHandlerPtyState,
+  drainPreHandlerPtyData,
+  drainPreHandlerPtyExit
+} from './pty-pre-handler-buffer'
 
 // ─── Eager PTY buffer for reconnection on restart ────────────────────
 // Why: On startup, PTYs are spawned before TerminalPane mounts. Shell output
@@ -101,6 +106,17 @@ export function registerEagerPtyBuffer(
   }
 
   eagerPtyHandles.set(ptyId, handle)
+  drainPreHandlerPtyData(ptyId, dataHandler)
+  // Why: launcher callbacks often capture the returned handle so they can
+  // flush output on exit. Defer a pre-handler exit by one microtask so the
+  // caller receives that handle before onExit fires.
+  queueMicrotask(() => {
+    if (ptyExitHandlers.get(ptyId) === exitHandler) {
+      drainPreHandlerPtyExit(ptyId, exitHandler)
+    } else {
+      clearPreHandlerPtyState(ptyId)
+    }
+  })
   return handle
 }
 

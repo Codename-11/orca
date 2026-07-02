@@ -2,13 +2,13 @@
 
 import { createHash } from 'node:crypto'
 import { readFileSync, statSync, writeFileSync } from 'node:fs'
-import { basename, dirname, resolve } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { basename, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 export const MOBILE_UPDATE_MANIFEST_ASSET_NAME = 'mobile-update.json'
 export const MOBILE_UPDATE_MANIFEST_SCHEMA_VERSION = 1
 
-const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
+const REPO_ROOT = resolve(import.meta.dirname, '../..')
 
 function parseArgs(argv) {
   const args = {

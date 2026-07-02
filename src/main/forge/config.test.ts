@@ -4,10 +4,10 @@
  * safeStorage), config + token clearing, and the resolveForgeConfig source
  * tag the IPC handler echoes back to the renderer.
  */
-import { mkdtempSync, rmSync } from 'fs'
-import { tmpdir } from 'os'
-import type * as Os from 'os'
-import { join } from 'path'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import type * as Os from 'node:os'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 let tempHome = ''
@@ -21,8 +21,8 @@ async function loadConfigModule() {
       decryptString: (value: Buffer) => value.toString('utf-8')
     }
   }))
-  vi.doMock('os', async () => {
-    const actual = await vi.importActual<typeof Os>('os')
+  vi.doMock('node:os', async () => {
+    const actual = await vi.importActual<typeof Os>('node:os')
     return { ...actual, homedir: () => tempHome }
   })
   return import('./config')
@@ -44,7 +44,7 @@ afterEach(() => {
   }
   vi.restoreAllMocks()
   vi.doUnmock('electron')
-  vi.doUnmock('os')
+  vi.doUnmock('node:os')
 })
 
 describe('forge config — env fallback', () => {

@@ -37,7 +37,8 @@ import {
   clearPtyOwnershipForConnection,
   clearProviderPtyState,
   deletePtyOwnership,
-  setPtyOwnership
+  setPtyOwnership,
+  answerStartupTerminalColorQueriesForPty
 } from '../ipc/pty'
 import {
   recordHiddenRendererPtyDataDrop,
@@ -946,8 +947,12 @@ export class SshRelaySession {
   private wireUpPtyEvents(ptyProvider: SshPtyProvider): void {
     ptyProvider.onData((payload) => {
       const seq = this.runtime?.onPtyData(payload.id, payload.data, Date.now())
+      const rendererData = answerStartupTerminalColorQueriesForPty(payload.id, payload.data)
       const win = this.getMainWindow()
       if (!win || win.isDestroyed()) {
+        return
+      }
+      if (rendererData.length === 0) {
         return
       }
       // Why: hidden-delivery gate parity with ipc/pty.ts — runtime ingestion
@@ -957,7 +962,7 @@ export class SshRelaySession {
       // OSC-9999-only chunks legitimately strip to empty in the renderer.
       const store = this.store as { getSettings?: Store['getSettings'] }
       if (shouldDropHiddenRendererPtyData(payload.id, store.getSettings?.())) {
-        const drop = recordHiddenRendererPtyDataDrop(payload.id, payload.data.length)
+        const drop = recordHiddenRendererPtyDataDrop(payload.id, rendererData.length)
         if (drop.shouldEmitRestoreMarker) {
           win.webContents.send('pty:modelRestoreNeeded', {
             id: payload.id,
@@ -969,7 +974,10 @@ export class SshRelaySession {
       }
       win.webContents.send('pty:data', {
         ...payload,
-        ...(typeof seq === 'number' ? { seq, rawLength: payload.data.length } : {})
+        data: rendererData,
+        ...(rendererData === payload.data && typeof seq === 'number'
+          ? { seq, rawLength: payload.data.length }
+          : {})
       })
     })
     ptyProvider.onReplay((payload) => {

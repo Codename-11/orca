@@ -70,16 +70,16 @@ import {
 import { shouldResolveHostedReviewStartPoint } from '../../../src/tasks/hosted-review-start-point'
 import { getLinkedWorkItemSuggestedName } from '../../../src/tasks/workspace-name'
 import { DEFAULT_FORGE_SORT, sortForgeIssues } from '../../../src/tasks/forge-issue-sort'
-import {
-  type ForgeAgentSummary,
-  type ForgeIssueListOptions,
-  type ForgeIssuePriority,
-  type ForgeIssueSort,
-  type ForgeIssueSortKey,
-  type ForgeIssueStatusCategory,
-  type ForgeListFilter,
-  type ForgeProjectSummary,
-  type ForgeSortDirection
+import type {
+  ForgeAgentSummary,
+  ForgeIssueListOptions,
+  ForgeIssuePriority,
+  ForgeIssueSort,
+  ForgeIssueSortKey,
+  ForgeIssueStatusCategory,
+  ForgeListFilter,
+  ForgeProjectSummary,
+  ForgeSortDirection
 } from '../../../../src/shared/forge-types'
 import {
   filterGitHubProjectRowsForRepos,
