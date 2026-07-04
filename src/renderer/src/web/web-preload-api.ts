@@ -635,7 +635,8 @@ function createWebPreloadApi(): Partial<PreloadApi> {
           sessions: [],
           issues: [],
           scannedAt: new Date().toISOString()
-        })
+        }),
+      onWindowFocused: () => () => {}
     },
     preflight: createPreflightApi(),
     notifications: createNotificationsApi(),

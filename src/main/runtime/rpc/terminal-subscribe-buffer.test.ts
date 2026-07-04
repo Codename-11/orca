@@ -320,6 +320,13 @@ describe('terminal subscribe buffering', () => {
     await vi.waitFor(() =>
       expect(messages.some((msg) => JSON.parse(msg).result?.type === 'subscribed')).toBe(true)
     )
+    const subscribed = messages
+      .map((msg) => JSON.parse(msg).result)
+      .find((result) => result?.type === 'subscribed')
+    expect(subscribed).toMatchObject({
+      type: 'subscribed',
+      truncated: false
+    })
     const snapshotStart = binaryFrames
       .map((frame) => decodeTerminalStreamFrame(frame))
       .find((frame) => frame?.opcode === TerminalStreamOpcode.SnapshotStart)
@@ -340,6 +347,7 @@ describe('terminal subscribe buffering', () => {
       const messages: string[] = []
       const binaryFrames: Uint8Array<ArrayBufferLike>[] = []
       const cleanups = new Map<string, () => void>()
+
       const dataListenerRef: {
         current?: (data: string, meta?: { seq?: number; rawLength?: number }) => void
       } = {}
@@ -412,6 +420,7 @@ describe('terminal subscribe buffering', () => {
       const shiftCallCount = shiftSpy.mock.calls.length
       shiftSpy.mockRestore()
       await vi.waitFor(() => expect(runtime.serializeTerminalBuffer).toHaveBeenCalled())
+
       snapshotResolvers[0]?.({ data: '', cols: 120, rows: 40, seq: 0, source: 'headless' })
       await vi.waitFor(() => expect(runtime.serializeTerminalBuffer).toHaveBeenCalledTimes(2))
       snapshotResolvers[1]?.({
@@ -433,19 +442,7 @@ describe('terminal subscribe buffering', () => {
         (frame) => frame.opcode === TerminalStreamOpcode.SnapshotStart
       )
       const decodedStarts = snapshotStarts.map((frame) => decodeTerminalStreamJson(frame.payload))
-      // Why: shipped mobile clients only apply a mid-session snapshot when it
-      // arrives as a resized frame; a second scrollback frame is dropped.
-      expect(decodedStarts).toEqual([
-        expect.objectContaining({ kind: 'scrollback', seq: 1 }),
-        expect.objectContaining({
-          kind: 'resized',
-          reason: 'pending-output-overflow',
-          source: 'headless'
-        })
-      ])
-      // Why: output-byte sequences must not pollute the client layout-seq
-      // staleness filter.
-      expect(decodedStarts[1]).not.toHaveProperty('seq')
+      expect(decodedStarts).toEqual([expect.objectContaining({ kind: 'scrollback', seq })])
       const snapshotText = decodedFrames
         .filter((frame) => frame.opcode === TerminalStreamOpcode.SnapshotChunk)
         .map((frame) => decodeTerminalStreamText(frame.payload))
@@ -455,6 +452,7 @@ describe('terminal subscribe buffering', () => {
         .map((frame) => decodeTerminalStreamText(frame.payload))
         .join('')
       expect(output.length).toBeLessThanOrEqual(256 * 1024)
+      expect(output).toBe('')
       expect(output).not.toContain('000')
       expect(output).not.toContain('399')
       expect(snapshotText).toContain('recovered after overflow')
@@ -687,9 +685,14 @@ describe('terminal subscribe buffering', () => {
         .filter((frame) => frame.opcode === TerminalStreamOpcode.Output)
         .map((frame) => decodeTerminalStreamText(frame.payload))
         .join('')
+      const snapshotPayload = decodedFrames
+        .filter((frame) => frame.opcode === TerminalStreamOpcode.SnapshotChunk)
+        .map((frame) => decodeTerminalStreamText(frame.payload))
+        .join('')
       expect(output.length).toBeLessThanOrEqual(256 * 1024)
       expect(output).not.toContain('000')
-      expect(output).toContain('399')
+      expect(output).not.toContain('399')
+      expect(snapshotPayload).toContain('renderer fallback snapshot')
 
       runtime.cleanupSubscription('terminal-1:desktop-1')
       await dispatchPromise

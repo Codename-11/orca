@@ -1,10 +1,15 @@
 import './xterm-env-polyfill'
 import { Terminal } from '@xterm/headless'
 import { SerializeAddon } from '@xterm/addon-serialize'
+
+import { Unicode11Addon } from '@xterm/addon-unicode11'
+import { activateOrcaTerminalUnicodeProvider } from '../../shared/terminal-unicode-provider'
+import { extractLastOscTitle } from '../../shared/agent-detection'
 import type { TerminalViewAttributes } from '../../shared/terminal-view-attributes'
 import { collectHeadlessOscLinkRanges } from './headless-osc-link-ranges'
-import { TerminalMouseModeMirror } from './terminal-mouse-mode-mirror'
-import { TerminalOscCwdTitleScanner } from './terminal-osc-cwd-title-scanner'
+import { extractOscScanTail, scanOsc7Uris } from './osc7-uri-extraction'
+import { parseFileUriPath } from './osc7-file-uri'
+import { TerminalPrivateModeTracker } from './terminal-private-mode-tracker'
 import {
   installTerminalViewAttributeResponder,
   type TerminalViewAttributeResponder
@@ -16,6 +21,9 @@ export type HeadlessEmulatorOptions = {
   cols: number
   rows: number
   scrollback?: number
+
+  pathFlavor?: 'posix' | 'win32'
+  remotePosixFileUriAuthority?: boolean
   /** Phase-5 model query responder sink (terminal-query-authority.md).
    *  When set, xterm-core auto-replies generated while parsing a write
    *  flagged `forwardQueryReplies` are forwarded here; all other emissions
@@ -45,20 +53,27 @@ type TerminalWithSynchronousWrite = Terminal & {
 }
 
 const DEFAULT_SCROLLBACK = 5000
+
 // Keep in sync with the renderer twin in terminal-conpty-device-attributes.ts
 // (main must not import renderer modules).
 const CONPTY_DA1_RESPONSE = '\x1b[?61;4c'
+const OSC_SCAN_TAIL_LIMIT = 4096
 
 export class HeadlessEmulator {
   private terminal: Terminal
   private serializer: SerializeAddon
-  private oscText = new TerminalOscCwdTitleScanner()
-  private mouseModes = new TerminalMouseModeMirror()
+
+  private cwd: string | null = null
+  private lastTitle: string | null = null
+  private oscScanTail = ''
+  private privateModes = new TerminalPrivateModeTracker()
   private restoredOscLinks: TerminalOscLinkRange[] = []
   private disposed = false
   private onQueryReply: ((reply: string) => void) | null
   private conptyDa1OverrideInstalled = false
   private viewAttributeResponder: TerminalViewAttributeResponder | null = null
+  private readonly pathFlavor?: 'posix' | 'win32'
+  private readonly remotePosixFileUriAuthority: boolean
   // Why: replies must be scoped to the exact write that carried the query.
   // The window opens around the parse of a forward-flagged chunk and closes
   // with it, so seeds/snapshots and unsolicited core emissions (e.g. native
@@ -66,6 +81,8 @@ export class HeadlessEmulator {
   private queryReplyForwardingDepth = 0
 
   constructor(opts: HeadlessEmulatorOptions) {
+    this.pathFlavor = opts.pathFlavor
+    this.remotePosixFileUriAuthority = opts.remotePosixFileUriAuthority === true
     this.terminal = new Terminal({
       cols: opts.cols,
       rows: opts.rows,
@@ -82,17 +99,18 @@ export class HeadlessEmulator {
     this.serializer = new SerializeAddon()
     this.terminal.loadAddon(this.serializer)
 
+    // Why: this mirror must measure character widths exactly like the
+    // renderer's xterm (Unicode 11 + ZWJ emoji joining). With the default v6
+    // tables, emoji-dense rows (agent status lines) advance the cursor
+    // differently here than on screen, so the mirrored buffer accumulates
+    // cell-shifted tears that snapshot restores then paint back as garbage.
+    this.terminal.loadAddon(new Unicode11Addon())
+    activateOrcaTerminalUnicodeProvider(this.terminal)
+
     // Why onData is gated behind onQueryReply: by default this emulator is
-    // pure state tracking and MUST NOT respond to terminal query sequences
-    // (DA1/DA2, DSR, OSC 10/11/12, DECRPM). The daemon emulator parses data
-    // in-process synchronously before `handleSubprocessData` forwards it to
-    // the renderer over IPC, so any reply it emitted would land on the
-    // shell's stdin ahead of the renderer's xterm reply and win the race —
-    // a double-reply with default-xterm values (OSC 11 default-black was
-    // the visible casualty). Only main's runtime per-PTY emulators pass a
-    // sink, and even then replies flow only for chunks the hidden-delivery
-    // gate DROPPED, where the renderer never sees the bytes and main is the
-    // single answerer. See docs/reference/terminal-query-authority.md.
+    // pure state tracking and MUST NOT respond to terminal query sequences.
+    // Runtime hidden-delivery responders pass a sink only when main is the
+    // single answerer for bytes the renderer did not see.
     this.onQueryReply = opts.onQueryReply ?? null
     if (this.onQueryReply) {
       this.terminal.onData((reply) => this.emitQueryReply(reply))
@@ -192,7 +210,7 @@ export class HeadlessEmulator {
     if (this.tryWriteSync(data, { forwardQueryReplies })) {
       return Promise.resolve()
     }
-    this.oscText.scan(data)
+    this.scanInputForOscState(data)
     // Why the sentinel: xterm parses queued writes asynchronously, so opening
     // the window at enqueue time would leak it over earlier queued unflagged
     // chunks (seed/hydration bytes parsing while depth > 0). Write callbacks
@@ -211,7 +229,8 @@ export class HeadlessEmulator {
         }
         // Why: snapshots combine serialized xterm state with mirrored mouse
         // modes. Commit the mirror only after xterm has parsed the same bytes.
-        this.mouseModes.scan(data)
+
+        this.privateModes.scan(data)
         resolve()
       })
     })
@@ -233,7 +252,7 @@ export class HeadlessEmulator {
     if (typeof writeSync !== 'function') {
       return false
     }
-    this.oscText.scan(data)
+    this.scanInputForOscState(data)
     const forwardQueryReplies = opts.forwardQueryReplies === true
     if (forwardQueryReplies) {
       this.queryReplyForwardingDepth += 1
@@ -247,8 +266,18 @@ export class HeadlessEmulator {
         this.queryReplyForwardingDepth -= 1
       }
     }
-    this.mouseModes.scan(data)
+    this.privateModes.scan(data)
     return true
+  }
+
+  private scanInputForOscState(data: string): void {
+    const oscInput = this.oscScanTail + data
+    this.oscScanTail = this.extractOscScanTail(oscInput)
+    this.scanOsc7(oscInput)
+    const lastTitle = extractLastOscTitle(oscInput)
+    if (lastTitle !== null) {
+      this.lastTitle = lastTitle
+    }
   }
 
   resize(cols: number, rows: number): void {
@@ -282,12 +311,12 @@ export class HeadlessEmulator {
         this.restoredOscLinks
       ),
       rehydrateSequences: this.buildRehydrateSequences(modes),
-      cwd: this.oscText.cwd,
+      cwd: this.cwd,
       modes,
       cols: this.terminal.cols,
       rows: this.terminal.rows,
       scrollbackLines: this.terminal.buffer.normal.length - this.terminal.rows,
-      lastTitle: this.oscText.lastTitle ?? undefined
+      lastTitle: this.lastTitle ?? undefined
     }
   }
 
@@ -305,15 +334,15 @@ export class HeadlessEmulator {
   }
 
   getCwd(): string | null {
-    return this.oscText.cwd
+    return this.cwd
   }
 
   setCwd(cwd: string | null): void {
-    this.oscText.cwd = cwd
+    this.cwd = cwd
   }
 
   setLastTitle(title: string): void {
-    this.oscText.lastTitle = title
+    this.lastTitle = title
   }
 
   setRestoredOscLinks(links: TerminalOscLinkRange[] | undefined): void {
@@ -328,6 +357,16 @@ export class HeadlessEmulator {
   dispose(): void {
     this.disposed = true
     this.terminal.dispose()
+  }
+
+  private scanOsc7(data: string): void {
+    scanOsc7Uris(data, (uri) => {
+      this.parseOsc7Uri(uri)
+    })
+  }
+
+  private extractOscScanTail(input: string): string {
+    return extractOscScanTail(input, OSC_SCAN_TAIL_LIMIT)
   }
 
   private normalizeSnapshotAnsiForModes(snapshotAnsi: string, modes: TerminalModes): string {
@@ -345,15 +384,26 @@ export class HeadlessEmulator {
     return snapshotAnsi.slice(start + alternateScreenMarker.length)
   }
 
+  private parseOsc7Uri(uri: string): void {
+    const parsed = parseFileUriPath(uri, {
+      pathFlavor: this.pathFlavor,
+      remotePosixAuthority: this.remotePosixFileUriAuthority
+    })
+    if (parsed) {
+      this.cwd = parsed
+    }
+  }
+
   private getModes(): TerminalModes {
     const buffer = this.terminal.buffer.active
-    const mouseTrackingMode = this.mouseModes.mouseTrackingMode
+    const mouseTrackingMode = this.privateModes.mouseTrackingMode
     return {
       bracketedPaste: this.terminal.modes.bracketedPasteMode,
       mouseTracking: mouseTrackingMode !== 'none',
       mouseTrackingMode,
-      sgrMouseMode: this.mouseModes.sgrMouseMode,
-      sgrMousePixelsMode: this.mouseModes.sgrMousePixelsMode,
+
+      sgrMouseMode: this.privateModes.sgrMouseMode,
+      sgrMousePixelsMode: this.privateModes.sgrMousePixelsMode,
       applicationCursor:
         buffer.type === 'normal' ? this.terminal.modes.applicationCursorKeysMode : false,
       alternateScreen: buffer.type === 'alternate',
