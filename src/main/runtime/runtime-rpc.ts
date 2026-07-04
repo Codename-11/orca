@@ -154,7 +154,12 @@ const MOBILE_RPC_METHOD_ALLOWLIST = new Set([
   'files.read',
   'files.readChunk',
   'files.readPreview',
+  'files.readTerminalArtifact',
+  'files.readTerminalArtifactPreview',
   'files.resolveTerminalPath',
+
+  'files.writeTerminalArtifact',
+
   'forge.createIssue',
   'forge.listAgents',
   'forge.listIssues',
