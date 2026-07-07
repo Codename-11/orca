@@ -14,7 +14,8 @@ export enum TerminalStreamOpcode {
   Subscribe = 9,
   Unsubscribe = 10,
   SnapshotRequest = 11,
-  Ack = 12
+  Ack = 12,
+  Metadata = 13
 }
 
 export type TerminalStreamFrame = {
@@ -94,6 +95,7 @@ function isTerminalStreamOpcode(value: number): value is TerminalStreamOpcode {
     value === TerminalStreamOpcode.Subscribe ||
     value === TerminalStreamOpcode.Unsubscribe ||
     value === TerminalStreamOpcode.SnapshotRequest ||
-    value === TerminalStreamOpcode.Ack
+    value === TerminalStreamOpcode.Ack ||
+    value === TerminalStreamOpcode.Metadata
   )
 }

@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- WSL installer coverage shares launcher, bridge, stale-state, timeout, and probe-failure fixtures. */
 import type { CliInstallStatus } from '../../shared/cli-install-types'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
