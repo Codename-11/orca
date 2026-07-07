@@ -1,0 +1,305 @@
+## Axiom Orca upstream sync remediation
+
+- Original Actions run: https://github.com/Codename-11/orca/actions/runs/28853127276
+- Upstream ref/tag: v1.4.126
+- Intended Axiom version/tag: 1.4.126-axiom.1 / axiom-v1.4.126-axiom.1
+- Target branch: `axiom/deploy`
+- Bot branch: `bot/upstream-sync-axiom-v1.4.126-axiom.1`
+- Classification: `auto_remediate` — Fork identity/update-feed files need policy-guided agent remediation: mobile/app.json
+
+## Conflicted files
+- `.github/workflows/release-cut.yml`
+- `mobile/app.json`
+- `package.json`
+- `src/main/cli/wsl-cli-installer.test.ts`
+- `src/main/daemon/daemon-pty-adapter.ts`
+- `src/main/daemon/headless-emulator.ts`
+- `src/main/ipc/pty.ts`
+- `src/main/persistence.ts`
+- `src/main/runtime/orca-runtime.ts`
+- `src/main/runtime/rpc/methods/terminal.ts`
+- `src/main/runtime/rpc/terminal-subscribe-buffer.test.ts`
+- `src/main/runtime/runtime-rpc.ts`
+- `src/main/updater-changelog.ts`
+- `src/main/updater-nudge.ts`
+- `src/main/updater-prerelease-feed.ts`
+- `src/main/window/attach-main-window-services.ts`
+- `src/renderer/src/App.tsx`
+- `src/renderer/src/components/settings/GeneralUpdateSettingsSection.tsx`
+- `src/renderer/src/components/terminal-pane/pty-connection.ts`
+- `src/renderer/src/components/terminal-pane/pty-transport.ts`
+- `src/renderer/src/components/terminal-pane/terminal-command-lifecycle.ts`
+- `src/renderer/src/lib/github-links.ts`
+- `src/shared/agent-detection.ts`
+- `src/shared/terminal-stream-protocol.ts`
+- `tests/e2e/artificial-opencode-hidden-pressure-scenario.ts`
+- `tests/e2e/artificial-opencode-terminal-load.spec.ts`
+
+## Captured git status
+```
+M  .github/workflows/mobile-android-release.yml
+M  .github/workflows/mobile.yml
+M  .github/workflows/pr.yml
+UU .github/workflows/release-cut.yml
+M  .gitignore
+M  .oxlintrc.json
+M  README.md
+A  config/reliability-gates.jsonc
+A  config/scripts/check-reliability-gates.mjs
+A  config/scripts/check-reliability-gates.test.mjs
+M  config/scripts/create-draft-release.mjs
+M  config/scripts/create-draft-release.test.mjs
+M  config/scripts/locale-ko-key-overrides.json
+M  config/scripts/orchestration-skill-guidance.test.mjs
+M  config/scripts/package-electron-runtime-contract.test.mjs
+A  config/scripts/repro-windows-apphang-terminal-activation.mjs
+M  config/scripts/run-electron-vite-dev.mjs
+M  config/scripts/verify-release-required-assets.mjs
+A  config/scripts/verify-windows-inner-signature.mjs
+A  config/scripts/verify-windows-inner-signature.test.mjs
+A  config/scripts/windows-apphang-repro/apphang-report-summary.mjs
+A  config/scripts/windows-apphang-repro/electron-dev-session.mjs
+A  config/scripts/windows-apphang-repro/repro-timing.mjs
+A  config/scripts/windows-apphang-repro/terminal-activation-scenario.mjs
+A  config/scripts/windows-apphang-repro/wsl-workspace-fixture.mjs
+M  config/tsconfig.cli.json
+M  docs/assets/readme-downloads.svg
+A  docs/assets/star-history.png
+M  docs/assets/wechat-qr.png
+A  docs/claude-fable-weekly-usage-meter.md
+M  docs/readme/README.es.md
+M  docs/readme/README.ja.md
+M  docs/readme/README.ko.md
+A  docs/readme/README.pt.md
+M  docs/readme/README.zh-CN.md
+A  docs/reference/reliability-gates-implementation-plan.md
+A  docs/reference/reliability-pain-points-2026-06-30.md
+M  mobile/.gitignore
+M  mobile/.oxlintrc.json
+UU mobile/app.json
+M  mobile/app/h/[hostId]/files/preview/[worktreeId].tsx
+M  mobile/app/h/[hostId]/index.tsx
+M  mobile/app/h/[hostId]/session/[worktreeId].tsx
+M  mobile/app/h/[hostId]/session/mobile-session-command-input-styles.ts
+M  mobile/package.json
+M  mobile/pnpm-lock.yaml
+A  mobile/scripts/build-terminal-webview-engine.mjs
+M  mobile/scripts/mock-server-file-preview-data.ts
+M  mobile/scripts/prepare-android-release.mjs
+M  mobile/src/components/MobileDiffReviewLine.tsx
+M  mobile/src/components/NewWorktreeModal.tsx
+M  mobile/src/components/pr-sidebar/pr-auto-merge-availability.ts
+A  mobile/src/files/MobileFileExplorerPanel.test.ts
+M  mobile/src/files/MobileFileExplorerPanel.tsx
+M  mobile/src/files/MobileFileMarkdownPreview.tsx
+A  mobile/src/files/MobileFilePreviewBody.tsx
+A  mobile/src/files/MobileFilePreviewEditableSource.tsx
+A  mobile/src/files/MobileFilePreviewScreen.test.ts
+M  mobile/src/files/MobileFilePreviewScreen.tsx
+M  mobile/src/files/MobileFilePreviewSourceText.tsx
+A  mobile/src/files/directory-load-revisions.test.ts
+A  mobile/src/files/directory-load-revisions.ts
+M  mobile/src/files/file-tree.test.ts
+M  mobile/src/files/file-tree.ts
+A  mobile/src/files/mobile-file-explorer-row.tsx
+M  mobile/src/files/mobile-file-explorer-styles.ts
+A  mobile/src/files/mobile-file-preview-editability.ts
+A  mobile/src/files/mobile-file-preview-line-column.test.ts
+A  mobile/src/files/mobile-file-preview-line-column.ts
+M  mobile/src/files/mobile-file-preview-request.test.ts
+M  mobile/src/files/mobile-file-preview-request.ts
+A  mobile/src/files/mobile-file-preview-response.ts
+M  mobile/src/files/mobile-file-preview-route.test.ts
+M  mobile/src/files/mobile-file-preview-route.ts
+A  mobile/src/files/mobile-file-preview-source.test.ts
+A  mobile/src/files/mobile-file-preview-source.ts
+M  mobile/src/files/mobile-file-preview-styles.ts
+A  mobile/src/files/mobile-terminal-artifact-grant-refresh.ts
+A  mobile/src/files/terminal-artifact-grant-error.ts
+M  mobile/src/hooks/use-mobile-dictation.ts
+A  mobile/src/mobile-release/prepare-android-release-script.test.ts
+M  mobile/src/session/MobileTerminalLiveInputStatus.tsx
+M  mobile/src/session/mobile-diff-comments.ts
+M  mobile/src/session/mobile-image-attachment.test.ts
+M  mobile/src/session/mobile-image-attachment.ts
+A  mobile/src/session/mobile-terminal-file-tap-open.test.ts
+A  mobile/src/session/mobile-terminal-file-tap-open.ts
+M  mobile/src/session/use-mobile-image-attachment.ts
+A  mobile/src/session/use-mobile-terminal-paste.ts
+A  mobile/src/session/use-terminal-live-input-mode-preference.test.ts
+A  mobile/src/session/use-terminal-live-input-mode-preference.ts
+M  mobile/src/storage/preferences.test.ts
+M  mobile/src/storage/preferences.ts
+M  mobile/src/terminal/TerminalWebView.tsx
+A  mobile/src/terminal/terminal-file-url-tap.ts
+A  mobile/src/terminal/terminal-live-accessory-input.ts
+A  mobile/src/terminal/terminal-live-accessory-raw-send-target.test.ts
+A  mobile/src/terminal/terminal-live-accessory-raw-send-target.ts
+A  mobile/src/terminal/terminal-live-control-send-order.test.ts
+A  mobile/src/terminal/terminal-live-control-send-order.ts
+A  mobile/src/terminal/terminal-live-hangul-mirror.test.ts
+A  mobile/src/terminal/terminal-live-hangul-mirror.ts
+A  mobile/src/terminal/terminal-live-input-affordance.test.ts
+A  mobile/src/terminal/terminal-live-input-sender.ts
+M  mobile/src/terminal/terminal-live-input.test.ts
+M  mobile/src/terminal/terminal-live-input.ts
+A  mobile/src/terminal/terminal-live-pending-flush-state.test.ts
+A  mobile/src/terminal/terminal-live-pending-flush-state.ts
+A  mobile/src/terminal/terminal-live-text-commit.test.ts
+A  mobile/src/terminal/terminal-live-text-commit.ts
+M  mobile/src/terminal/terminal-path-tap-injected.ts
+M  mobile/src/terminal/terminal-path-tap.test.ts
+M  mobile/src/terminal/terminal-path-tap.ts
+A  mobile/src/terminal/terminal-send-rpc-response.test.ts
+A  mobile/src/terminal/terminal-send-rpc-response.ts
+A  mobile/src/terminal/terminal-webview-contract.ts
+A  mobile/src/terminal/terminal-webview-engine-error-state.tsx
+A  mobile/src/terminal/terminal-webview-engine-error.test.ts
+A  mobile/src/terminal/terminal-webview-engine.test.ts
+A  mobile/src/terminal/terminal-webview-frame-styles.ts
+M  mobile/src/terminal/terminal-webview-html.ts
+A  mobile/src/terminal/terminal-webview-ready-watchdog.ts
+M  mobile/src/terminal/terminal-webview-tap-routing.test.ts
+M  mobile/src/terminal/terminal-webview-text-zoom.test.ts
+M  mobile/src/terminal/terminal-webview-url-tap.test.ts
+M  mobile/src/terminal/terminal-webview-url-tap.ts
+A  mobile/src/terminal/use-terminal-live-accessory-input-commit.test.ts
+A  mobile/src/terminal/use-terminal-live-accessory-input-commit.ts
+A  mobile/src/terminal/use-terminal-live-input-commit.test.ts
+A  mobile/src/terminal/use-terminal-live-input-commit.ts
+A  mobile/src/terminal/use-terminal-live-pending-input-flush.ts
+A  mobile/src/transport/rpc-client-terminal-binary-frame.test.ts
+A  mobile/src/transport/rpc-client-terminal-binary-frame.ts
+A  mobile/src/transport/rpc-client-terminal-reconnect.test.ts
+M  mobile/src/transport/rpc-client.test.ts
+M  mobile/src/transport/rpc-client.ts
+M  mobile/src/transport/terminal-stream-protocol.ts
+D  mobile/src/worktree/use-workspace-sections.test.ts
+M  mobile/src/worktree/use-workspace-sections.ts
+M  mobile/src/worktree/workspace-view-settings.test.ts
+M  mobile/src/worktree/workspace-view-settings.ts
+A  mobile/src/worktree/worktree-list-completeness.test.ts
+M  notes/windows-perf-progress.md
+UU package.json
+A  resources/minimax-icon.svg
+M  skills/linear-tickets/SKILL.md
+M  skills/orca-linear/SKILL.md
+M  skills/orca-per-workspace-env/SKILL.md
+M  skills/orchestration/SKILL.md
+M  src/cli/browser.test.ts
+M  src/cli/handlers/emulator.test.ts
+M  src/cli/handlers/emulator.ts
+M  src/cli/handlers/file.test.ts
+M  src/cli/handlers/orchestration.test.ts
+M  src/cli/handlers/orchestration.ts
+M  src/cli/linear-format.ts
+M  src/main/agent-hooks/first-work-branch-rename.test.ts
+M  src/main/agent-hooks/first-work-branch-rename.ts
+M  src/main/agent-hooks/installer-utils.test.ts
+M  src/main/agent-hooks/installer-utils.ts
+M  src/main/agent-hooks/remote-hook-service-installers.test.ts
+A  src/main/ai-vault/remote-session-scanner-codex-index.ts
+A  src/main/ai-vault/remote-session-scanner-sources.ts
+A  src/main/ai-vault/remote-session-scanner-types.ts
+A  src/main/ai-vault/remote-session-scanner.test.ts
+A  src/main/ai-vault/remote-session-scanner.ts
+M  src/main/ai-vault/session-scanner-accumulator.ts
+M  src/main/ai-vault/session-scanner-agent-parser.ts
+A  src/main/ai-vault/session-scanner-claude-title.test.ts
+A  src/main/ai-vault/session-scanner-codex-fixtures.ts
+M  src/main/ai-vault/session-scanner-codex-parser.ts
+A  src/main/ai-vault/session-scanner-codex-title-index.ts
+M  src/main/ai-vault/session-scanner-devin-parser.ts
+M  src/main/ai-vault/session-scanner-discovery.ts
+A  src/main/ai-vault/session-scanner-droid-parser.ts
+M  src/main/ai-vault/session-scanner-graph-parsers.ts
+A  src/main/ai-vault/session-scanner-incremental-fixtures.ts
+A  src/main/ai-vault/session-scanner-parse-cache-agents.test.ts
+A  src/main/ai-vault/session-scanner-parse-cache.test.ts
+A  src/main/ai-vault/session-scanner-parse-cache.ts
+M  src/main/ai-vault/session-scanner-primary-parsers.ts
+M  src/main/ai-vault/session-scanner-scope-discovery.ts
+M  src/main/ai-vault/session-scanner-secondary-parsers.ts
+M  src/main/ai-vault/session-scanner-source-discovery.ts
+A  src/main/ai-vault/session-scanner-test-fixtures.ts
+M  src/main/ai-vault/session-scanner-token-values.ts
+M  src/main/ai-vault/session-scanner-types.ts
+M  src/main/ai-vault/session-scanner-values.ts
+M  src/main/ai-vault/session-scanner.test.ts
+M  src/main/ai-vault/session-scanner.ts
+M  src/main/antigravity/hook-service.test.ts
+M  src/main/antigravity/hook-service.ts
+M  src/main/attribution/terminal-attribution.test.ts
+M  src/main/automations/external-manager.test.ts
+A  src/main/automations/run-target-resolution.test.ts
+M  src/main/automations/run-target-resolution.ts
+M  src/main/automations/service-precheck.test.ts
+M  src/main/automations/service.test.ts
+M  src/main/automations/service.ts
+M  src/main/azure-devops/azure-devops-api-request.ts
+M  src/main/bitbucket/client.ts
+M  src/main/browser/agent-browser-bridge.test.ts
+M  src/main/browser/agent-browser-bridge.ts
+M  src/main/browser/browser-cookie-import.test.ts
+M  src/main/browser/browser-guest-ui.test.ts
+M  src/main/browser/browser-guest-ui.ts
+M  src/main/browser/browser-manager-grab.test.ts
+M  src/main/browser/browser-manager.test.ts
+M  src/main/browser/browser-screencast-stream.test.ts
+M  src/main/browser/browser-session-registry.test.ts
+M  src/main/browser/browser-session-registry.ts
+M  src/main/browser/cdp-bridge-integration.test.ts
+A  src/main/browser/cdp-print-to-pdf.test.ts
+A  src/main/browser/cdp-print-to-pdf.ts
+M  src/main/browser/cdp-screenshot.ts
+A  src/main/browser/cdp-ws-proxy-focus-replay.test.ts
+A  src/main/browser/cdp-ws-proxy-test-harness.ts
+M  src/main/browser/cdp-ws-proxy.test.ts
+M  src/main/browser/cdp-ws-proxy.ts
+M  src/main/browser/snapshot-engine.test.ts
+M  src/main/claude-accounts/live-pty-gate.test.ts
+M  src/main/claude-accounts/live-pty-gate.ts
+M  src/main/claude-accounts/oauth-refresh.ts
+M  src/main/claude-accounts/runtime-auth-service.test.ts
+M  src/main/claude-accounts/runtime-auth-service.ts
+M  src/main/claude-accounts/service.test.ts
+M  src/main/claude-accounts/service.ts
+M  src/main/claude-usage/store.test.ts
+M  src/main/claude/hook-service.test.ts
+M  src/main/claude/hook-service.ts
+M  src/main/claude/hook-settings.ts
+M  src/main/cli/appimage-cli-wrapper.ts
+A  src/main/cli/linux-bare-orca-dispatcher.test.ts
+A  src/main/cli/linux-bare-orca-dispatcher.ts
+UU src/main/cli/wsl-cli-installer.test.ts
+M  src/main/codex-accounts/runtime-home-service.test.ts
+M  src/main/codex-accounts/runtime-home-service.ts
+M  src/main/codex-accounts/service.test.ts
+M  src/main/codex-accounts/service.ts
+M  src/main/codex-usage/scanner-paths.test.ts
+M  src/main/codex/codex-config-mirror.test.ts
+M  src/main/codex/codex-config-mirror.ts
+A  src/main/codex/codex-config-path-reference-rewrite.ts
+M  src/main/codex/codex-home-paths.test.ts
+M  src/main/codex/codex-home-paths.ts
+A  src/main/codex/config-toml-line-scan.ts
+M  src/main/codex/config-toml-trust.test.ts
+M  src/main/codex/config-toml-trust.ts
+M  src/main/codex/hook-service.ts
+A  src/main/codex/wsl-codex-session-bridge.test.ts
+... omitted 1065 additional status records to keep remediation payloads within GitHub limits.
+```
+
+## Axiom safety notes
+- Bot branch PR only; do not push conflict remediation directly to `axiom/deploy`.
+- Preserve side-by-side identity, updater feed, fork semver, profile portability, and Forge provider/task-registry additions.
+- Protected-file deletion or fork identity/update-feed changes require explicit review before merge.
+
+## Verification checklist
+- [ ] `pnpm install --frozen-lockfile`
+- [ ] `pnpm run typecheck`
+- [ ] `pnpm exec vitest run --config config/vitest.config.ts src/shared/task-providers.test.ts src/main/axiom-release-hardening.test.ts src/main/updater-endpoints.test.ts src/main/app-build-identity.test.ts config/scripts/axiom-upstream-sync-release.test.mjs`
+- [ ] `pnpm exec oxlint config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml`
+- [ ] `pnpm exec oxfmt --check config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml config/axiom-merge-remediation-policy.json`
+- [ ] `git diff --check`
+
