@@ -56,12 +56,17 @@ export type Osc133CommandFinishedScanner = {
 }
 
 export function createOsc133CommandFinishedScanner(
-  onCommandFinished: (bestEffortExitCode: number | null) => void
+  onCommandFinished: (bestEffortExitCode: number | null) => void,
+  options: { onCommandStarted?: () => void } = {}
 ): Osc133CommandFinishedScanner {
   let carry = ''
 
   const handleOsc133 = (payload: string): void => {
     const [sequence, exitCode] = payload.split(';')
+    if (sequence === 'C') {
+      options.onCommandStarted?.()
+      return
+    }
     if (sequence === 'D') {
       onCommandFinished(parseBestEffortExitCode(exitCode))
     }

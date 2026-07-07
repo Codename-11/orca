@@ -41,16 +41,13 @@ export async function fetchChangelog(
   incomingVersion: string,
   localVersion: string
 ): Promise<ChangelogData | null> {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 5000)
-
   try {
     const changelogJsonUrl = getChangelogJsonUrl()
     if (!changelogJsonUrl) {
       return null
     }
     const res = await net.fetch(changelogJsonUrl, {
-      signal: controller.signal
+      signal: AbortSignal.timeout(5000)
     })
     if (!res.ok) {
       return null
@@ -86,7 +83,7 @@ export async function fetchChangelog(
     // ── Fallback: find the most recent entry with rich content ────────
     // Why: releases often ship without rich media/description. Rather than
     // showing the plain card, we look for the latest entry that does have
-    // rich content. As long as the user's local version is behind that
+    // rich content. As long as the user's local version is at or behind that
     // entry, the demo is still relevant — it highlights something they
     // haven't seen yet. We swap the release notes URL to the generic
     // changelog page since the shown content doesn't match the incoming
@@ -138,7 +135,7 @@ export async function fetchChangelog(
     }
 
     return null
-  } finally {
-    clearTimeout(timeout)
+  } catch {
+    return null
   }
 }

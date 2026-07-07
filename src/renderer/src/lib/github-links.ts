@@ -8,14 +8,20 @@ import { isWorkItemLinkQueryTooLarge } from './work-item-link-query-bounds'
 
 export { buildGitHubRepoUrl, parseGitHubIssueOrPRLink, parseGitHubIssueOrPRNumber }
 export type { RepoSlug }
+const HTTP_URL_PREFIX_RE = /^https?:\/\//i
+
+export type GitHubIssueOrPRLink = {
+  slug: RepoSlug
+  number: number
+  type: 'issue' | 'pr'
+}
 
 export type GitHubLinkQuery = {
   query: string
   directNumber: number | null
+  directLink?: GitHubIssueOrPRLink
   tooLarge?: boolean
 }
-
-
 
 /**
  * Normalizes link-picker input so both raw issue/PR numbers and full GitHub
@@ -31,7 +37,7 @@ export function normalizeGitHubLinkQuery(raw: string): GitHubLinkQuery {
   }
 
   const direct = parseGitHubIssueOrPRNumber(trimmed)
-  if (direct !== null && !trimmed.startsWith('http')) {
+  if (direct !== null && !HTTP_URL_PREFIX_RE.test(trimmed)) {
     return { query: trimmed, directNumber: direct }
   }
 
@@ -45,6 +51,7 @@ export function normalizeGitHubLinkQuery(raw: string): GitHubLinkQuery {
   // slug differs from the origin remote.
   return {
     query: trimmed,
-    directNumber: link.number
+    directNumber: link.number,
+    directLink: link
   }
 }
