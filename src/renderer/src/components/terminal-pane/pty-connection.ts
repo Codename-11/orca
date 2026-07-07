@@ -2185,24 +2185,6 @@ export function connectPanePty(
     releaseHiddenRendererPtyDelivery()
     clearPanePtyFitBinding()
     const isSuppressedExit = deps.consumeSuppressedPtyExit(ptyId)
-    if (!isSuppressedExit) {
-      deps.clearExitedPanePtyLayoutBinding(pane.id, ptyId)
-    }
-    deps.clearRuntimePaneTitle(deps.tabId, pane.id)
-    deps.clearTabPtyId(deps.tabId, ptyId)
-    // Why: if the PTY exits abruptly (Ctrl-D, crash, shell termination) without
-    // first emitting a non-agent title, the cache timer would persist as stale
-    // state. Clear it unconditionally on PTY exit.
-    deps.setCacheTimerStartedAt(cacheKey, null)
-    // Why: a dead terminal has no running agent — remove its explicit status
-    // entry so the hover UI only shows what is running *now*.
-    useAppStore.getState().removeAgentStatus(cacheKey)
-    useAppStore.getState().clearPaneForegroundAgent(cacheKey)
-    // The runtime graph is the CLI's source for live terminal bindings, so
-    // we must republish when a pane loses its PTY instead of waiting for a
-    // broader layout change that may never happen.
-    scheduleRuntimeGraphSync()
-
     // Why: intentional restarts suppress the PTY exit ahead of time so the
     // pane stays mounted and can reconnect in place. Without consuming the
     // suppression here, split-pane Codex restarts would still close the pane
@@ -2228,6 +2210,22 @@ export function connectPanePty(
       }
       return
     }
+
+    deps.clearExitedPanePtyLayoutBinding(pane.id, ptyId)
+    deps.clearRuntimePaneTitle(deps.tabId, pane.id)
+    deps.clearTabPtyId(deps.tabId, ptyId)
+    // Why: if the PTY exits abruptly (Ctrl-D, crash, shell termination) without
+    // first emitting a non-agent title, the cache timer would persist as stale
+    // state. Clear it unconditionally on PTY exit.
+    deps.setCacheTimerStartedAt(cacheKey, null)
+    // Why: a dead terminal has no running agent — remove its explicit status
+    // entry so the hover UI only shows what is running *now*.
+    useAppStore.getState().removeAgentStatus(cacheKey)
+    useAppStore.getState().clearPaneForegroundAgent(cacheKey)
+    // The runtime graph is the CLI's source for live terminal bindings, so
+    // we must republish when a pane loses its PTY instead of waiting for a
+    // broader layout change that may never happen.
+    scheduleRuntimeGraphSync()
 
     manager.setPaneGpuRendering(pane.id, true)
     const panes = manager.getPanes()

@@ -812,12 +812,18 @@ describe('pane terminal output scheduler', () => {
       latencySensitive: false
     })
 
-    vi.advanceTimersByTime(0)
+    await vi.advanceTimersByTimeAsync(0)
 
     expect(active.write).toHaveBeenCalledWith('active', expect.any(Function))
+    expect(backgroundA.write).toHaveBeenCalledWith('background-a')
+    expect(backgroundB.write).not.toHaveBeenCalled()
     expect(active.write.mock.invocationCallOrder[0]).toBeLessThan(
       backgroundA.write.mock.invocationCallOrder[0]
     )
+
+    await vi.advanceTimersByTimeAsync(16)
+
+    expect(backgroundB.write).toHaveBeenCalledWith('background-b')
     expect(active.write.mock.invocationCallOrder[0]).toBeLessThan(
       backgroundB.write.mock.invocationCallOrder[0]
     )

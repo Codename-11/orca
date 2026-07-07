@@ -607,7 +607,6 @@ describe('registerPtyHandlers', () => {
       throw new Error('missing pty:setPtyDeliveryInterest listener')
     }
     return interestCall[1] as (event: unknown, args: { id: string; interested: boolean }) => void
-
   }
 
   function getPtySetRendererPtyVisibleListener(): (
@@ -8928,6 +8927,17 @@ describe('registerPtyHandlers', () => {
     ).toHaveLength(1)
   })
 
+  function getLastDidFinishLoadHandler(): (() => void) | undefined {
+    const calls = mainWindow.webContents.on.mock.calls
+    for (let index = calls.length - 1; index >= 0; index -= 1) {
+      const [eventName, handler] = calls[index]
+      if (eventName === 'did-finish-load') {
+        return handler as () => void
+      }
+    }
+    return undefined
+  }
+
   // Why (#5787): a crash/freeze-recovery reload re-fires did-finish-load on the
   // single window. The orphan sweep must be suppressed for it so live LOCAL PTYs
   // stay attached until session restore re-adopts them.
@@ -8962,9 +8972,7 @@ describe('registerPtyHandlers', () => {
       undefined,
       { isRecoveryReloadInFlight }
     )
-    const didFinishLoad = mainWindow.webContents.on.mock.calls.find(
-      ([eventName]) => eventName === 'did-finish-load'
-    )?.[1] as (() => void) | undefined
+    const didFinishLoad = getLastDidFinishLoadHandler()
     expect(didFinishLoad).toBeTypeOf('function')
 
     const spawnResult = (await handlers.get('pty:spawn')!(null, { cols: 80, rows: 24 })) as {
@@ -9017,9 +9025,7 @@ describe('registerPtyHandlers', () => {
       undefined,
       { isRecoveryReloadInFlight }
     )
-    const didFinishLoad = mainWindow.webContents.on.mock.calls.find(
-      ([eventName]) => eventName === 'did-finish-load'
-    )?.[1] as (() => void) | undefined
+    const didFinishLoad = getLastDidFinishLoadHandler()
 
     const spawnResult = (await handlers.get('pty:spawn')!(null, { cols: 80, rows: 24 })) as {
       id: string
@@ -9059,9 +9065,7 @@ describe('registerPtyHandlers', () => {
       undefined,
       { isRecoveryReloadInFlight }
     )
-    const didFinishLoad = mainWindow.webContents.on.mock.calls.find(
-      ([eventName]) => eventName === 'did-finish-load'
-    )?.[1] as (() => void) | undefined
+    const didFinishLoad = getLastDidFinishLoadHandler()
 
     spawnMock.mockReturnValue({
       onData: vi.fn(() => makeDisposable()),
