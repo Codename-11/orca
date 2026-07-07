@@ -95,6 +95,7 @@ Upstream main and release sync are automated through:
 - [`.github/workflows/axiom-upstream-main-sync.yml`](.github/workflows/axiom-upstream-main-sync.yml)
 - [`.github/workflows/axiom-upstream-sync-release.yml`](.github/workflows/axiom-upstream-sync-release.yml)
 - [`config/scripts/axiom-sync-upstream-release.mjs`](config/scripts/axiom-sync-upstream-release.mjs)
+- [`docs/reference/local-source-runtime-update.md`](docs/reference/local-source-runtime-update.md)
 
 The sync path is allowed to update:
 
@@ -117,6 +118,8 @@ The protected paths and required checks are defined in
   verification.
 - [`docs/reference/axiom-release-readiness.md`](docs/reference/axiom-release-readiness.md):
   release identity, updater safety, and sync automation.
+- [`docs/reference/local-source-runtime-update.md`](docs/reference/local-source-runtime-update.md):
+  normal `orca update` behavior for source/dev CLI and headless serve runtimes.
 - [`docs/reference/forge-task-provider.md`](docs/reference/forge-task-provider.md):
   Forge provider behavior and branch strategy.
 - [`docs/reference/task-provider-surface-map.md`](docs/reference/task-provider-surface-map.md):

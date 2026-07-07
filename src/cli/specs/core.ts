@@ -18,6 +18,7 @@ export const CORE_COMMAND_SPECS: CommandSpec[] = [
     allowedFlags: [...GLOBAL_FLAGS],
     examples: ['orca status', 'orca status --json']
   },
+
   {
     path: ['claude-teams'],
     summary: 'Start Claude Code Agent Teams in the current Orca terminal',

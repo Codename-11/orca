@@ -41,6 +41,12 @@ builds default to `stablyai/orca`, while Axiom builds can route to the fork via
 `ORCA_UPDATE_DOWNLOAD_BASE_URL`, `ORCA_UPDATE_CHANGELOG_URL`, and
 `ORCA_UPDATE_NUDGE_URL`.
 
+Source/dev runtimes use the normal CLI surface, `orca update`, rather than the
+packaged Electron updater. That command defaults Axiom fork checkouts to
+`origin/axiom/deploy`, manages clean local runtime worktrees, repoints the
+standard `orca` / `orca-dev` shims, and can update/restart the headless
+`orca-serve.service`. See [`local-source-runtime-update.md`](local-source-runtime-update.md).
+
 Do not publish fork assets over an upstream release/tag. Axiom releases use
 fork-owned prerelease versions and tags:
 

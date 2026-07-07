@@ -38,6 +38,7 @@ export const BOOLEAN_FLAGS = new Set([
   'mobile',
   'mobile-pairing',
   'no-pairing',
+  'no-restart',
   'parent-current',
   'provision',
   'ready',
@@ -141,7 +142,8 @@ export function supportsBrowserPageFlag(commandPath: string[]): boolean {
       'emulator',
       'note',
       'diagnostics',
-      'linear'
+      'linear',
+      'update'
     ].includes(commandPath[0])
   ) {
     return false
@@ -182,6 +184,7 @@ export function isCommandGroup(commandPath: string[]): boolean {
         'environment',
         'diagnostics',
         'linear',
+        'update',
         'vm'
       ].includes(commandPath[0])) ||
     (commandPath.length === 2 && commandPath[0] === 'agent' && commandPath[1] === 'hooks') ||
