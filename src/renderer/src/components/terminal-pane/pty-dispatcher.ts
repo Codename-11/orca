@@ -28,7 +28,6 @@ export const ptyDataHandlers = new Map<string, (data: string, meta?: PtyDataMeta
  *  active subscription; removal is by Set.delete inside the unsubscribe fn. */
 export const ptyDataSidecars = new Map<string, Set<(data: string) => void>>()
 
-
 /** Register a side-channel data watcher for a PTY without taking ownership
  *  of the primary handler. Returns an unsubscribe fn. ensurePtyDispatcher()
  *  is called automatically so the underlying IPC stream is wired up. */
@@ -141,6 +140,10 @@ export function ensurePtyDispatcher(): void {
         meta ??= {}
         meta.background = true
       }
+      if (payload.droppedBacklog === true) {
+        meta ??= {}
+        meta.droppedBacklog = true
+      }
       const handler = ptyDataHandlers.get(payload.id)
       if (handler) {
         handler(payload.data, meta)
@@ -210,10 +213,7 @@ export function subscribeToPtyExit(ptyId: string, watcher: (code: number) => voi
   }
 }
 
-export {
-  getEagerPtyBufferHandle,
-  registerEagerPtyBuffer
-} from './pty-eager-buffer'
+export { getEagerPtyBufferHandle, registerEagerPtyBuffer } from './pty-eager-buffer'
 export type { EagerPtyHandle } from './pty-eager-buffer'
 export type {
   IpcPtyTransportOptions,

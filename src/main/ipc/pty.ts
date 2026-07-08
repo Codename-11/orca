@@ -83,7 +83,6 @@ import {
 } from '../../shared/stable-pane-id'
 import { isValidTerminalTabId } from '../../shared/terminal-tab-id'
 import { resolveTerminalStartupCwdForWorkspace } from '../../shared/terminal-startup-cwd'
-import { localTerminalCwdCanonicalizer } from '../pty/terminal-cwd-realpath'
 import {
   clearMigrationUnsupportedPty,
   clearMigrationUnsupportedPtysForPaneKey
@@ -1426,6 +1425,10 @@ export function registerPtyHandlers(
     data: string
     startSeq?: number
     containsBackgroundOutput?: boolean
+    /** Set once this pty's unsent backlog was trimmed past the cap; rides the
+     *  next payload so the renderer rebuilds the dropped span from the main
+     *  headless snapshot (see appendPendingPtyData / dataCallback). */
+    droppedBacklog?: boolean
   }
 
   type PtyDataPayload = {
@@ -1434,6 +1437,7 @@ export function registerPtyHandlers(
     seq?: number
     rawLength?: number
     background?: boolean
+    droppedBacklog?: boolean
   }
 
   const pendingData = new Map<string, PendingPtyData>()
@@ -1581,7 +1585,8 @@ export function registerPtyHandlers(
     id: string,
     data: string,
     startSeq: number | undefined,
-    containsBackgroundOutput: boolean | undefined
+    containsBackgroundOutput: boolean | undefined,
+    droppedBacklog?: boolean
   ): PtyDataPayload {
     const payload: PtyDataPayload = { id, data }
     if (typeof startSeq === 'number') {
@@ -1590,6 +1595,9 @@ export function registerPtyHandlers(
     }
     if (containsBackgroundOutput === true) {
       payload.background = true
+    }
+    if (droppedBacklog === true) {
+      payload.droppedBacklog = true
     }
     return payload
   }
@@ -1639,7 +1647,6 @@ export function registerPtyHandlers(
       reason,
       ...(typeof markerSeq === 'number' ? { markerSeq } : {})
     })
-
   }
 
   function rendererPtyIsKnownHidden(id: string): boolean {
@@ -1683,6 +1690,14 @@ export function registerPtyHandlers(
     return [...active, ...background]
   }
 
+  // Why: pending renderer delivery is capped below, after reading the Axiom
+  // rollout/kill-switch settings. Keeping the append helper as a pure merge
+  // preserves byte-identical delivery when the gate is disabled while still
+  // letting the gated cap mark droppedBacklog on the outgoing payload.
+  function capPendingPtyData(pending: PendingPtyData): PendingPtyData {
+    return pending
+  }
+
   function appendPendingPtyData(
     existing: PendingPtyData | undefined,
     data: string,
@@ -1692,27 +1707,29 @@ export function registerPtyHandlers(
   ): PendingPtyData {
     const nextContainsBackgroundOutput =
       existing?.containsBackgroundOutput === true || containsBackgroundOutput
+    // Carry a prior drop flag forward until it actually rides an outgoing payload.
+    const inheritedDropped = existing?.droppedBacklog === true
+    const base: PendingPtyData = { data: '' }
     if (!preservesSeq) {
-      return {
-        data: (existing?.data ?? '') + data,
-        ...(nextContainsBackgroundOutput ? { containsBackgroundOutput: true } : {})
+      base.data = (existing?.data ?? '') + data
+    } else if (!existing) {
+      base.data = data
+      if (typeof startSeq === 'number') {
+        base.startSeq = startSeq
+      }
+    } else {
+      base.data = existing.data + data
+      if (typeof existing.startSeq === 'number') {
+        base.startSeq = existing.startSeq
       }
     }
-    if (!existing) {
-      return {
-        data,
-        ...(typeof startSeq === 'number' ? { startSeq } : {}),
-        ...(nextContainsBackgroundOutput ? { containsBackgroundOutput: true } : {})
-      }
+    if (nextContainsBackgroundOutput) {
+      base.containsBackgroundOutput = true
     }
-    const next: PendingPtyData = {
-      data: existing.data + data,
-      ...(nextContainsBackgroundOutput ? { containsBackgroundOutput: true } : {})
+    if (inheritedDropped) {
+      base.droppedBacklog = true
     }
-    if (typeof existing.startSeq === 'number') {
-      next.startSeq = existing.startSeq
-    }
-    return next
+    return capPendingPtyData(base)
   }
 
   function schedulePendingDataFlush(delayMs: number): void {
@@ -1768,9 +1785,18 @@ export function registerPtyHandlers(
       } else {
         pendingOverflowMarkedPtys.delete(id)
       }
+      // Why: the drop flag rides the first emitted chunk (renderer restore is
+      // idempotent) and is intentionally not copied onto `remaining` above, so a
+      // single backlog trim signals the renderer exactly once.
       sendPtyDataToRenderer(
         id,
-        makePtyDataPayload(id, chunk, pending.startSeq, pending.containsBackgroundOutput)
+        makePtyDataPayload(
+          id,
+          chunk,
+          pending.startSeq,
+          pending.containsBackgroundOutput,
+          pending.droppedBacklog
+        )
       )
       writes++
     }
@@ -1834,7 +1860,8 @@ export function registerPtyHandlers(
           payload.id,
           remaining.data,
           remaining.startSeq,
-          remaining.containsBackgroundOutput
+          remaining.containsBackgroundOutput,
+          remaining.droppedBacklog
         )
       )
       pendingData.delete(payload.id)
@@ -1957,6 +1984,9 @@ export function registerPtyHandlers(
         if (pending.containsBackgroundOutput === true) {
           trimmed.containsBackgroundOutput = true
         }
+        if (runtime) {
+          trimmed.droppedBacklog = true
+        }
         pending = trimmed
         if (!pendingOverflowMarkedPtys.has(payload.id)) {
           pendingOverflowMarkedPtys.add(payload.id)
@@ -1989,7 +2019,8 @@ export function registerPtyHandlers(
           ...(typeof pending.startSeq === 'number'
             ? { seq: pending.startSeq + nextData.length, rawLength: nextData.length }
             : {}),
-          ...(pending.containsBackgroundOutput === true ? { background: true } : {})
+          ...(pending.containsBackgroundOutput === true ? { background: true } : {}),
+          ...(pending.droppedBacklog === true ? { droppedBacklog: true } : {})
         })
         return
       }
@@ -2159,19 +2190,15 @@ export function registerPtyHandlers(
     assertFolderWorkspacePathUsable(status)
   }
 
-  const resolveGuardedPtySpawnCwd = (
+  const resolvePtySpawnStartupCwd = (
     worktreeId: string | undefined,
-    cwd: string | undefined,
-    connectionId?: string | null
+    cwd: string | undefined
   ): string | undefined =>
     resolveTerminalStartupCwdForWorkspace({
       workspaceId: worktreeId,
       requestedCwd: cwd,
       resolveFolderWorkspacePath: (folderWorkspaceId) =>
-        store?.getFolderWorkspace(folderWorkspaceId)?.folderPath,
-      // Why: realpath only makes sense on the local filesystem; SSH worktree
-      // paths live on the remote host.
-      canonicalizePath: localTerminalCwdCanonicalizer(connectionId)
+        store?.getFolderWorkspace(folderWorkspaceId)?.folderPath
     })
 
   // Why: the runtime controller must route through getProviderForPty() so that
@@ -2184,7 +2211,7 @@ export function registerPtyHandlers(
         await startupPromise
       }
       await assertFolderWorkspacePtyPathUsable(args.worktreeId)
-      const cwd = resolveGuardedPtySpawnCwd(args.worktreeId, args.cwd, args.connectionId)
+      const cwd = resolvePtySpawnStartupCwd(args.worktreeId, args.cwd)
       const provider = getProvider(args.connectionId)
       const isClaudeLaunch = !args.connectionId && isClaudeLaunchCommand(args.command)
       if (isClaudeLaunch && isClaudeAuthSwitchInProgress()) {
@@ -2482,7 +2509,20 @@ export function registerPtyHandlers(
           runtime?.registerPreAllocatedHandleForPty(result.id, args.preAllocatedHandle)
         }
         if (args.worktreeId) {
-          runtime?.registerPty(result.id, args.worktreeId, args.connectionId ?? null)
+          runtime?.registerPty(
+            result.id,
+            args.worktreeId,
+            args.connectionId ?? null,
+            // Why: thread the validated pane identity so main can back a pending
+            // mobile create from this live spawn even if graph-sync stalls (#7587).
+            // Bound tabId like the sibling metadataPaneKey/spawnOptions.tabId here.
+            typeof args.tabId === 'string' &&
+              isValidTerminalTabId(args.tabId) &&
+              args.tabId.length <= 512 &&
+              metadataLeafId !== null
+              ? { tabId: args.tabId, leafId: metadataLeafId }
+              : undefined
+          )
         }
         // Why: arms main's per-PTY Command Code output detector from the launch
         // command (renderer startupCommand parity); banner detection covers
@@ -2742,6 +2782,7 @@ export function registerPtyHandlers(
       pendingDeliveryStartSeq?: number
       source?: 'headless' | 'renderer'
       alternateScreen?: boolean
+      pendingEscapeTailAnsi?: string
     } | null> => {
       if (!runtime || typeof args?.id !== 'string' || args.id.length === 0) {
         return null
@@ -2850,7 +2891,7 @@ export function registerPtyHandlers(
         await startupPromise
       }
       await assertFolderWorkspacePtyPathUsable(args.worktreeId)
-      const cwd = resolveGuardedPtySpawnCwd(args.worktreeId, args.cwd, args.connectionId)
+      const cwd = resolvePtySpawnStartupCwd(args.worktreeId, args.cwd)
       spawnTiming.mark('preflight')
       const provider = getProvider(args.connectionId)
       const isClaudeLaunch = !args.connectionId && isClaudeLaunchCommand(args.command)
@@ -3460,7 +3501,21 @@ export function registerPtyHandlers(
           args.worktreeId.length > 0 &&
           args.worktreeId.length <= 512
         ) {
-          runtime?.registerPty(result.id, args.worktreeId, args.connectionId ?? null)
+          runtime?.registerPty(
+            result.id,
+            args.worktreeId,
+            args.connectionId ?? null,
+            // Why: pass the validated pane identity so a mobile create waiting on
+            // this renderer tab can publish its surface main-side when graph-sync
+            // is throttled, instead of destroying the live PTY (#7587). Bound the
+            // untrusted tabId like the sibling metadataPaneKey/spawnOptions.tabId.
+            typeof args.tabId === 'string' &&
+              isValidTerminalTabId(args.tabId) &&
+              args.tabId.length <= 512 &&
+              metadataLeafId !== null
+              ? { tabId: args.tabId, leafId: metadataLeafId }
+              : undefined
+          )
         }
         // Why: arms main's per-PTY Command Code output detector from the launch
         // command (renderer startupCommand parity); banner detection covers

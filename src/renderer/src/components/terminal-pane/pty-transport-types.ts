@@ -10,6 +10,9 @@ export type PtyDataMeta = {
   seq?: number
   rawLength?: number
   background?: boolean
+  /** Main trimmed this pty's unsent backlog past its cap; the handler should
+   *  rebuild the dropped span from the main headless snapshot. */
+  droppedBacklog?: boolean
 }
 
 export type PtyBufferSnapshot = {
@@ -28,6 +31,11 @@ export type PtyBufferSnapshot = {
    *  scrollback lives in xterm and a clear destroys scroll-up after a tab
    *  return. Mirrors the attach-time guard in pty-transport.ts. */
   alternateScreen?: boolean
+  /** Trailing partial escape sequence the source emulator held mid-parse when
+   *  the snapshot was taken. The restorer writes it LAST (after the reset) so a
+   *  racing live continuation completes it instead of rendering literally
+   *  (#7329). */
+  pendingEscapeTailAnsi?: string
 }
 
 export type LocalPtySessionMetadata = { cwd?: string; shellOverride?: string }
@@ -42,6 +50,10 @@ export type PtyConnectResult = {
   sessionExpired?: boolean
   coldRestore?: { scrollback: string; cwd: string }
   replay?: string
+  /** Trailing partial escape the daemon emulator held mid-parse; the reattach
+   *  replay writes it LAST (after the reset) so a racing live continuation
+   *  completes it instead of rendering literally (#7329). */
+  pendingEscapeTailAnsi?: string
 }
 
 type PtyCallbacks = {
@@ -52,7 +64,10 @@ type PtyCallbacks = {
    *  clears). Routed separately from onData so the renderer can engage
    *  the replay guard — otherwise xterm auto-replies to embedded query
    *  sequences leak into the shell. See replay-guard.ts. */
-  onReplayData?: (data: string, meta?: { clearBeforeReplay?: boolean }) => void
+  onReplayData?: (
+    data: string,
+    meta?: { clearBeforeReplay?: boolean; pendingEscapeTailAnsi?: string }
+  ) => void
   onStatus?: (shell: string) => void
   onError?: (message: string, errors?: string[]) => void
   onExit?: (code: number) => void
@@ -93,6 +108,13 @@ export type PtyTransport = {
   }) => void
   disconnect: () => void
   sendInput: (data: string) => boolean
+  // Why: latency-critical terminal query replies (CPR/DSR/DA/OSC color/pixel
+  // size) must skip input coalescing — a querying program reads them in raw
+  // mode with a short timeout, so a debounced reply lands on the shell prompt
+  // and corrupts input (#7329). Local transports already write promptly, so
+  // this is `sendInput` for them; the remote transport flushes pending input
+  // (preserving order) and sends the reply immediately.
+  sendInputImmediate: (data: string) => boolean
   sendInputAccepted?: (data: string) => Promise<boolean>
   resize: (
     cols: number,
