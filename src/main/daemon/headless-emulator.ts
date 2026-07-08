@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/headless'
 import { SerializeAddon } from '@xterm/addon-serialize'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { activateOrcaTerminalUnicodeProvider } from '../../shared/terminal-unicode-provider'
+import { advancePartialEscapeTail } from '../../shared/terminal-partial-escape-tail'
 import type { TerminalViewAttributes } from '../../shared/terminal-view-attributes'
 import { collectHeadlessOscLinkRanges } from './headless-osc-link-ranges'
 import { TerminalPrivateModeTracker } from './terminal-private-mode-tracker'
@@ -49,6 +50,13 @@ export class HeadlessEmulator {
   private oscState: HeadlessEmulatorOscState
   private privateModes = new TerminalPrivateModeTracker()
   private restoredOscLinks: TerminalOscLinkRange[] = []
+  // Why: a PTY read can end mid-escape-sequence — those bytes live in xterm's
+  // parser, not the screen buffer, so serialize() drops them and the next
+  // chunk's continuation renders literally after a remote snapshot restore
+  // (#7329). Track the unparsed trailing partial at ingest (committed after
+  // xterm parses the same bytes, like the private-mode mirror) and ship it in
+  // the snapshot so the restorer can complete the sequence.
+  private partialEscapeTail = ''
   private disposed = false
   private onQueryReply: ((reply: string) => void) | null
   private conptyDa1OverrideInstalled = false
@@ -154,6 +162,7 @@ export class HeadlessEmulator {
           this.queryReplyForwardingDepth -= 1
         }
         this.privateModes.scan(data)
+        this.partialEscapeTail = advancePartialEscapeTail(this.partialEscapeTail, data)
         resolve()
       })
     })
@@ -184,6 +193,7 @@ export class HeadlessEmulator {
       }
     }
     this.privateModes.scan(data)
+    this.partialEscapeTail = advancePartialEscapeTail(this.partialEscapeTail, data)
     return true
   }
 
@@ -219,7 +229,13 @@ export class HeadlessEmulator {
       cols: this.terminal.cols,
       rows: this.terminal.rows,
       scrollbackLines: this.terminal.buffer.normal.length - this.terminal.rows,
-      lastTitle: this.oscState.getLastTitle()
+      lastTitle: this.oscState.getLastTitle(),
+      // Why: written LAST by the restorer (after any reset) so the next live
+      // chunk completes this dangling sequence instead of rendering it literally
+      // (#7329). Its bytes are already counted by the snapshot seq.
+      ...(this.partialEscapeTail.length > 0
+        ? { pendingEscapeTailAnsi: this.partialEscapeTail }
+        : {})
     }
   }
 

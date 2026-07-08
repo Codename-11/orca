@@ -447,6 +447,7 @@ export function getDefaultPersistedState(homedir: string): PersistedState {
     workspaceSession: getDefaultWorkspaceSession(),
     workspaceSessionsByHostId: {},
     sshTargets: [],
+    deletedSshConfigAliases: [],
     sshRemotePtyLeases: [],
     claudeLivePtySessionIds: [],
     migrationUnsupportedPtyEntries: [],

@@ -6,6 +6,32 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-07-08 — Remediated upstream v1.4.128 release sync
+
+Resolved the Axiom upstream sync remediation branch for `v1.4.128` / `axiom-v1.4.128-axiom.1` through the bot PR lane. Preserved the fork version (`1.4.128-axiom.1`), Axiom updater/release identity, side-by-side Windows installer process isolation, profile-portability assumptions, and Forge provider/task surfaces while accepting upstream daemon relocation, terminal partial-escape recovery, remote snapshot metadata, SSH relay pressure, mobile file/notification, AI Vault/session scanner, and release workflow updates.
+
+Conflict notes:
+
+- Kept the fork semver in `package.json` while accepting upstream release scripts such as `win-update-e2e`.
+- Combined Axiom hidden-renderer PTY delivery/model-restore behavior with upstream terminal capability replies, pending escape-tail snapshot metadata, and dropped-backlog recovery markers.
+- Preserved Axiom's side-by-side NSIS running-app check in `resources/build/installer.nsh` and folded upstream's relocated daemon real-uninstall cleanup into the same include so electron-builder keeps one installer include file.
+- Kept Axiom SSH ACK-stall e2e coverage and added upstream's relay file-stream/git-churn pressure case.
+- Reviewed staged deletions against `config/axiom-merge-remediation-policy.json`; deleted files were not under protected deletion paths.
+- CI-only follow-up: added the pre-existing Axiom Forge oversized files (`src/main/forge/issues.test.ts`, `src/renderer/src/store/slices/forge.ts`) to upstream's newly introduced `config/max-lines-baseline.txt` so the ratchet treats them as grandfathered rather than as new bypasses.
+- CI-only follow-up: restored Axiom's settings-gated pending-delivery cap semantics while preserving upstream `droppedBacklog` metadata for runtime-backed PTYs, and updated the new multiplex escape-tail regression stub for upstream's remote-view-subscriber hook.
+
+Verification:
+
+- `pnpm install --frozen-lockfile` → passed. Node engine warning only (`wanted node 24`, local `v25.6.0`).
+- `pnpm run typecheck` → passed. Node engine warning only (`wanted node 24`, local `v25.6.0`).
+- `pnpm exec vitest run --config config/vitest.config.ts src/shared/task-providers.test.ts src/main/axiom-release-hardening.test.ts src/main/updater-endpoints.test.ts src/main/app-build-identity.test.ts config/scripts/axiom-upstream-sync-release.test.mjs` → 5 files / 50 tests passed.
+- `pnpm exec oxlint config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml` → 0 warnings / 0 errors.
+- `pnpm exec oxfmt --check config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml config/axiom-merge-remediation-policy.json` → passed.
+- `git diff --check` → passed.
+- Focused hygiene: `pnpm exec oxlint` and `pnpm exec oxfmt --check` on the conflict-resolved PTY/daemon/e2e files → passed.
+
+---
+
 ---
 
 ## 2026-07-01 — Fixed oversized remediation PR body failure

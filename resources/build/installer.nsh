@@ -83,3 +83,18 @@
     axiomNotRunning:
   ${endIf}
 !macroend
+
+; Clean up the relocated terminal daemon on a REAL uninstall.
+;
+; Why: the daemon host is deliberately copied to a distinct image name
+; (orca-terminal-daemon.exe) under %LOCALAPPDATA%\Orca\daemon-host so app
+; UPDATES cannot kill it. A real uninstall must clean up the orphanable host,
+; while ${isUpdated} keeps normal updates terminal-safe.
+!macro customUnInstall
+  ${ifNot} ${isUpdated}
+    nsExec::Exec 'taskkill /F /IM orca-terminal-daemon.exe'
+    ; Give the OS a moment to release the image lock before removing the tree.
+    Sleep 500
+    RMDir /r "$LOCALAPPDATA\Orca\daemon-host"
+  ${endIf}
+!macroend

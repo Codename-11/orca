@@ -11,6 +11,7 @@ import { getWorktreeMapFromState } from '@/store/selectors'
 import { parseWorkspaceKey } from '../../../../shared/workspace-scope'
 import { createTerminalZeroDimensionsMessage } from '../../../../shared/terminal-zero-dimensions-diagnostic'
 import { parseTerminalOscColorQuery } from '../../../../shared/terminal-osc-color-reply'
+import { isTerminalQueryReply } from '../../../../shared/terminal-query-reply'
 import type { PtyBufferSnapshot, PtyConnectResult } from './pty-transport'
 import { createIpcPtyTransport } from './pty-transport'
 import { createRemoteRuntimePtyTransport } from './remote-runtime-pty-transport'
@@ -76,7 +77,12 @@ import {
   waitForTerminalOutputParsed,
   writeTerminalOutput
 } from '@/lib/pane-manager/pane-terminal-output-scheduler'
-import { sendTerminalOscColorQueryReplies } from './terminal-capability-replies'
+import {
+  CONPTY_DA1_RESPONSE,
+  createTerminalPixelSizeQueryResponder,
+  installTerminalCapabilityReplyHandlers,
+  sendTerminalOscColorQueryReplies
+} from './terminal-capability-replies'
 import { recordAgentHibernationPaneOutput } from '@/lib/agent-hibernation-output-activity'
 import {
   isLocalNativeWindowsConpty,
@@ -92,6 +98,7 @@ import { makePaneKey, parseLegacyNumericPaneKey } from '../../../../shared/stabl
 import { createTerminalCommandLifecycle } from './terminal-command-lifecycle'
 import { createPaneForegroundAgentTracker } from './pane-foreground-agent-tracker'
 import { parseAppSshPtyId } from '../../../../shared/ssh-pty-id'
+import { resolveSshPaneConnectGate } from './ssh-pane-connect-gate'
 import { dispatchTerminalCommandFinishedEvent } from '@/hooks/terminal-command-finished-event'
 import { e2eConfig } from '@/lib/e2e-config'
 import {
@@ -133,7 +140,6 @@ import { isKnownTuiAgentTerminalStartupCommand } from './terminal-startup-comman
 import type { PtyDataMeta } from './pty-dispatcher'
 import { getEagerPtyBufferHandle } from './pty-dispatcher'
 import { createTerminalGitHubPRLinkDetector } from '../../../../shared/terminal-github-pr-link-detector'
-import { installConptyDeviceAttributesHandler } from './terminal-conpty-device-attributes'
 import { scheduleTerminalWebglAtlasRecovery } from './terminal-webgl-atlas-recovery'
 import {
   cancelScheduledHiddenOutputRestore,
@@ -161,7 +167,7 @@ import {
   normalizeCompatibleAgentTitleForOwner,
   resolveCompatibleAgentTypeForOwner
 } from '../../../../shared/agent-title-owner'
-import { resolveExplicitTerminalTitleAgentType } from '../../../../shared/terminal-title-agent-type'
+import { resolveCommittedTitleAgentType } from '@/lib/pane-agent-evidence'
 import {
   isExpectedAgentProcess,
   recognizeAgentProcessFromCommandLine
@@ -1842,7 +1848,7 @@ export function connectPanePty(
       (entry) => entry.id === deps.tabId
     )
     const title = currentTitle ?? tab?.title
-    if (!title || resolveExplicitTerminalTitleAgentType(title) === null) {
+    if (!title || resolveCommittedTitleAgentType(title) === null) {
       return
     }
     const neutralTitle = neutralTerminalTitle()
@@ -2993,7 +2999,7 @@ export function connectPanePty(
       useAppStore.getState().settings,
       getSystemPrefersDark()
     )
-    transport.sendInput(mode2031SequenceFor(mode))
+    transport.sendInputImmediate(mode2031SequenceFor(mode))
     // Why: register the subscription exactly like the xterm CSI handler
     // would — without the registry entry, later theme flips never push the
     // CSI 997 update and the TUI keeps a stale theme after reveal.
@@ -3001,13 +3007,20 @@ export function connectPanePty(
     recordHiddenMode2031Reply()
   }
   deps.paneTransportsRef.current.set(pane.id, transport)
-  const conptyDeviceAttributesDisposable = isNativeWindowsConpty
-    ? installConptyDeviceAttributesHandler({
-        parser: pane.terminal.parser,
-        sendInput: (data) => transport.sendInput(data),
-        isReplaying: () => isPaneReplaying(deps.replayingPanesRef, pane.id)
-      })
-    : null
+  const terminalCapabilityRepliesDisposable = installTerminalCapabilityReplyHandlers({
+    terminal: pane.terminal,
+    parser: pane.terminal.parser,
+    // Why: OSC 10/11 + DA1 replies must beat the querying program's raw-mode
+    // read window; the remote transport's input debounce would corrupt them
+    // (#7329), so send immediately.
+    sendInput: (data) => transport.sendInputImmediate(data),
+    isReplaying: () => isPaneReplaying(deps.replayingPanesRef, pane.id),
+    ...(isNativeWindowsConpty ? { da1Response: CONPTY_DA1_RESPONSE } : {})
+  })
+  const respondToTerminalPixelSizeQueries = createTerminalPixelSizeQueryResponder(
+    pane.terminal,
+    (data) => transport.sendInputImmediate(data)
+  )
 
   const onDataDisposable = pane.terminal.onData((data) => {
     // Why: xterm auto-replies to embedded query sequences (DA1, DECRQM,
@@ -3042,6 +3055,19 @@ export function connectPanePty(
     // explicit Take back action owns restoring desktop input and dimensions.
     if (currentPtyId && isPtyLocked(currentPtyId)) {
       clearPendingTerminalInputIntent()
+      return
+    }
+    // Why: xterm answers CPR/DSR/DA queries natively through this same onData
+    // stream (mixed with keystrokes). Those replies are latency-critical — a
+    // querying program reads them in raw mode with a short timeout — so send
+    // them immediately, skipping the remote input debounce that would corrupt
+    // them (#7329). They are not user input, so they bypass intent inference and
+    // activity recording below. No pending-intent guard: the only intents are
+    // plain-escape (`\x1b`) and ctrl-c (`\x03`), neither of which can satisfy
+    // isTerminalQueryReply (it requires length >= 3 and a full reply grammar),
+    // so a real keystroke never reaches this branch.
+    if (isTerminalQueryReply(data)) {
+      transport.sendInputImmediate(data)
       return
     }
     const intent = pendingTerminalInputIntent
@@ -4194,13 +4220,14 @@ export function connectPanePty(
     type PendingReplayData = {
       data: string
       clearBeforeReplay: boolean
+      pendingEscapeTailAnsi?: string
     }
 
     let pendingReplayData: PendingReplayData | null = null
     let replayDrainQueued = false
     const drainReplayDataQueue = async (): Promise<void> => {
       while (pendingReplayData !== null) {
-        const { data, clearBeforeReplay } = pendingReplayData
+        const { data, clearBeforeReplay, pendingEscapeTailAnsi } = pendingReplayData
         pendingReplayData = null
         // Relay replay buffers may overlap with content already rendered in
         // xterm. Local eager replay decides this earlier so metadata-only frames
@@ -4218,6 +4245,14 @@ export function connectPanePty(
           await writeReplayDataAsync(reattachReplayResetSequence())
           sendFocusedReattachFocusInAfterReplay()
         }
+        // Why: the daemon could not serialize a PTY read that ended mid-escape,
+        // so the emulator shipped the dangling partial separately. Write it LAST
+        // — after the reset, whose ESC would otherwise abort it — so the next
+        // live chunk completes the sequence instead of rendering literally
+        // (#7329). Guarded so a later ESC cannot leave the parser wedged.
+        if (pendingEscapeTailAnsi) {
+          await writeReplayDataAsync(pendingEscapeTailAnsi)
+        }
         if (disposed) {
           pendingReplayData = null
           return
@@ -4228,10 +4263,14 @@ export function connectPanePty(
         manager.rebuildPaneWebgl(pane.id)
       }
     }
-    const replayDataCallback = (data: string, meta: { clearBeforeReplay?: boolean } = {}): void => {
+    const replayDataCallback = (
+      data: string,
+      meta: { clearBeforeReplay?: boolean; pendingEscapeTailAnsi?: string } = {}
+    ): void => {
       pendingReplayData = {
         data,
-        clearBeforeReplay: meta.clearBeforeReplay !== false
+        clearBeforeReplay: meta.clearBeforeReplay !== false,
+        ...(meta.pendingEscapeTailAnsi ? { pendingEscapeTailAnsi: meta.pendingEscapeTailAnsi } : {})
       }
       if (replayDrainQueued) {
         return
@@ -4244,7 +4283,10 @@ export function connectPanePty(
           replayDrainQueued = false
           if (pendingReplayData !== null) {
             replayDataCallback(pendingReplayData.data, {
-              clearBeforeReplay: pendingReplayData.clearBeforeReplay
+              clearBeforeReplay: pendingReplayData.clearBeforeReplay,
+              ...(pendingReplayData.pendingEscapeTailAnsi
+                ? { pendingEscapeTailAnsi: pendingReplayData.pendingEscapeTailAnsi }
+                : {})
             })
           }
         })
@@ -4752,7 +4794,7 @@ export function connectPanePty(
         useAppStore.getState().settings,
         getSystemPrefersDark()
       )
-      if (transport.sendInput(mode2031SequenceFor(mode))) {
+      if (transport.sendInputImmediate(mode2031SequenceFor(mode))) {
         recordMode2031Subscription(mode)
       }
     }
@@ -4767,7 +4809,7 @@ export function connectPanePty(
         return false
       }
       return sendTerminalOscColorQueryReplies(data, pane.terminal, (reply) =>
-        transport.sendInput(reply)
+        transport.sendInputImmediate(reply)
       )
     }
 
@@ -4999,7 +5041,7 @@ export function connectPanePty(
         getSystemPrefersDark()
       )
       deps.paneMode2031Ref.current.set(pane.id, true)
-      transport.sendInput(mode2031SequenceFor(mode))
+      transport.sendInputImmediate(mode2031SequenceFor(mode))
       deps.paneLastThemeModeRef.current.set(pane.id, mode)
       recordHiddenMode2031Reply()
     }
@@ -5475,6 +5517,7 @@ export function connectPanePty(
       rows: number
       seq?: number
       alternateScreen?: boolean
+      pendingEscapeTailAnsi?: string
     }): void {
       const scrollIntent = captureTerminalWriteScrollIntent(pane.terminal)
       const colsBeforeReplay = pane.terminal.cols
@@ -5515,7 +5558,13 @@ export function connectPanePty(
       }
       writeReplayData(snapshot.data)
       writeReplayData(POST_REPLAY_LIVE_SNAPSHOT_RESET)
-
+      if (snapshot.pendingEscapeTailAnsi) {
+        // Why last: the snapshot was serialized while the emulator sat mid-escape;
+        // re-arm the dangling sequence as the FINAL replay write (any later ESC —
+        // including the reset above — would abort it) so the racing live tail's
+        // continuation completes it instead of rendering literally (#7329).
+        writeReplayData(snapshot.pendingEscapeTailAnsi)
+      }
       clearHiddenStartupRendererState()
       hiddenRendererStateDirty = false
       recordRendererOrderedSeq(snapshot)
@@ -5734,6 +5783,14 @@ export function connectPanePty(
       }
       observeStartupDraftPasteReadiness(data)
       resetHiddenOutputRestoreIfPtyChanged()
+      if (meta?.droppedBacklog === true) {
+        // Why: main trimmed this pty's unsent backlog (the renderer was
+        // background-throttled/frozen and stopped ACKing). Rebuild the dropped
+        // span from the main headless snapshot — same recovery the renderer's
+        // own 2 MB scheduler overflow uses. No-op cost when already visible+synced.
+        markHiddenOutputRestoreNeeded()
+      }
+      respondToTerminalPixelSizeQueries(data)
       observeTerminalBracketedPasteModeOutput(pane.terminal, data)
       // Why: with main side-effect authority, command-finished, pr-link, and
       // the Command Code scrape arrive as pty:sideEffect facts —
@@ -5792,6 +5849,15 @@ export function connectPanePty(
       }
       if (pendingForegroundQuery?.statelessQueryData) {
         writePtyOutputToXterm(pendingForegroundQuery.statelessQueryData, true)
+      }
+      if (pendingForegroundQuery?.oscColorQueryData) {
+        sendTerminalOscColorQueryReplies(
+          pendingForegroundQuery.oscColorQueryData,
+          pane.terminal,
+          // Why: OSC color reply — immediate so the remote debounce cannot delay
+          // it past the querying program's read window (#7329).
+          (reply) => transport.sendInputImmediate(reply)
+        )
       }
       if (!foreground) {
         const hiddenStartupQueryResult = writeHiddenStartupRendererQueriesIfNeeded(data)
@@ -5969,12 +6035,45 @@ export function connectPanePty(
       // and only the freshest source belongs on screen.
       if (connectResult?.snapshot) {
         rememberReattachPayloadAgentSignal(connectResult.snapshot, { fullScreenReplay: true })
+        // Why: the daemon serializes its grid with soft-wrapped lines as
+        // continuous text. Replaying that at a different column count rewraps
+        // rows one cell early/late (bug #7279). Replay at the snapshot's own
+        // dimensions first; safeFit below fits the pane back and resizes the
+        // remote PTY. Suppress the xterm->PTY forward so this layout-only
+        // resize does not SIGWINCH the live remote TUI. Mirrors
+        // applyMainBufferSnapshot.
+        const snapshotCols = connectResult.snapshotCols
+        const snapshotRows = connectResult.snapshotRows
+        const hasSnapshotDimensions =
+          typeof snapshotCols === 'number' &&
+          typeof snapshotRows === 'number' &&
+          Number.isFinite(snapshotCols) &&
+          Number.isFinite(snapshotRows) &&
+          snapshotCols > 0 &&
+          snapshotRows > 0
+        if (
+          hasSnapshotDimensions &&
+          (pane.terminal.cols !== snapshotCols || pane.terminal.rows !== snapshotRows)
+        ) {
+          suppressSnapshotReplayPtyResize = true
+          try {
+            pane.terminal.resize(snapshotCols, snapshotRows)
+          } finally {
+            suppressSnapshotReplayPtyResize = false
+          }
+        }
         writeReplayData('\x1b[2J\x1b[3J\x1b[H')
         writeReplayData(connectResult.snapshot)
         // Snapshot reattach keeps a live session, so avoid the broader mode
         // reset. We only drop renderer-owned state that should not leak from
         // replay bytes into the restored renderer terminal.
         writeReplayData(reattachReplayResetSequence())
+        if (connectResult.pendingEscapeTailAnsi) {
+          // Why last: re-arm the daemon's dangling mid-escape sequence AFTER the
+          // reset (whose ESC would abort it) so the racing live continuation
+          // completes it instead of rendering literally (#7329).
+          writeReplayData(connectResult.pendingEscapeTailAnsi)
+        }
         sendFocusedReattachFocusInAfterReplay()
         if (connectResult.coldRestore) {
           // Snapshot superseded the cold-restore payload — ack it so the
@@ -6059,13 +6158,23 @@ export function connectPanePty(
         deps.restoredLeafId && deps.restoredPtyIdByLeafId
           ? (deps.restoredPtyIdByLeafId[deps.restoredLeafId] ?? null)
           : null
-      const pendingSessionId =
-        restoredLeafSessionId ?? storeState.deferredSshSessionIdsByTabId[deps.tabId]
-      const isDeferredTarget = storeState.deferredSshReconnectTargets.includes(connectionId)
+      const gate = resolveSshPaneConnectGate({
+        connectionId,
+        sshStatus: storeState.sshConnectionStates.get(connectionId)?.status,
+        isDeferredTarget: storeState.deferredSshReconnectTargets.includes(connectionId),
+        restoredLeafSessionId,
+        deferredTabSessionId: storeState.deferredSshSessionIdsByTabId[deps.tabId],
+        tabPtyId: storeState.tabsByWorktree[deps.worktreeId]?.find((t) => t.id === deps.tabId)
+          ?.ptyId,
+        hasLeafSessionMap: Boolean(
+          deps.restoredPtyIdByLeafId && Object.keys(deps.restoredPtyIdByLeafId).length > 0
+        )
+      })
+      const pendingSessionId = gate.pendingSessionId
       console.warn(
-        `[pty-connection] SSH tab=${deps.tabId} connectionId=${connectionId} pendingSessionId=${pendingSessionId} isDeferredTarget=${isDeferredTarget}`
+        `[pty-connection] SSH tab=${deps.tabId} connectionId=${connectionId} pendingSessionId=${pendingSessionId} sshConnected=${gate.sshConnected}`
       )
-      if (pendingSessionId || isDeferredTarget) {
+      if (gate.enterDeferredFlow) {
         void (async () => {
           // Why: if the target requires a passphrase/password and no credential
           // is cached yet, auto-firing ssh.connect would surprise the user —
@@ -6789,7 +6898,7 @@ export function connectPanePty(
       }
       onDataDisposable.dispose()
 
-      conptyDeviceAttributesDisposable?.dispose()
+      terminalCapabilityRepliesDisposable.dispose()
 
       userInputActivityDisposable?.dispose()
 

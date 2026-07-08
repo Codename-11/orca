@@ -58,6 +58,7 @@ type SnapshotFrameOptions = {
   truncatedByByteBudget?: boolean
   source?: 'headless' | 'renderer'
   oscLinks?: TerminalOscLinkRange[]
+  pendingEscapeTailAnsi?: string
 }
 
 type SerializedSnapshot = {
@@ -70,6 +71,7 @@ type SerializedSnapshot = {
   oscLinks?: TerminalOscLinkRange[]
   scrollbackRows: number
   truncatedByByteBudget: boolean
+  pendingEscapeTailAnsi?: string
 } | null
 
 type TerminalViewportClient = {
@@ -528,6 +530,7 @@ function sendSnapshotFrames(
       cwd: options.cwd,
       source: options.source,
       oscLinks: options.oscLinks,
+      pendingEscapeTailAnsi: options.pendingEscapeTailAnsi,
       truncated: options.truncated === true,
       truncatedByByteBudget: options.truncatedByByteBudget === true
     })
@@ -1616,6 +1619,7 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
             cwd: serialized?.cwd,
             source: serialized?.source,
             oscLinks: serialized?.oscLinks,
+            pendingEscapeTailAnsi: serialized?.pendingEscapeTailAnsi,
             truncated: false,
             truncatedByByteBudget: serialized?.truncatedByByteBudget,
             data: serialized?.data ?? ''
@@ -1845,6 +1849,7 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
             truncatedByByteBudget: serialized?.truncatedByByteBudget,
             source: serialized?.source,
             oscLinks: serialized?.oscLinks,
+            pendingEscapeTailAnsi: serialized?.pendingEscapeTailAnsi,
             data: serialized?.data ?? (read.tail.length > 0 ? `${read.tail.join('\r\n')}\r\n` : '')
           })
           // Why: baseline for resize re-stream gating; the client already
