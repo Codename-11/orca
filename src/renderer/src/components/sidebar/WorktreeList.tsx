@@ -493,15 +493,31 @@ function markSidebarWorktreeActiveImmediately(worktreeId: string, primaryRowKey?
   }
 }
 
+function revealMountedWorktreeElement(
+  container: HTMLElement,
+  worktreeId: string,
+  behavior: ScrollBehavior,
+  optionId?: string
+): HTMLElement | null {
+  const element = optionId
+    ? document.getElementById(optionId)
+    : getMountedWorktreeOptions(worktreeId, container)[0]
+  if (!element || !container.contains(element)) {
+    return null
+  }
+  return revealElementInScrollContainer(container, element, behavior) ? element : null
+}
+
 function revealMountedSidebarRowElement(
   container: HTMLElement,
-  rowKey: string
+  rowKey: string,
+  behavior: ScrollBehavior
 ): HTMLElement | null {
   const element = document.getElementById(getWorktreeOptionId(rowKey))
   if (!element || !container.contains(element)) {
     return null
   }
-  return revealElementInScrollContainer(container, element) ? element : null
+  return revealElementInScrollContainer(container, element, behavior) ? element : null
 }
 
 function getRenderRowSidebarKey(row: RenderRow): string | null {
@@ -2147,15 +2163,14 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
             clearPendingRevealWorktreeId()
           }
         }
-        const optionId = getRenderRowOptionId(targetRow, pendingRevealWorktree.worktreeId)
-        const option = optionId
-          ? document.getElementById(optionId)
-          : getMountedWorktreeOptions(pendingRevealWorktree.worktreeId, container)[0]
-        const mountedOption = container && option && container.contains(option) ? option : null
-        const revealedOption =
-          container && mountedOption && revealElementInScrollContainer(container, mountedOption)
-            ? mountedOption
-            : null
+        const revealedOption = container
+          ? revealMountedWorktreeElement(
+              container,
+              pendingRevealWorktree.worktreeId,
+              pendingRevealWorktree.behavior,
+              getRenderRowOptionId(targetRow, pendingRevealWorktree.worktreeId)
+            )
+          : null
         if (revealedOption) {
           if (pendingRevealWorktree.highlight) {
             const revealedRowKey =
@@ -2311,7 +2326,11 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
 
       const container = scrollRef.current
       const revealedElement = container
-        ? revealMountedSidebarRowElement(container, pendingRevealSidebarRow.rowKey)
+        ? revealMountedSidebarRowElement(
+            container,
+            pendingRevealSidebarRow.rowKey,
+            pendingRevealSidebarRow.behavior
+          )
         : null
       if (revealedElement) {
         if (pendingRevealSidebarRow.highlight) {
@@ -6669,6 +6688,7 @@ const WorktreeList = React.memo(function WorktreeList({
           { target: { type: 'sidebar-row' } }
         >
         revealSidebarRow(detail.target.rowKey, {
+          behavior: 'smooth',
           highlight: sidebarDetail.highlight !== false
         })
         return
@@ -6690,6 +6710,7 @@ const WorktreeList = React.memo(function WorktreeList({
         clearFilters()
       }
       revealWorktreeInSidebar(currentSidebarWorktreeId, {
+        behavior: 'smooth',
         highlight: true,
         beginRename: (detail as { beginRename?: boolean } | undefined)?.beginRename === true
       })

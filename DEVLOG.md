@@ -6,6 +6,28 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-07-10 — Remediated upstream v1.4.134 release sync
+
+Resolved the Axiom upstream sync remediation branch for `v1.4.134` / `axiom-v1.4.134-axiom.1` through the bot PR lane. Preserved the fork version (`1.4.134-axiom.1`), Axiom release/updater identity, side-by-side installer contract, profile portability, Forge provider surfaces, terminal view-attribute publication, and Windows ConPTY keyboard compatibility while accepting upstream's invalid terminal line-height normalization and the remaining v1.4.133-v1.4.134 changes.
+
+Conflict notes:
+
+- Kept Axiom's app-start and per-pane terminal view-attribute publisher imports and value-gated theme application while adding upstream's normalized terminal line-height assignment.
+- Kept Axiom's `vtExtensions.kittyKeyboard` lifecycle option while using upstream's line-height normalizer for newly created panes.
+- Preserved the intended fork semver in `package.json`; no protected Axiom files were deleted or changed by the upstream merge.
+
+Verification:
+
+- `CI=true pnpm install --frozen-lockfile` → passed. Node engine warning only (`wanted node 24`, local `v25.6.0`).
+- `pnpm run typecheck` → passed.
+- `pnpm exec vitest run --config config/vitest.config.ts src/shared/task-providers.test.ts src/main/axiom-release-hardening.test.ts src/main/updater-endpoints.test.ts src/main/app-build-identity.test.ts config/scripts/axiom-upstream-sync-release.test.mjs` → 5 files / 50 tests passed.
+- `pnpm exec oxlint config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml` → 0 warnings / 0 errors.
+- `pnpm exec oxfmt --check config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml config/axiom-merge-remediation-policy.json` → passed.
+- `pnpm exec vitest run --config config/vitest.config.ts src/shared/terminal-line-height-settings.test.ts src/renderer/src/components/settings/TerminalSettingsPreview.lifecycle.test.tsx src/renderer/src/components/terminal-pane/use-terminal-pane-lifecycle.test.ts src/renderer/src/components/terminal-pane/terminal-appearance.test.ts` → 4 files / 56 tests passed.
+- `git diff --check` → passed.
+
+---
+
 ## 2026-07-10 — Remediated upstream v1.4.132 release sync
 
 Resolved the Axiom upstream sync remediation branch for `v1.4.132` / `axiom-v1.4.132-axiom.1` through PR #96's bot branch, without pushing directly to `axiom/deploy`. Preserved fork semver (`1.4.132-axiom.1`), Axiom desktop/mobile identity and updater assumptions, profile portability, Forge provider/task surfaces, hidden-renderer PTY delivery interest, and byte-ordered terminal side effects while accepting upstream remote-runtime host identity, targeted background terminal mounts, stable Grok/Pi/Gemini titles, stale terminal-handle rejection, source-control/mobile, daemon packaging, and macOS notification-status changes.

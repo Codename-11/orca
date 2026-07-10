@@ -4025,6 +4025,7 @@ describe('useIpcEvents CLI-created worktree activation', () => {
     expect(activateAndRevealWorktree).toHaveBeenCalledTimes(1)
     expect(activateAndRevealWorktree).toHaveBeenCalledWith('wt-new', {
       setup,
+      sidebarRevealBehavior: 'auto',
       notifyHostRuntime: false
     })
 
@@ -5056,7 +5057,11 @@ describe('useIpcEvents agent status snapshot integration', () => {
       }),
       'Codex - action required',
       { updatedAt: 1_700_000_000_400, stateStartedAt: 1_699_999_999_400 },
-      expect.objectContaining({ tabId: 'tab-future', worktreeId: 'wt-1', terminalHandle: undefined }),
+      expect.objectContaining({
+        tabId: 'tab-future',
+        worktreeId: 'wt-1',
+        terminalHandle: undefined
+      }),
       undefined
     )
     expect(updateTabTitle).toHaveBeenCalledWith('tab-future', 'Codex - action required')

@@ -52,7 +52,7 @@ import {
   AGENT_PROMPT_SUBMIT_DELAY_MS,
   buildAgentPromptPasteBytes
 } from '../../shared/agent-prompt-injection'
-import { gitExecFileAsync, wslAwareSpawn } from '../git/runner'
+import { gitExecFileAsync, gitSpawn } from '../git/runner'
 import {
   cleanupClaimedCloneTarget,
   claimCloneTarget,
@@ -60,6 +60,7 @@ import {
   getClonePathComparisonKey
 } from '../git/repo-clone-path'
 import { getGitCloneFailureMessage } from '../../shared/git-clone-failure-message'
+import { GIT_FETCH_SKIP_AUTO_MAINTENANCE_CONFIG_ARGS } from '../../shared/git-fetch-auto-maintenance'
 import { createHash, randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
@@ -11224,9 +11225,9 @@ export class OrcaRuntimeService {
     await mkdir(trimmedDestination, { recursive: true })
     const claimedTarget = await claimCloneTarget(clonePath)
     await new Promise<void>((resolve, reject) => {
-      let proc: ReturnType<typeof wslAwareSpawn>
+      let proc: ReturnType<typeof gitSpawn>
       try {
-        proc = wslAwareSpawn('git', ['clone', '--progress', '--', trimmedUrl, clonePath], {
+        proc = gitSpawn(['clone', '--progress', '--', trimmedUrl, clonePath], {
           cwd: trimmedDestination,
           stdio: ['ignore', 'ignore', 'pipe']
         })
@@ -15152,8 +15153,15 @@ export class OrcaRuntimeService {
       if (this.getFreshFetchCompletedAt(key) !== null) {
         return { ok: true }
       }
+      // Why: this exact refresh gates worktree create; ordinary fetches still own maintenance.
       return gitExecFileAsync(
-        ['fetch', '--no-tags', base.remote, `+refs/heads/${base.branch}:${base.ref}`],
+        [
+          ...GIT_FETCH_SKIP_AUTO_MAINTENANCE_CONFIG_ARGS,
+          'fetch',
+          '--no-tags',
+          base.remote,
+          `+refs/heads/${base.branch}:${base.ref}`
+        ],
         {
           cwd: repoPath,
           ...gitOptions,
