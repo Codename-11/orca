@@ -10012,7 +10012,9 @@
             "sessionRole": "Sesión",
             "jumpToOriginalPane": "Saltar al panel original",
             "jumpToWorktree": "Saltar al worktree",
-            "recoverableBadge": "No guardada"
+            "recoverableBadge": "No guardada",
+            "subagentCountSingular": "1 subagent",
+            "subagentCountPlural": "{{value0}} subagents"
           },
           "FileExplorerNameFilter": {
             "26fb73c6e3": "Buscar archivos",
@@ -10067,6 +10069,11 @@
             "archivedJumpUnavailable": "Esta sesión está en un worktree archivado.",
             "noActiveWorktreeMatch": "Ningún worktree activo coincide con esta sesión.",
             "noActiveWorktreeTarget": "No hay ningún worktree activo disponible."
+          },
+          "AiVaultSessionSubagents": {
+            "subagentsCount": "Subagents ({{value0}})",
+            "messageCount": "{{value0}} msgs",
+            "viewLog": "View Log"
           }
         }
       },

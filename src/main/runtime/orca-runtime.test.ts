@@ -2313,7 +2313,7 @@ describe('OrcaRuntimeService', () => {
       if (args[0] === 'rev-parse' && args[1] === '--verify') {
         return { stdout: 'base-sha\n', stderr: '' }
       }
-      if (args[0] === 'fetch') {
+      if (args.includes('fetch')) {
         return refresh.promise
       }
       return { stdout: '', stderr: '' }
@@ -2326,7 +2326,18 @@ describe('OrcaRuntimeService', () => {
 
       await vi.waitFor(() => {
         expect(gitSpy).toHaveBeenCalledWith(
-          ['fetch', '--no-tags', 'origin', '+refs/heads/main:refs/remotes/origin/main'],
+          [
+            '-c',
+            'maintenance.auto=false',
+            '-c',
+            'maintenance.commit-graph.auto=0',
+            '-c',
+            'gc.auto=0',
+            'fetch',
+            '--no-tags',
+            'origin',
+            '+refs/heads/main:refs/remotes/origin/main'
+          ],
           {
             cwd: TEST_REPO_PATH,
             useConfiguredSshCommandForNetwork: true,
@@ -2444,7 +2455,7 @@ describe('OrcaRuntimeService', () => {
       if (args[0] === 'rev-parse' && args.includes('refs/remotes/origin/main^{commit}')) {
         return { stdout: 'base-sha\n', stderr: '' }
       }
-      if (args[0] === 'fetch') {
+      if (args.includes('fetch')) {
         throw new Error('network unavailable')
       }
       return { stdout: '', stderr: '' }
@@ -2506,7 +2517,7 @@ describe('OrcaRuntimeService', () => {
       if (args[0] === 'rev-parse' && args.includes('refs/heads/develop^{commit}')) {
         return { stdout: 'develop-sha\n', stderr: '' }
       }
-      if (args[0] === 'fetch') {
+      if (args.includes('fetch')) {
         throw new Error('network unavailable')
       }
       return { stdout: '', stderr: '' }
@@ -2560,7 +2571,7 @@ describe('OrcaRuntimeService', () => {
       if (args[0] === 'rev-parse' && args.includes('refs/heads/team/feature^{commit}')) {
         return { stdout: 'team-feature-sha\n', stderr: '' }
       }
-      if (args[0] === 'fetch') {
+      if (args.includes('fetch')) {
         throw new Error('network unavailable')
       }
       return { stdout: '', stderr: '' }
@@ -2581,7 +2592,18 @@ describe('OrcaRuntimeService', () => {
         false
       )
       expect(gitSpy).not.toHaveBeenCalledWith(
-        ['fetch', '--no-tags', 'team', '+refs/heads/feature:refs/remotes/team/feature'],
+        [
+          '-c',
+          'maintenance.auto=false',
+          '-c',
+          'maintenance.commit-graph.auto=0',
+          '-c',
+          'gc.auto=0',
+          'fetch',
+          '--no-tags',
+          'team',
+          '+refs/heads/feature:refs/remotes/team/feature'
+        ],
         expect.any(Object)
       )
     } finally {
@@ -2605,7 +2627,7 @@ describe('OrcaRuntimeService', () => {
       if (args[0] === 'rev-parse' && args[1] === '--verify') {
         throw new Error('missing ref')
       }
-      if (args[0] === 'fetch') {
+      if (args.includes('fetch')) {
         throw new Error('network unavailable')
       }
       return { stdout: '', stderr: '' }
@@ -5453,7 +5475,7 @@ describe('OrcaRuntimeService', () => {
   it('keeps project clone setup on the cloned host-qualified repo', async () => {
     const destination = await mkdtemp(join(tmpdir(), 'orca-runtime-project-clone-'))
     const clonePath = join(destination, 'orca')
-    const spawnSpy = vi.spyOn(gitRunner, 'wslAwareSpawn')
+    const spawnSpy = vi.spyOn(gitRunner, 'gitSpawn')
     const repos: Record<string, unknown>[] = []
     getRepoUpstreamMock.mockResolvedValue({ owner: 'stablyai', repo: 'orca' })
     const runtimeStore = {
@@ -5515,7 +5537,7 @@ describe('OrcaRuntimeService', () => {
   it('adopts public clone repos into host-qualified project setup', async () => {
     const destination = await mkdtemp(join(tmpdir(), 'orca-runtime-project-clone-'))
     const clonePath = join(destination, 'orca')
-    const spawnSpy = vi.spyOn(gitRunner, 'wslAwareSpawn')
+    const spawnSpy = vi.spyOn(gitRunner, 'gitSpawn')
     const repos: Record<string, unknown>[] = []
     getRepoUpstreamMock.mockResolvedValue({ owner: 'stablyai', repo: 'orca' })
     const runtimeStore = {
@@ -5585,7 +5607,7 @@ describe('OrcaRuntimeService', () => {
   it('keeps project clone repos split by runtime host on the same clone path', async () => {
     const destination = await mkdtemp(join(tmpdir(), 'orca-runtime-project-clone-'))
     const clonePath = join(destination, 'orca')
-    const spawnSpy = vi.spyOn(gitRunner, 'wslAwareSpawn')
+    const spawnSpy = vi.spyOn(gitRunner, 'gitSpawn')
     const repos: Record<string, unknown>[] = [
       {
         id: 'repo-host-a',
@@ -5756,7 +5778,7 @@ describe('OrcaRuntimeService', () => {
   })
 
   it('defaults runtime cloneRepo badgeColor to DEFAULT_REPO_BADGE_COLOR', async () => {
-    const spawnSpy = vi.spyOn(gitRunner, 'wslAwareSpawn')
+    const spawnSpy = vi.spyOn(gitRunner, 'gitSpawn')
     const added: Record<string, unknown>[] = []
     const colorStore = {
       ...store,
@@ -5792,7 +5814,7 @@ describe('OrcaRuntimeService', () => {
   })
 
   it('preserves existing badgeColor on runtime cloneRepo folder->git dedupe upgrade', async () => {
-    const spawnSpy = vi.spyOn(gitRunner, 'wslAwareSpawn')
+    const spawnSpy = vi.spyOn(gitRunner, 'gitSpawn')
     spawnSpy.mockImplementation(() => {
       const proc = new EventEmitter() as EventEmitter & { stderr: EventEmitter }
       proc.stderr = new EventEmitter()
@@ -5890,7 +5912,7 @@ describe('OrcaRuntimeService', () => {
   })
 
   it('rejects runtime cloneRepo dot-segment URLs before spawning git', async () => {
-    const spawnSpy = vi.spyOn(gitRunner, 'wslAwareSpawn')
+    const spawnSpy = vi.spyOn(gitRunner, 'gitSpawn')
     const runtime = createRuntime()
     const tempRoot = await mkdtemp(join(tmpdir(), 'orca-runtime-clone-'))
     const destination = join(tempRoot, 'destination')
@@ -5907,7 +5929,7 @@ describe('OrcaRuntimeService', () => {
   })
 
   it('rejects runtime cloneRepo parent-segment URLs before spawning git', async () => {
-    const spawnSpy = vi.spyOn(gitRunner, 'wslAwareSpawn')
+    const spawnSpy = vi.spyOn(gitRunner, 'gitSpawn')
     const runtime = createRuntime()
     const tempRoot = await mkdtemp(join(tmpdir(), 'orca-runtime-clone-'))
     const destination = join(tempRoot, 'destination')
@@ -5924,7 +5946,7 @@ describe('OrcaRuntimeService', () => {
   })
 
   it('removes an owned runtime clone target when git exits unsuccessfully', async () => {
-    const spawnSpy = vi.spyOn(gitRunner, 'wslAwareSpawn')
+    const spawnSpy = vi.spyOn(gitRunner, 'gitSpawn')
     const proc = new EventEmitter() as EventEmitter & { stderr: EventEmitter }
     proc.stderr = new EventEmitter()
     spawnSpy.mockReturnValue(proc as never)
@@ -5951,7 +5973,7 @@ describe('OrcaRuntimeService', () => {
   })
 
   it('preserves an existing runtime clone target when git exits unsuccessfully', async () => {
-    const spawnSpy = vi.spyOn(gitRunner, 'wslAwareSpawn')
+    const spawnSpy = vi.spyOn(gitRunner, 'gitSpawn')
     const proc = new EventEmitter() as EventEmitter & { stderr: EventEmitter }
     proc.stderr = new EventEmitter()
     spawnSpy.mockReturnValue(proc as never)
@@ -5978,7 +6000,7 @@ describe('OrcaRuntimeService', () => {
   })
 
   it('skips runtime clone failure cleanup when the owned target is replaced', async () => {
-    const spawnSpy = vi.spyOn(gitRunner, 'wslAwareSpawn')
+    const spawnSpy = vi.spyOn(gitRunner, 'gitSpawn')
     const proc = new EventEmitter() as EventEmitter & { stderr: EventEmitter }
     proc.stderr = new EventEmitter()
     spawnSpy.mockReturnValue(proc as never)
@@ -6007,7 +6029,7 @@ describe('OrcaRuntimeService', () => {
   })
 
   it('serializes concurrent runtime clones for the same target', async () => {
-    const spawnSpy = vi.spyOn(gitRunner, 'wslAwareSpawn')
+    const spawnSpy = vi.spyOn(gitRunner, 'gitSpawn')
     const firstProc = new EventEmitter() as EventEmitter & { stderr: EventEmitter }
     firstProc.stderr = new EventEmitter()
     spawnSpy.mockReturnValueOnce(firstProc as never)
