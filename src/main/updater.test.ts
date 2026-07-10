@@ -1300,6 +1300,7 @@ describe('updater', () => {
       expect(sendMock).toHaveBeenCalledWith('updater:status', {
         state: 'available',
         version: '1.0.61',
+        releaseUrl: 'https://github.com/stablyai/orca/releases/tag/v1.0.61',
         changelog: null
       })
     })

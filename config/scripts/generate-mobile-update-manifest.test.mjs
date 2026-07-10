@@ -117,7 +117,7 @@ describe('buildMobileUpdateManifest', () => {
     const manifest = JSON.parse(readFileSync(outputPath, 'utf8'))
     expect(manifest.platforms.android).toMatchObject({
       packageName: 'com.axiomlabs.orca.mobile',
-      versionCode: 5
+      versionCode: 6
     })
   })
 })

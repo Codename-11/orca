@@ -17,6 +17,7 @@ Conflict notes:
 - Terminal/runtime conflicts preserve Axiom cold parking, hidden-delivery/query authority, eager delivery-interest buffering, parked byte watchers, profile/main-authority-aware agent status, and conflict-adjacent tests while accepting upstream targeted background tab mounting, cleanup on partial remote launch failure, stable stored agent titles, OSC-status snapshot refreshes, and stale handle guards.
 - `src/shared/agent-detection.ts` remains a compatibility barrel; upstream Grok title normalization was ported into the split focused title modules.
 - Updated the Axiom release-hardening test fixture for upstream's packaged daemon layout verification.
+- CI-only follow-up: aligned the mobile update-manifest fixture with the accepted Android `versionCode: 6` and added the fork-preserved updater `releaseUrl` to a newly upstream-added late-install-error expectation.
 - Reviewed staged deletions against `config/axiom-merge-remediation-policy.json`; `docs/new-worktree-sidebar-reveal.md` and `previews/mobile-driver-overlay-preview.html` are not protected paths. No protected Axiom files were removed.
 
 Verification:
@@ -27,6 +28,7 @@ Verification:
 - Required remediation `oxlint` → 0 warnings / 0 errors.
 - Required remediation `oxfmt --check` → passed.
 - Focused runtime/terminal/agent suite → 10 files / 1,227 tests passed.
+- CI-only follow-up suite (`generate-mobile-update-manifest.test.mjs`, `updater.test.ts`) → 2 files / 83 tests passed.
 - Focused conflict-file `oxlint` → 0 warnings / 0 errors; `oxfmt --check` → passed.
 - `git diff --check` and `git diff --cached --check` → passed.
 
