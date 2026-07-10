@@ -35,7 +35,7 @@ import {
   useForceReconnect,
   usePrimeHosts
 } from '../src/transport/client-context'
-import { classifyConnection } from '../src/transport/connection-health'
+import { classifyConnection, verdictDisplayLabel } from '../src/transport/connection-health'
 import { subscribeToDesktopNotifications } from '../src/notifications/mobile-notifications'
 import type { ConnectionState, HostProfile } from '../src/transport/types'
 import { triggerMediumImpact } from '../src/platform/haptics'
@@ -843,7 +843,8 @@ export default function HomeScreen() {
             const verdict = classifyConnection({
               state,
               reconnectAttempts: attempts,
-              lastConnectedAt
+              lastConnectedAt,
+              endpoint: item.endpoint
             })
             const isError =
               verdict.kind === 'warning' ||
@@ -875,7 +876,7 @@ export default function HomeScreen() {
                   <View style={styles.hostMeta}>
                     <StatusDot state={state} verdict={verdict} />
                     <Text style={[styles.hostMetaItem, isError && { color: colors.statusRed }]}>
-                      {verdict.label}
+                      {verdictDisplayLabel(verdict)}
                       {connected && info
                         ? ` · ${info.totalWorktrees} worktree${info.totalWorktrees !== 1 ? 's' : ''}${info.activeCount > 0 ? ` · ${info.activeCount} active` : ''}`
                         : ''}

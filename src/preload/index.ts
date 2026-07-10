@@ -36,6 +36,7 @@ import type {
   MemorySnapshot,
   NotificationDismissResult,
   NotificationDispatchResult,
+  NotificationDeliveryProbeResult,
   NotificationPermissionStatusResult,
   NotificationSoundDataResult,
   NotificationSoundPathResult,
@@ -86,6 +87,7 @@ import type {
 } from '../shared/mobile-markdown-document'
 import type {
   CodexRateLimitResetResult,
+  GrokAccountStatus,
   RateLimitRuntimeTarget,
   RateLimitState
 } from '../shared/rate-limit-types'
@@ -490,6 +492,25 @@ const api = {
       ipcRenderer.invoke('app:pickFloatingWorkspaceDirectory')
   },
 
+  orcaProfiles: {
+    list: () => ipcRenderer.invoke('orcaProfiles:list'),
+    authStatus: () => ipcRenderer.invoke('orcaProfiles:authStatus'),
+    createLocal: (args) => ipcRenderer.invoke('orcaProfiles:createLocal', args),
+    createCloudLinked: (args) => ipcRenderer.invoke('orcaProfiles:createCloudLinked', args),
+    switchProfile: (args) => ipcRenderer.invoke('orcaProfiles:switch', args),
+    transferProject: (args) => ipcRenderer.invoke('orcaProfiles:transferProject', args),
+    findProjectProfiles: (args) => ipcRenderer.invoke('orcaProfiles:findProjectProfiles', args),
+    connectCurrent: () => ipcRenderer.invoke('orcaProfiles:connectCurrent'),
+    refreshAuth: () => ipcRenderer.invoke('orcaProfiles:refreshAuth'),
+    signOutCurrent: () => ipcRenderer.invoke('orcaProfiles:signOutCurrent'),
+    selectOrg: (args) => ipcRenderer.invoke('orcaProfiles:selectOrg', args),
+    orgMembersList: (args) => ipcRenderer.invoke('orcaProfiles:orgMembersList', args),
+    orgMemberInvite: (args) => ipcRenderer.invoke('orcaProfiles:orgMemberInvite', args),
+    orgInviteRevoke: (args) => ipcRenderer.invoke('orcaProfiles:orgInviteRevoke', args),
+    orgMemberChangeRole: (args) => ipcRenderer.invoke('orcaProfiles:orgMemberChangeRole', args),
+    orgMemberRemove: (args) => ipcRenderer.invoke('orcaProfiles:orgMemberRemove', args)
+  } satisfies PreloadApi['orcaProfiles'],
+
   platform: {
     get: () => ({
       platform: process.platform,
@@ -528,6 +549,8 @@ const api = {
       ipcRenderer.invoke('repos:getDefaultCreateProjectParent'),
 
     remove: (args) => ipcRenderer.invoke('repos:remove', args),
+
+    removeForHost: (args) => ipcRenderer.invoke('repos:removeForHost', args),
 
     reorder: (args) => ipcRenderer.invoke('repos:reorder', args),
 
@@ -661,6 +684,8 @@ const api = {
 
     remove: (args) => ipcRenderer.invoke('worktrees:remove', args),
 
+    forgetLocal: (args) => ipcRenderer.invoke('worktrees:forgetLocal', args),
+
     forceDeletePreservedBranch: (args) =>
       ipcRenderer.invoke('worktrees:forceDeletePreservedBranch', args),
 
@@ -761,6 +786,7 @@ const api = {
       cols: number
       rows: number
       cwd?: string
+      cwdFallback?: 'worktree'
       env?: Record<string, string>
       command?: string
       launchConfig?: SleepingAgentLaunchConfig
@@ -800,6 +826,7 @@ const api = {
       replay?: string
       sessionExpired?: boolean
       coldRestore?: { scrollback: string; cwd: string }
+      startupCwdFallback?: { kind: 'worktree'; cwd: string }
     }> => ipcRenderer.invoke('pty:spawn', opts),
 
     write: (id: string, data: string): void => {
@@ -1499,6 +1526,7 @@ const api = {
       filter?: 'assigned' | 'created' | 'all' | 'completed'
       limit?: number
       workspaceId?: string
+      attributeFilter?: unknown
     }): Promise<unknown> => ipcRenderer.invoke('linear:listIssues', args),
 
     createIssue: (args: {
@@ -1990,8 +2018,8 @@ const api = {
     openSystemSettings: (): Promise<void> => ipcRenderer.invoke('notifications:openSystemSettings'),
     getPermissionStatus: (): Promise<NotificationPermissionStatusResult> =>
       ipcRenderer.invoke('notifications:getPermissionStatus'),
-    requestPermission: (): Promise<NotificationPermissionStatusResult> =>
-      ipcRenderer.invoke('notifications:requestPermission'),
+    probeDelivery: (args?: { force?: boolean }): Promise<NotificationDeliveryProbeResult> =>
+      ipcRenderer.invoke('notifications:probeDelivery', args),
     playSound: async (options?: {
       force?: boolean
       volume?: number
@@ -2764,7 +2792,10 @@ const api = {
       rootPath: string
       connectionId?: string
       excludePaths?: string[]
+      requestToken?: string
     }): Promise<string[]> => ipcRenderer.invoke('fs:listFiles', args),
+    cancelListFiles: (args: { requestToken: string }): Promise<void> =>
+      ipcRenderer.invoke('fs:cancelListFiles', args),
     search: (args: {
       query: string
       rootPath: string
@@ -3569,6 +3600,12 @@ const api = {
       ipcRenderer.on('ui:sleepWorktree', listener)
       return () => ipcRenderer.removeListener('ui:sleepWorktree', listener)
     },
+    onResumeSleepingAgents: (callback: (data: { worktreeId: string }) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, data: { worktreeId: string }) =>
+        callback(data)
+      ipcRenderer.on('ui:resumeSleepingAgents', listener)
+      return () => ipcRenderer.removeListener('ui:resumeSleepingAgents', listener)
+    },
     onTerminalZoom: (callback: (direction: 'in' | 'out' | 'reset') => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent, direction: 'in' | 'out' | 'reset') =>
         callback(direction)
@@ -3935,6 +3972,7 @@ const api = {
     fetchInactiveCodexAccounts: (): Promise<void> =>
       ipcRenderer.invoke('rateLimits:fetchInactiveCodexAccounts'),
     refreshMiniMax: (): Promise<RateLimitState> => ipcRenderer.invoke('rateLimits:refreshMiniMax'),
+    refreshGrok: (): Promise<RateLimitState> => ipcRenderer.invoke('rateLimits:refreshGrok'),
     onUpdate: (callback: (state: RateLimitState) => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent, state: RateLimitState) => callback(state)
       ipcRenderer.on('rateLimits:update', listener)
@@ -3951,8 +3989,15 @@ const api = {
       ipcRenderer.invoke('minimaxCredentials:clearCookie')
   },
 
+  grokAccounts: {
+    getStatus: (): Promise<GrokAccountStatus> => ipcRenderer.invoke('grokAccounts:getStatus')
+  },
+
   ssh: {
     listTargets: (): Promise<SshTarget[]> => ipcRenderer.invoke('ssh:listTargets'),
+
+    listRemovedTargetLabels: (): Promise<Record<string, string>> =>
+      ipcRenderer.invoke('ssh:listRemovedTargetLabels'),
 
     addTarget: (args: { target: Omit<SshTarget, 'id'> }): Promise<SshTarget> =>
       ipcRenderer.invoke('ssh:addTarget', args),

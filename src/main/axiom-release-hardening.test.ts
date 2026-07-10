@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -115,7 +115,16 @@ describe('Axiom release hardening', () => {
     const config = loadBuilderConfig()
     const appOutDir = mkdtempSync(join(tmpdir(), 'orca-win-pack-'))
     try {
-      mkdirSync(join(appOutDir, 'resources'), { recursive: true })
+      const resourcesDir = join(appOutDir, 'resources')
+      const unpackedMainDir = join(resourcesDir, 'app.asar.unpacked', 'out', 'main')
+      mkdirSync(unpackedMainDir, { recursive: true })
+      // Why: upstream now verifies the unpacked daemon layout during every
+      // afterPack run, so the fork marker fixture must resemble a real package.
+      writeFileSync(
+        join(unpackedMainDir, 'daemon-entry.js'),
+        'console.error("Usage: daemon-entry <socket>"); process.exit(1)\n',
+        'utf8'
+      )
 
       await config.afterPack?.({
         electronPlatformName: 'win32',

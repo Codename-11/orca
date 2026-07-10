@@ -3144,12 +3144,14 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
     })
   },
 
-  removeWorktree: async (worktreeId, force) => {
+  removeWorktree: async (worktreeId, force, options) => {
+    const forgetLocalOnly = options?.mode === 'forget-local'
     set((s) => ({
       deleteStateByWorktreeId: {
         ...s.deleteStateByWorktreeId,
         [worktreeId]: {
           isDeleting: true,
+          phase: 'deleting',
           error: null,
           canForceDelete: false
         }
@@ -3157,22 +3159,30 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
     }))
 
     try {
-      const repoIdForTrust = getRepoIdFromWorktreeId(worktreeId)
-      const trustDecision = await ensureHooksConfirmed(get(), repoIdForTrust, 'archive')
-      const skipArchive = trustDecision === 'skip'
+      // Why: forget-local touches no remote, so there is no archive hook to run
+      // and no need to prompt for hook trust.
+      const skipArchive = forgetLocalOnly
+        ? true
+        : (await ensureHooksConfirmed(get(), getRepoIdFromWorktreeId(worktreeId), 'archive')) ===
+          'skip'
 
       const worktreeBeforeRemoval = get()
         .allWorktrees()
         .find((entry) => entry.id === worktreeId)
+      // Why: forget-local always clears Orca's own records via the local IPC
+      // handler regardless of the workspace's execution host — the whole point
+      // is that the remote (SSH relay / runtime) is gone or unreachable.
       const target = getActiveRuntimeTarget(settingsForWorktreeOwner(get(), worktreeId))
-      const removalResult = await (target.kind === 'local'
-        ? window.api.worktrees.remove({ worktreeId, force, skipArchive })
-        : callRuntimeRpc<RemoveWorktreeResult>(
-            target,
-            'worktree.rm',
-            { worktree: toRuntimeWorktreeSelector(worktreeId), force, runHooks: !skipArchive },
-            { timeoutMs: 60_000 }
-          ))
+      const removalResult = await (forgetLocalOnly
+        ? window.api.worktrees.forgetLocal({ worktreeId })
+        : target.kind === 'local'
+          ? window.api.worktrees.remove({ worktreeId, force, skipArchive })
+          : callRuntimeRpc<RemoveWorktreeResult>(
+              target,
+              'worktree.rm',
+              { worktree: toRuntimeWorktreeSelector(worktreeId), force, runHooks: !skipArchive },
+              { timeoutMs: 60_000 }
+            ))
 
       const worktreeDisplayName = worktreeBeforeRemoval?.displayName?.trim()
       if (worktreeDisplayName) {
@@ -3499,7 +3509,7 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
       // prune effect cannot be the only stale-draft cleanup path.
       clearSessionCommitDraftForWorktree(worktreeId)
       const preservedBranch = removalResult?.preservedBranch
-      if (preservedBranch) {
+      if (preservedBranch && options?.suppressPreservedBranchToast !== true) {
         showPreservedBranchToast(removalResult, worktreeBeforeRemoval, (branch, expectedHead) => {
           void get().forceDeletePreservedBranch(worktreeId, branch, expectedHead)
         })
@@ -3539,6 +3549,31 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
         }
         nextDeleteState[worktreeId] = {
           isDeleting: true,
+          phase: 'deleting',
+          error: null,
+          canForceDelete: false
+        }
+        changed = true
+      }
+      return changed ? { deleteStateByWorktreeId: nextDeleteState } : {}
+    })
+  },
+
+  markWorktreesQueuedForDeletion: (worktreeIds) => {
+    if (worktreeIds.length === 0) {
+      return
+    }
+    set((s) => {
+      const nextDeleteState = { ...s.deleteStateByWorktreeId }
+      let changed = false
+      for (const worktreeId of new Set(worktreeIds)) {
+        const current = nextDeleteState[worktreeId]
+        if (current?.isDeleting && current.error === null && !current.canForceDelete) {
+          continue
+        }
+        nextDeleteState[worktreeId] = {
+          isDeleting: true,
+          phase: 'queued',
           error: null,
           canForceDelete: false
         }
@@ -3924,7 +3959,7 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
     // persistence is async), so the reveal below resolves against a render
     // where the shortcut row already exists.
     void get().updateWorktreesMeta(updates)
-    get().revealWorktreeInSidebar(revealWorktreeId, { behavior: 'smooth', highlight: true })
+    get().revealWorktreeInSidebar(revealWorktreeId, { highlight: true })
   },
 
   markWorktreeUnread: (worktreeId) => {

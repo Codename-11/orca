@@ -11,8 +11,35 @@ import type {
 import type { NativeFileDropPayload } from '../shared/native-file-drop'
 import type { ReadClipboardTextOptions } from '../shared/clipboard-text'
 import type { AppIdentity } from '../shared/app-identity'
+import type {
+  CreateLocalOrcaProfileArgs,
+  CreateLocalOrcaProfileResult,
+  CreateCloudLinkedOrcaProfileArgs,
+  CreateCloudLinkedOrcaProfileResult,
+  ConnectCurrentOrcaProfileResult,
+  FindOrcaProfileProjectsByPathArgs,
+  FindOrcaProfileProjectsByPathResult,
+  OrcaProfileListResult,
+  OrcaProfileAuthStatus,
+  RefreshCurrentOrcaProfileAuthResult,
+  SelectOrcaProfileOrgArgs,
+  SelectOrcaProfileOrgResult,
+  SignOutCurrentOrcaProfileResult,
+  SwitchOrcaProfileArgs,
+  SwitchOrcaProfileResult,
+  TransferOrcaProfileProjectArgs,
+  TransferOrcaProfileProjectResult,
+  OrcaProfileOrgInviteRevokeArgs,
+  OrcaProfileOrgMemberChangeRoleArgs,
+  OrcaProfileOrgMemberInviteArgs,
+  OrcaProfileOrgMemberMutationResult,
+  OrcaProfileOrgMemberRemoveArgs,
+  OrcaProfileOrgMembersListArgs,
+  OrcaProfileOrgMembersListResult
+} from '../shared/orca-profiles'
 import type { TerminalPaneSplitSource } from '../shared/feature-education-telemetry'
 import type { TaskSourceContext } from '../shared/task-source-context'
+import type { LinearIssueAttributeFilter } from '../shared/linear-issue-attribute-filter'
 import type { ProjectExecutionRuntimeResolution } from '../shared/project-execution-runtime'
 import type { StartupCommandDelivery } from '../shared/codex-startup-delivery'
 import type { SleepingAgentLaunchConfig } from '../shared/agent-session-resume'
@@ -143,6 +170,7 @@ import type {
   GetRateLimitResult,
   NotificationDispatchRequest,
   NotificationDispatchResult,
+  NotificationDeliveryProbeResult,
   NotificationDismissResult,
   NotificationPermissionStatusResult,
   NotificationSoundResult,
@@ -339,6 +367,7 @@ import type {
 } from '../shared/claude-usage-types'
 import type {
   CodexRateLimitResetResult,
+  GrokAccountStatus,
   RateLimitRuntimeTarget,
   RateLimitState
 } from '../shared/rate-limit-types'
@@ -868,6 +897,40 @@ export type AppApi = {
 
 export type PreloadApi = {
   app: AppApi
+  orcaProfiles: {
+    list: () => Promise<OrcaProfileListResult>
+    authStatus: () => Promise<OrcaProfileAuthStatus>
+    createLocal: (args?: CreateLocalOrcaProfileArgs) => Promise<CreateLocalOrcaProfileResult>
+    createCloudLinked: (
+      args?: CreateCloudLinkedOrcaProfileArgs
+    ) => Promise<CreateCloudLinkedOrcaProfileResult>
+    switchProfile: (args: SwitchOrcaProfileArgs) => Promise<SwitchOrcaProfileResult>
+    transferProject: (
+      args: TransferOrcaProfileProjectArgs
+    ) => Promise<TransferOrcaProfileProjectResult>
+    findProjectProfiles: (
+      args: FindOrcaProfileProjectsByPathArgs
+    ) => Promise<FindOrcaProfileProjectsByPathResult>
+    connectCurrent: () => Promise<ConnectCurrentOrcaProfileResult>
+    refreshAuth: () => Promise<RefreshCurrentOrcaProfileAuthResult>
+    signOutCurrent: () => Promise<SignOutCurrentOrcaProfileResult>
+    selectOrg: (args: SelectOrcaProfileOrgArgs) => Promise<SelectOrcaProfileOrgResult>
+    orgMembersList: (
+      args: OrcaProfileOrgMembersListArgs
+    ) => Promise<OrcaProfileOrgMembersListResult>
+    orgMemberInvite: (
+      args: OrcaProfileOrgMemberInviteArgs
+    ) => Promise<OrcaProfileOrgMemberMutationResult>
+    orgInviteRevoke: (
+      args: OrcaProfileOrgInviteRevokeArgs
+    ) => Promise<OrcaProfileOrgMemberMutationResult>
+    orgMemberChangeRole: (
+      args: OrcaProfileOrgMemberChangeRoleArgs
+    ) => Promise<OrcaProfileOrgMemberMutationResult>
+    orgMemberRemove: (
+      args: OrcaProfileOrgMemberRemoveArgs
+    ) => Promise<OrcaProfileOrgMemberMutationResult>
+  }
   platform: {
     get: () => {
       platform: NodeJS.Platform
@@ -886,6 +949,9 @@ export type PreloadApi = {
       kind?: 'git' | 'folder'
     }) => Promise<{ repo: Repo } | { error: string }>
     remove: (args: { repoId: string }) => Promise<void>
+    // Forget a project on one execution host only, leaving the same repo id on
+    // other hosts (local or a re-added SSH target) intact.
+    removeForHost: (args: { repoId: string; hostId: string }) => Promise<void>
     reorder: (args: { orderedIds: string[] }) => Promise<{ status: 'applied' | 'rejected' }>
     update: (args: {
       repoId: string
@@ -1086,6 +1152,9 @@ export type PreloadApi = {
       force?: boolean
       skipArchive?: boolean
     }) => Promise<RemoveWorktreeResult>
+    // Forget a workspace from Orca only — no remote Git/filesystem work. Used
+    // for workspaces pinned to a removed/disconnected SSH host.
+    forgetLocal: (args: { worktreeId: string }) => Promise<RemoveWorktreeResult>
     forceDeletePreservedBranch: (args: {
       worktreeId: string
       branchName: string
@@ -1136,6 +1205,7 @@ export type PreloadApi = {
       cols: number
       rows: number
       cwd?: string
+      cwdFallback?: 'worktree'
       env?: Record<string, string>
       command?: string
       launchConfig?: SleepingAgentLaunchConfig
@@ -1176,6 +1246,7 @@ export type PreloadApi = {
       replay?: string
       sessionExpired?: boolean
       coldRestore?: { scrollback: string; cwd: string }
+      startupCwdFallback?: { kind: 'worktree'; cwd: string }
     }>
     write: (id: string, data: string) => void
     writeAccepted: (id: string, data: string) => Promise<boolean>
@@ -1765,6 +1836,7 @@ export type PreloadApi = {
       filter?: 'assigned' | 'created' | 'all' | 'completed'
       limit?: number
       workspaceId?: LinearWorkspaceSelection
+      attributeFilter?: LinearIssueAttributeFilter
     }) => Promise<LinearCollectionResult<LinearIssue>>
     createIssue: (args: {
       teamId: string
@@ -2088,7 +2160,7 @@ export type PreloadApi = {
     dismiss: (ids: string[]) => Promise<NotificationDismissResult>
     openSystemSettings: () => Promise<void>
     getPermissionStatus: () => Promise<NotificationPermissionStatusResult>
-    requestPermission: () => Promise<NotificationPermissionStatusResult>
+    probeDelivery: (args?: { force?: boolean }) => Promise<NotificationDeliveryProbeResult>
     playSound: (options?: { force?: boolean; volume?: number }) => Promise<NotificationSoundResult>
   }
   onboarding: {
@@ -2343,7 +2415,9 @@ export type PreloadApi = {
       rootPath: string
       connectionId?: string
       excludePaths?: string[]
+      requestToken?: string
     }) => Promise<string[]>
+    cancelListFiles: (args: { requestToken: string }) => Promise<void>
     search: (args: SearchOptions & { connectionId?: string }) => Promise<SearchResult>
     importExternalPaths: (args: {
       sourcePaths: string[]
@@ -2781,6 +2855,7 @@ export type PreloadApi = {
       callback: (data: { tabId: string; paneRuntimeId?: number }) => void
     ) => () => void
     onSleepWorktree: (callback: (data: { worktreeId: string }) => void) => () => void
+    onResumeSleepingAgents: (callback: (data: { worktreeId: string }) => void) => () => void
     onTerminalZoom: (callback: (direction: 'in' | 'out' | 'reset') => void) => () => void
     onSystemResumed: (callback: () => void) => () => void
     readClipboardText: (options?: ReadClipboardTextOptions) => Promise<string>
@@ -2904,6 +2979,7 @@ export type PreloadApi = {
     fetchInactiveClaudeAccounts: () => Promise<void>
     fetchInactiveCodexAccounts: () => Promise<void>
     refreshMiniMax: () => Promise<RateLimitState>
+    refreshGrok: () => Promise<RateLimitState>
     onUpdate: (callback: (state: RateLimitState) => void) => () => void
   }
   minimaxCredentials: {
@@ -2911,8 +2987,14 @@ export type PreloadApi = {
     saveCookie: (cookie: string) => Promise<{ configured: boolean }>
     clearCookie: () => Promise<{ configured: boolean }>
   }
+  grokAccounts: {
+    getStatus: () => Promise<GrokAccountStatus>
+  }
   ssh: {
     listTargets: () => Promise<SshTarget[]>
+    // Removed-target id → last known label, for showing a friendly host name on
+    // workspaces still pinned to a target that no longer exists.
+    listRemovedTargetLabels: () => Promise<Record<string, string>>
     addTarget: (args: { target: Omit<SshTarget, 'id'> }) => Promise<SshTarget>
     updateTarget: (args: {
       id: string

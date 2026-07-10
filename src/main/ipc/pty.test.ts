@@ -18,11 +18,13 @@ const expectedOmpStatusExtension = posix.join(
   'extensions',
   'orca-agent-status.ts'
 )
-const expectedAttributionShimDir = join(
-  '/tmp/orca-user-data',
-  'orca-terminal-attribution',
-  isWindowsHost ? 'win32' : 'posix'
-)
+function expectedAttributionShimDir(): string {
+  return join(
+    '/tmp/orca-user-data',
+    'orca-terminal-attribution',
+    process.platform === 'win32' ? 'win32' : 'posix'
+  )
+}
 
 const {
   handleMock,
@@ -264,6 +266,7 @@ describe('registerPtyHandlers', () => {
   const savedOrcaClaudeAgentStatusSettings = process.env.ORCA_CLAUDE_AGENT_STATUS_SETTINGS
   const savedProcessPlatform = Object.getOwnPropertyDescriptor(process, 'platform')
   const savedDisableMacosLoginShell = process.env.ORCA_DISABLE_MACOS_LOGIN_SHELL
+  const savedOrcaUserDataPath = process.env.ORCA_USER_DATA_PATH
 
   beforeEach(() => {
     // Why: most PTY spawn tests assert POSIX shell behavior; Windows-specific
@@ -339,6 +342,10 @@ describe('registerPtyHandlers', () => {
       handlers.delete(channel)
     })
     getPathMock.mockReturnValue('/tmp/orca-user-data')
+    // Why: shell-ready wrapper roots resolve from ORCA_USER_DATA_PATH (main
+    // canonicalizes it to app.getPath('userData') at startup before any spawn);
+    // mirror that here so ZDOTDIR/wrapper assertions match the mocked userData.
+    process.env.ORCA_USER_DATA_PATH = '/tmp/orca-user-data'
     existsSyncMock.mockReturnValue(true)
     statSyncMock.mockReturnValue({ isDirectory: () => true, mode: 0o755 })
     readFileSyncMock.mockReturnValue('')
@@ -392,6 +399,11 @@ describe('registerPtyHandlers', () => {
       process.env.ORCA_DISABLE_MACOS_LOGIN_SHELL = savedDisableMacosLoginShell
     } else {
       delete process.env.ORCA_DISABLE_MACOS_LOGIN_SHELL
+    }
+    if (savedOrcaUserDataPath !== undefined) {
+      process.env.ORCA_USER_DATA_PATH = savedOrcaUserDataPath
+    } else {
+      delete process.env.ORCA_USER_DATA_PATH
     }
     if (savedOpenCodeConfigDir !== undefined) {
       process.env.OPENCODE_CONFIG_DIR = savedOpenCodeConfigDir
@@ -1188,7 +1200,7 @@ describe('registerPtyHandlers', () => {
       expect(env.ORCA_GIT_COMMIT_TRAILER).toBe('Co-authored-by: Orca <help@stably.ai>')
       expect(env.ORCA_GH_PR_FOOTER).toBe('Made with [Orca](https://github.com/stablyai/orca) 🐋')
       expect(env.ORCA_GH_ISSUE_FOOTER).toBe('Made with [Orca](https://github.com/stablyai/orca) 🐋')
-      expect(env.PATH).toContain(expectedAttributionShimDir)
+      expect(env.PATH).toContain(expectedAttributionShimDir())
     })
 
     it('skips git/gh attribution shims when attribution is disabled', async () => {
@@ -1200,7 +1212,7 @@ describe('registerPtyHandlers', () => {
       expect(env.ORCA_GIT_COMMIT_TRAILER).toBeUndefined()
       expect(env.ORCA_GH_PR_FOOTER).toBeUndefined()
       expect(env.ORCA_GH_ISSUE_FOOTER).toBeUndefined()
-      expect(env.PATH ?? '').not.toContain(expectedAttributionShimDir)
+      expect(env.PATH ?? '').not.toContain(expectedAttributionShimDir())
     })
 
     it('prepends git/gh attribution shims for daemon-backed local PTYs', async () => {
@@ -1229,7 +1241,7 @@ describe('registerPtyHandlers', () => {
 
       const env = daemonSpawn.mock.calls.at(-1)![0].env
       expect(env.ORCA_ENABLE_GIT_ATTRIBUTION).toBe('1')
-      expect(env.PATH).toContain(expectedAttributionShimDir)
+      expect(env.PATH).toContain(expectedAttributionShimDir())
     })
 
     it('overrides ambient CODEX_HOME with the Orca-managed home for system default', async () => {
@@ -1839,7 +1851,7 @@ describe('registerPtyHandlers', () => {
 
         const spawnOptions = daemonSpawn.mock.calls.at(-1)?.[0] as DaemonSpawnCall
         expect(spawnOptions.env.PATH.split(delimiter)[0]).toBe('/tmp/orca-agent-teams-bin')
-        expect(spawnOptions.env.PATH).toContain(expectedAttributionShimDir)
+        expect(spawnOptions.env.PATH).toContain(expectedAttributionShimDir())
         expect(spawnOptions.env.TERM_PROGRAM).toBeUndefined()
         expect(spawnOptions.env.ORCA_ATTRIBUTION_SHIM_DIR).toBeUndefined()
         expect(spawnOptions.envToDelete).toEqual(
@@ -1869,7 +1881,7 @@ describe('registerPtyHandlers', () => {
           enableGitHubAttribution: true
         }))
         expect(env.ORCA_ENABLE_GIT_ATTRIBUTION).toBe('1')
-        expect(env.PATH).toContain(expectedAttributionShimDir)
+        expect(env.PATH).toContain(expectedAttributionShimDir())
       })
 
       it('keeps the Agent Teams tmux shim ahead of host PATH shims on daemon pty:spawn', async () => {
@@ -1890,7 +1902,7 @@ describe('registerPtyHandlers', () => {
         )
 
         expect(spawnOptions.env.PATH.split(delimiter)[0]).toBe('/tmp/orca-agent-teams-bin')
-        expect(spawnOptions.env.PATH).toContain(expectedAttributionShimDir)
+        expect(spawnOptions.env.PATH).toContain(expectedAttributionShimDir())
         expect(spawnOptions.env.TERM_PROGRAM).toBeUndefined()
         expect(spawnOptions.env.ORCA_ATTRIBUTION_SHIM_DIR).toBeUndefined()
         expect(spawnOptions.envToDelete).toEqual(
@@ -2007,7 +2019,7 @@ describe('registerPtyHandlers', () => {
           enableGitHubAttribution: false
         }))
         expect(env.ORCA_ENABLE_GIT_ATTRIBUTION).toBeUndefined()
-        expect(env.PATH ?? '').not.toContain(expectedAttributionShimDir)
+        expect(env.PATH ?? '').not.toContain(expectedAttributionShimDir())
       })
 
       it('does not mutate the caller-provided args.env on the daemon path', async () => {
@@ -5866,9 +5878,11 @@ describe('registerPtyHandlers', () => {
     const env = spawnCall[2].env as Record<string, string>
     expect(spawnCall[0]).toBe('wsl.exe')
     expect(env.ORCA_TERMINAL_HANDLE).toBe('term_wsl')
+    expect(env.ORCA_USER_DATA_PATH).toBe('/tmp/orca-user-data')
     expect(env.WSLENV?.split(':')).toEqual(
       expect.arrayContaining([
         'ORCA_TERMINAL_HANDLE/u',
+        'ORCA_USER_DATA_PATH/p',
         'ORCA_AGENT_HOOK_PORT/u',
         'ORCA_AGENT_HOOK_TOKEN/u',
         'ORCA_OMP_SOURCE_AGENT_DIR/p',
@@ -5876,6 +5890,42 @@ describe('registerPtyHandlers', () => {
         'POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD'
       ])
     )
+  })
+
+  it('forces managed ORCA_USER_DATA_PATH for WSL spawns even when the caller provides a stale root', async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')
+    Object.defineProperty(process, 'platform', {
+      configurable: true,
+      value: 'win32'
+    })
+    const runtime = {
+      setPtyController: vi.fn(),
+      preAllocateHandleForPty: vi.fn(() => 'term_wsl'),
+      onPtySpawned: vi.fn(),
+      onPtyExit: vi.fn(),
+      onPtyData: vi.fn()
+    }
+
+    try {
+      registerPtyHandlers(mainWindow as never, runtime as never)
+      await handlers.get('pty:spawn')!(null, {
+        cols: 80,
+        rows: 24,
+        shellOverride: 'wsl.exe',
+        env: {
+          ORCA_USER_DATA_PATH: '/tmp/stale-orca-user-data'
+        }
+      })
+    } finally {
+      if (platform) {
+        Object.defineProperty(process, 'platform', platform)
+      }
+    }
+
+    const spawnCall = spawnMock.mock.calls.at(-1)!
+    const env = spawnCall[2].env as Record<string, string>
+    expect(spawnCall[0]).toBe('wsl.exe')
+    expect(env.ORCA_USER_DATA_PATH).toBe('/tmp/orca-user-data')
   })
 
   describe('Windows UTF-8 code page', () => {
@@ -6320,6 +6370,98 @@ describe('registerPtyHandlers', () => {
 
     const [, , options] = spawnMock.mock.calls.at(-1) as [string, string[], { cwd: string }]
     expect(options.cwd).toBe('/tmp/floating-notes')
+  })
+
+  it('falls back to the worktree root when a saved local cwd no longer exists', async () => {
+    registerPtyHandlers(mainWindow as never)
+    // Why: issue #7239 reproduced in a Japanese-named worktree; the fallback
+    // must return the selected worktree path verbatim.
+    const worktreePath = '/Users/motoki/orca/workspaces/nakamuramotoki/Fableと議論'
+    const missingCwd = `${worktreePath}/deleted-folder`
+    statSyncMock.mockImplementation((target: string) => {
+      if (target === missingCwd) {
+        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' })
+      }
+      return { isDirectory: () => true, mode: 0o755 }
+    })
+
+    const result = (await handlers.get('pty:spawn')!(null, {
+      cols: 80,
+      rows: 24,
+      cwd: missingCwd,
+      cwdFallback: 'worktree',
+      worktreeId: `repo-1::${worktreePath}`
+    })) as { startupCwdFallback?: { kind: string; cwd: string } }
+
+    const [, , options] = spawnMock.mock.calls.at(-1) as [string, string[], { cwd: string }]
+    expect(options.cwd).toBe(worktreePath)
+    expect(result.startupCwdFallback).toEqual({ kind: 'worktree', cwd: worktreePath })
+  })
+
+  it('keeps a missing cwd unchanged without the fallback flag', async () => {
+    registerPtyHandlers(mainWindow as never)
+    existsSyncMock.mockImplementation((target: string) => target !== '/repo/app/deleted-folder')
+    statSyncMock.mockImplementation((target: string) => {
+      if (target === '/repo/app/deleted-folder') {
+        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' })
+      }
+      return { isDirectory: () => true, mode: 0o755 }
+    })
+
+    // Why: without the renderer opt-in the provider still surfaces its normal
+    // missing-directory error — API/runtime callers keep exact cwd semantics.
+    await expect(
+      handlers.get('pty:spawn')!(null, {
+        cols: 80,
+        rows: 24,
+        cwd: '/repo/app/deleted-folder',
+        worktreeId: 'repo-1::/repo/app'
+      })
+    ).rejects.toThrow('Working directory "/repo/app/deleted-folder" does not exist.')
+
+    expect(spawnMock).not.toHaveBeenCalled()
+  })
+
+  it('spawns at an existing outside-worktree cwd without falling back (#7685)', async () => {
+    registerPtyHandlers(mainWindow as never)
+
+    const result = (await handlers.get('pty:spawn')!(null, {
+      cols: 80,
+      rows: 24,
+      cwd: '/repo/app-other',
+      cwdFallback: 'worktree',
+      worktreeId: 'repo-1::/repo/app'
+    })) as { startupCwdFallback?: unknown }
+
+    const [, , options] = spawnMock.mock.calls.at(-1) as [string, string[], { cwd: string }]
+    expect(options.cwd).toBe('/repo/app-other')
+    expect(result.startupCwdFallback).toBeUndefined()
+  })
+
+  it('ignores the cwd fallback flag for session reattach spawns', async () => {
+    registerPtyHandlers(mainWindow as never)
+    existsSyncMock.mockImplementation((target: string) => target !== '/repo/app/deleted-folder')
+    statSyncMock.mockImplementation((target: string) => {
+      if (target === '/repo/app/deleted-folder') {
+        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' })
+      }
+      return { isDirectory: () => true, mode: 0o755 }
+    })
+
+    // Why: a reattach must keep the session's exact cwd; remapping it would
+    // silently detach the restored terminal from its recorded state.
+    await expect(
+      handlers.get('pty:spawn')!(null, {
+        cols: 80,
+        rows: 24,
+        cwd: '/repo/app/deleted-folder',
+        cwdFallback: 'worktree',
+        sessionId: 'session-1',
+        worktreeId: 'repo-1::/repo/app'
+      })
+    ).rejects.toThrow('Working directory "/repo/app/deleted-folder" does not exist.')
+
+    expect(spawnMock).not.toHaveBeenCalled()
   })
 
   it('rejects missing WSL worktree cwd instead of validating only the fallback Windows cwd', async () => {

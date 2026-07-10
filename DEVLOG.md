@@ -6,6 +6,34 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-07-10 — Remediated upstream v1.4.132 release sync
+
+Resolved the Axiom upstream sync remediation branch for `v1.4.132` / `axiom-v1.4.132-axiom.1` through PR #96's bot branch, without pushing directly to `axiom/deploy`. Preserved fork semver (`1.4.132-axiom.1`), Axiom desktop/mobile identity and updater assumptions, profile portability, Forge provider/task surfaces, hidden-renderer PTY delivery interest, and byte-ordered terminal side effects while accepting upstream remote-runtime host identity, targeted background terminal mounts, stable Grok/Pi/Gemini titles, stale terminal-handle rejection, source-control/mobile, daemon packaging, and macOS notification-status changes.
+
+Conflict notes:
+
+- `mobile/app.json` keeps `Axiom Orca` and `com.axiomlabs.orca.mobile` while advancing the upstream Android native build to `versionCode: 6`.
+- `package.json` keeps fork version `1.4.132-axiom.1` while accepting upstream scripts and dependencies.
+- Terminal/runtime conflicts preserve Axiom cold parking, hidden-delivery/query authority, eager delivery-interest buffering, parked byte watchers, profile/main-authority-aware agent status, and conflict-adjacent tests while accepting upstream targeted background tab mounting, cleanup on partial remote launch failure, stable stored agent titles, OSC-status snapshot refreshes, and stale handle guards.
+- `src/shared/agent-detection.ts` remains a compatibility barrel; upstream Grok title normalization was ported into the split focused title modules.
+- Updated the Axiom release-hardening test fixture for upstream's packaged daemon layout verification.
+- CI-only follow-up: aligned the mobile update-manifest fixture with the accepted Android `versionCode: 6` and added the fork-preserved updater `releaseUrl` to a newly upstream-added late-install-error expectation.
+- Reviewed staged deletions against `config/axiom-merge-remediation-policy.json`; `docs/new-worktree-sidebar-reveal.md` and `previews/mobile-driver-overlay-preview.html` are not protected paths. No protected Axiom files were removed.
+
+Verification:
+
+- `pnpm install --frozen-lockfile` → passed; Node engine warning only (`wanted node 24`, local `v25.6.0`).
+- `pnpm run typecheck` → passed.
+- Required fork-invariant Vitest command → 5 files / 50 tests passed.
+- Required remediation `oxlint` → 0 warnings / 0 errors.
+- Required remediation `oxfmt --check` → passed.
+- Focused runtime/terminal/agent suite → 10 files / 1,227 tests passed.
+- CI-only follow-up suite (`generate-mobile-update-manifest.test.mjs`, `updater.test.ts`) → 2 files / 83 tests passed.
+- Focused conflict-file `oxlint` → 0 warnings / 0 errors; `oxfmt --check` → passed.
+- `git diff --check` and `git diff --cached --check` → passed.
+
+---
+
 ## 2026-07-08 — Remediated upstream v1.4.128 release sync
 
 Resolved the Axiom upstream sync remediation branch for `v1.4.128` / `axiom-v1.4.128-axiom.1` through the bot PR lane. Preserved the fork version (`1.4.128-axiom.1`), Axiom updater/release identity, side-by-side Windows installer process isolation, profile-portability assumptions, and Forge provider/task surfaces while accepting upstream daemon relocation, terminal partial-escape recovery, remote snapshot metadata, SSH relay pressure, mobile file/notification, AI Vault/session scanner, and release workflow updates.
