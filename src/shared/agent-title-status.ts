@@ -18,6 +18,7 @@ import {
   containsLegacyAgentName,
   isClaudeManagementTitle,
   isGeminiTerminalTitle,
+  isGrokRotatingWorkingTitle,
   isPiAgentTitle,
   isPiTerminalTitle
 } from './agent-title-core'
@@ -120,6 +121,12 @@ export function normalizeTerminalTitle(title: string): string {
     if (status === 'idle') {
       return 'Pi'
     }
+  }
+
+  // Why: Grok rotates its working phrase on every frame; collapse it before
+  // persistence so desktop and mobile compare one stable title per state.
+  if (isGrokRotatingWorkingTitle(title)) {
+    return '\u280b Grok'
   }
 
   return title

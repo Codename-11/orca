@@ -1,6 +1,6 @@
 /* eslint-disable max-lines */
 import type { ExecutionHostId } from './execution-host'
-import type { SshRemotePtyLease, SshTarget } from './ssh-types'
+import type { RemovedSshTargetTombstone, SshRemotePtyLease, SshTarget } from './ssh-types'
 import type { Automation, AutomationExecutionTargetType, AutomationRun } from './automations-types'
 import type { WorkspaceSource } from './workspace-source'
 import type { ForgeIssueSort, ForgeListFilter } from './forge-types'
@@ -1023,6 +1023,9 @@ export type PersistedOpenFile = {
   runtimeEnvironmentId?: string | null
   /** Unsaved editor buffer captured for hot exit; presence restores the tab dirty. */
   dirtyDraftContent?: string
+  /** Signature of the disk content the dirty draft is based on; lets restore
+   *  re-derive a changed-on-disk conflict from ground truth. */
+  lastKnownDiskSignature?: string
 }
 
 export type WorkspaceSessionState = {
@@ -3083,7 +3086,9 @@ export type NotificationDispatchRequest = {
 
 export type NotificationDispatchResult = {
   delivered: boolean
-  /** Present when delivered is false. Tells the caller why delivery was skipped. */
+  /** Present when delivered is false. Tells the caller why delivery was skipped.
+   *  'blocked-by-system' means the OS-level permission readout says macOS
+   *  would silently swallow the notification (denied or prompt unanswered). */
   reason?:
     | 'disabled'
     | 'source-disabled'
@@ -3091,6 +3096,7 @@ export type NotificationDispatchResult = {
     | 'cooldown'
     | 'not-supported'
     | 'not-displayed'
+    | 'blocked-by-system'
 }
 
 export type NotificationDismissResult = {
@@ -3163,6 +3169,18 @@ export type NotificationPermissionStatusResult = {
   requested: boolean
 }
 
+/** Outcome of a macOS notification permission check. Preferred source is the
+ *  bundled native helper reading UNUserNotificationCenter authorization
+ *  (authoritative); when unavailable, a silent delivery probe supplies weaker
+ *  scheduling-based evidence. 'awaiting-decision' means the macOS permission
+ *  dialog has not been answered yet. */
+export type NotificationDeliveryProbeResult = {
+  state: 'delivered' | 'blocked' | 'awaiting-decision' | 'unsupported'
+  /** True when the state comes from the native authorization readout. Silent
+   *  to poll; probe-based fallbacks flash a banner when delivery works. */
+  authoritative: boolean
+}
+
 export type WorktreeCardProperty =
   | 'status'
   | 'unread'
@@ -3196,6 +3214,7 @@ export type StatusBarItem =
   | 'opencode-go'
   | 'kimi'
   | 'minimax'
+  | 'grok'
   | 'ssh'
   | 'resource-usage'
   | 'ports'
@@ -3311,6 +3330,8 @@ export type PersistedUIState = {
   _kimiStatusBarDefaultAdded?: boolean
   /** One-shot migration flag for adding the default-on MiniMax status item. */
   _minimaxStatusBarDefaultAdded?: boolean
+  /** One-shot migration flag for adding the default-on Grok status item. */
+  _grokStatusBarDefaultAdded?: boolean
   statusBarItems: StatusBarItem[]
   statusBarVisible: boolean
   dismissedUpdateVersion: string | null
@@ -3572,6 +3593,9 @@ export type PersistedState = {
    *  matching ~/.ssh/config host on the next sync so a deleted host does not
    *  reappear. Cleared for an alias when the user re-adds it or re-adopts config. */
   deletedSshConfigAliases: string[]
+  /** Identity records for removed SSH targets. Lets a re-added host re-adopt
+   *  workspaces that were orphaned on the old target id. Pruned by age/count. */
+  removedSshTargetTombstones?: RemovedSshTargetTombstone[]
   sshRemotePtyLeases: SshRemotePtyLease[]
   /** Daemon session ids of live local Claude launches. Seeds the Claude
    *  live-PTY gate on startup so an early OAuth refresh cannot rotate the

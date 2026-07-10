@@ -50,6 +50,7 @@ export type PtyConnectResult = {
   sessionExpired?: boolean
   coldRestore?: { scrollback: string; cwd: string }
   replay?: string
+  startupCwdFallback?: { kind: 'worktree'; cwd: string }
   /** Trailing partial escape the daemon emulator held mid-parse; the reattach
    *  replay writes it LAST (after the reset) so a racing live continuation
    *  completes it instead of rendering literally (#7329). */
@@ -139,6 +140,7 @@ export type PtyTransport = {
 
 export type IpcPtyTransportOptions = {
   cwd?: string
+  cwdFallback?: 'worktree'
   env?: Record<string, string>
   command?: string
   launchConfig?: SleepingAgentLaunchConfig
