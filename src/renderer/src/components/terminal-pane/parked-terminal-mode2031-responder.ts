@@ -21,7 +21,7 @@ import {
 } from '../../../../shared/terminal-color-scheme-protocol'
 import { useAppStore } from '@/store'
 import { getSystemPrefersDark } from '@/lib/terminal-theme'
-import { subscribeToPtyData } from './pty-dispatcher'
+import { subscribeToPtyData } from './pty-data-sidecar-subscriptions'
 
 export type ParkedTerminalMode2031ResponderOptions = {
   ptyId: string

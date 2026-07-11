@@ -10,9 +10,9 @@ export type PtyDataMeta = {
   seq?: number
   rawLength?: number
   background?: boolean
-  /** Main trimmed this pty's unsent backlog past its cap; the handler should
-   *  rebuild the dropped span from the main headless snapshot. */
-  droppedBacklog?: boolean
+  /** Main dropped this PTY's buffered output at the pending cap; the pane
+   *  must repaint from the main-owned snapshot instead of the live stream. */
+  droppedOutput?: boolean
 }
 
 export type PtyBufferSnapshot = {
@@ -31,10 +31,12 @@ export type PtyBufferSnapshot = {
    *  scrollback lives in xterm and a clear destroys scroll-up after a tab
    *  return. Mirrors the attach-time guard in pty-transport.ts. */
   alternateScreen?: boolean
-  /** Trailing partial escape sequence the source emulator held mid-parse when
-   *  the snapshot was taken. The restorer writes it LAST (after the reset) so a
-   *  racing live continuation completes it instead of rendering literally
-   *  (#7329). */
+  /** Authoritative normal buffer paired with an alternate-screen frame. */
+  scrollbackAnsi?: string
+  /** Trailing incomplete escape sequence main's emulator ingested (a PTY read
+   *  ended mid-escape). Must be written LAST — after post-replay resets, right
+   *  before post-snapshot live chunks — so the continuation completes it
+   *  exactly as live instead of rendering literal (Bug E / #7329). */
   pendingEscapeTailAnsi?: string
 }
 

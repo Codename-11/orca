@@ -1,20 +1,19 @@
+// Why: the parsing core moved to shared so main's terminal side-effect
+// tracker can emit pr-link facts (terminal-side-effect-authority.md, slice 3).
+// Re-exported here so renderer consumers keep their '@/lib' import path.
+// normalizeGitHubLinkQuery stays renderer-side: its too-large guard is link-
+// picker input policy, not parsing.
 import {
-  buildGitHubRepoUrl,
+  type GitHubIssueOrPRLink,
   parseGitHubIssueOrPRLink,
   parseGitHubIssueOrPRNumber
 } from '../../../shared/github-links'
-import type { RepoSlug } from '../../../shared/github-links'
+
 import { isWorkItemLinkQueryTooLarge } from './work-item-link-query-bounds'
 
-export { buildGitHubRepoUrl, parseGitHubIssueOrPRLink, parseGitHubIssueOrPRNumber }
-export type { RepoSlug }
-const HTTP_URL_PREFIX_RE = /^https?:\/\//i
+export * from '../../../shared/github-links'
 
-export type GitHubIssueOrPRLink = {
-  slug: RepoSlug
-  number: number
-  type: 'issue' | 'pr'
-}
+const HTTP_URL_PREFIX_RE = /^https?:\/\//i
 
 export type GitHubLinkQuery = {
   query: string

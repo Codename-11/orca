@@ -570,7 +570,8 @@ describe('launchAgentBackgroundSession', () => {
       state.repos = [{ id: 'repo-1', connectionId: 'ssh-1', path: '/repo' }]
       state.settings = {
         agentCmdOverrides: { codex: "codex --prefill 'draft from override'" },
-        activeRuntimeEnvironmentId: null
+        activeRuntimeEnvironmentId: null,
+        terminalMainSideEffectAuthority: undefined
       }
       const { launchAgentBackgroundSession } = await import('./launch-agent-background-session')
 
@@ -707,7 +708,11 @@ describe('launchAgentBackgroundSession', () => {
   })
 
   it('closes a created runtime terminal when its data subscription fails', async () => {
-    state.settings = { agentCmdOverrides: {}, activeRuntimeEnvironmentId: 'env-1' }
+    state.settings = {
+      agentCmdOverrides: {},
+      activeRuntimeEnvironmentId: 'env-1',
+      terminalMainSideEffectAuthority: undefined
+    }
     mockRuntimeEnvironmentSubscribe.mockRejectedValueOnce(new Error('subscription failed'))
     const { launchAgentBackgroundSession } = await import('./launch-agent-background-session')
 

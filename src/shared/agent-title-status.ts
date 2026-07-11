@@ -18,12 +18,12 @@ import {
   containsLegacyAgentName,
   isClaudeManagementTitle,
   isGeminiTerminalTitle,
-  isGrokRotatingWorkingTitle,
   isPiAgentTitle,
   isPiTerminalTitle
 } from './agent-title-core'
 import type { AgentStatus } from './agent-title-core'
 import { getPiCompatibleSyntheticAgentStatus } from './pi-compatible-synthetic-title'
+import { isGrokRotatingWorkingTitle } from './terminal-title-agent-type'
 
 /**
  * Strip working-status indicators so stale exit titles stop reporting working.
@@ -123,8 +123,10 @@ export function normalizeTerminalTitle(title: string): string {
     }
   }
 
-  // Why: Grok rotates its working phrase on every frame; collapse it before
-  // persistence so desktop and mobile compare one stable title per state.
+  // Why: Grok Build interpolates a rotating status/tool phrase between the
+  // spinner and its name, so its working frames change the title many times per
+  // turn. Collapse them to one stable label; idle/session titles carry no
+  // spinner and pass through, so the meaningful final title still shows (#7863).
   if (isGrokRotatingWorkingTitle(title)) {
     return '\u280b Grok'
   }

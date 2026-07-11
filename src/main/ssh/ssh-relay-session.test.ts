@@ -1,10 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { SshRelaySession } from './ssh-relay-session'
 import type { SshConnection } from './ssh-connection'
-import type { Store } from '../persistence'
-import type { SshPortForwardManager } from './ssh-port-forward'
 import { AGENT_HOOK_INSTALL_PLUGINS_METHOD } from '../../shared/agent-hook-relay'
 import { SSH_RELAY_CONFIGURE_GRACE_TIME_METHOD } from '../../shared/ssh-types'
+import { createMockDeps, mockDeploySuccess } from './ssh-relay-session-test-fixtures'
 
 const { muxRequestMock, installRemoteManagedAgentHooksMock } = vi.hoisted(() => ({
   muxRequestMock: vi.fn(),
@@ -110,41 +109,6 @@ const { registerSshFilesystemProvider, unregisterSshFilesystemProvider } =
   await import('../providers/ssh-filesystem-dispatch')
 const { registerSshGitProvider, unregisterSshGitProvider } =
   await import('../providers/ssh-git-dispatch')
-
-function createMockDeps() {
-  const mockConn = {} as SshConnection
-  const mockStore = {
-    getRepos: vi.fn().mockReturnValue([]),
-    getSshRemotePtyLeases: vi.fn().mockReturnValue([]),
-    markSshRemotePtyLease: vi.fn(),
-    markSshRemotePtyLeases: vi.fn()
-  } as unknown as Store
-  const mockPortForward = {
-    removeAllForwards: vi.fn()
-  } as unknown as SshPortForwardManager
-  const mockWindow = {
-    isDestroyed: () => false,
-    // Why: the port scanner visibility-gates its ticks; a visible mock window
-    // keeps establish-path tests exercising the scan-on-ready behavior.
-    isVisible: () => true,
-    isMinimized: () => false,
-    webContents: { send: vi.fn() }
-  }
-  const getMainWindow = vi.fn().mockReturnValue(mockWindow)
-  return { mockConn, mockStore, mockPortForward, getMainWindow, mockWindow }
-}
-
-function mockDeploySuccess() {
-  const mockTransport = {
-    write: vi.fn(),
-    onData: vi.fn(),
-    onClose: vi.fn()
-  }
-  vi.mocked(deployAndLaunchRelay).mockResolvedValue({
-    transport: mockTransport,
-    platform: 'linux-x64'
-  })
-}
 
 describe('SshRelaySession', () => {
   beforeEach(() => {
@@ -267,6 +231,39 @@ describe('SshRelaySession', () => {
     expect(registerSshGitProvider).toHaveBeenCalledWith('target-1', expect.anything())
   })
 
+  it.each([
+    ['/bin/bash', "'/bin/bash' -lc 'printenv GROK_HOME | head -c 4097'"],
+    ['/usr/bin/fish', "'/usr/bin/fish' -lc 'printenv GROK_HOME | head -c 4097'"],
+    ['/bin/tcsh', "'/bin/tcsh' -lc 'printenv GROK_HOME | head -c 4097'"],
+    ['/bin/sh', "'/bin/sh' -c 'printenv GROK_HOME | head -c 4097'"]
+  ])('uses a shell-independent GROK_HOME probe with login shell %s', async (shell, command) => {
+    process.env.ORCA_FEATURE_REMOTE_AGENT_HOOKS = '1'
+    muxRequestMock.mockImplementation(async (method: string) =>
+      method === 'session.resolveHome' ? { resolvedPath: '/home/orca' } : { ok: true }
+    )
+    vi.mocked(execCommand).mockResolvedValueOnce(`${shell}\n`).mockResolvedValueOnce('/srv/grok\n')
+    const sftp = { end: vi.fn() }
+    const { mockStore, mockPortForward, getMainWindow } = createMockDeps()
+    const mockConn = { sftp: vi.fn().mockResolvedValue(sftp) } as unknown as SshConnection
+    const session = new SshRelaySession('target-1', getMainWindow, mockStore, mockPortForward)
+
+    await session.establish(mockConn)
+
+    expect(execCommand).toHaveBeenNthCalledWith(
+      1,
+      mockConn,
+      "printenv SHELL || printf '/bin/sh\\n'",
+      { timeoutMs: 8_000 }
+    )
+    expect(execCommand).toHaveBeenNthCalledWith(2, mockConn, command, {
+      wrapCommand: false,
+      timeoutMs: 8_000
+    })
+    expect(installRemoteManagedAgentHooksMock).toHaveBeenCalledWith(sftp, '/home/orca', {
+      grokHomeDir: '/srv/grok'
+    })
+  })
+
   it('installs remote managed hooks and relay-owned plugin assets before registering the SSH PTY provider', async () => {
     process.env.ORCA_FEATURE_REMOTE_AGENT_HOOKS = '1'
     muxRequestMock.mockImplementation(async (method: string) => {
@@ -276,6 +273,9 @@ describe('SshRelaySession', () => {
       return { ok: true }
     })
     const sftp = { end: vi.fn() }
+    vi.mocked(execCommand)
+      .mockResolvedValueOnce('/bin/bash\n')
+      .mockResolvedValueOnce('/srv/grok profile\n')
     const { mockStore, mockPortForward, getMainWindow } = createMockDeps()
     const mockConn = {
       sftp: vi.fn().mockResolvedValue(sftp)
@@ -294,7 +294,9 @@ describe('SshRelaySession', () => {
       ompExtensionSource: expect.stringContaining('/hook/omp')
     })
     expect(mockConn.sftp).toHaveBeenCalledTimes(1)
-    expect(installRemoteManagedAgentHooksMock).toHaveBeenCalledWith(sftp, '/home/orca')
+    expect(installRemoteManagedAgentHooksMock).toHaveBeenCalledWith(sftp, '/home/orca', {
+      grokHomeDir: '/srv/grok profile'
+    })
     expect(sftp.end).toHaveBeenCalledTimes(1)
     expect(installRemoteManagedAgentHooksMock.mock.invocationCallOrder[0]).toBeLessThan(
       muxRequestMock.mock.invocationCallOrder[installPluginsCallIndex]
@@ -302,6 +304,26 @@ describe('SshRelaySession', () => {
     expect(muxRequestMock.mock.invocationCallOrder[installPluginsCallIndex]).toBeLessThan(
       vi.mocked(registerSshPtyProvider).mock.invocationCallOrder[0]
     )
+  })
+
+  it('falls back to login-home Grok config when the remote env probe is invalid', async () => {
+    process.env.ORCA_FEATURE_REMOTE_AGENT_HOOKS = '1'
+    muxRequestMock.mockImplementation(async (method: string) =>
+      method === 'session.resolveHome' ? { resolvedPath: '/home/orca' } : { ok: true }
+    )
+    vi.mocked(execCommand)
+      .mockResolvedValueOnce('/bin/bash\n')
+      .mockResolvedValueOnce('relative/grok-home\n')
+    const sftp = { end: vi.fn() }
+    const { mockStore, mockPortForward, getMainWindow } = createMockDeps()
+    const mockConn = { sftp: vi.fn().mockResolvedValue(sftp) } as unknown as SshConnection
+    const session = new SshRelaySession('target-1', getMainWindow, mockStore, mockPortForward)
+
+    await session.establish(mockConn)
+
+    expect(installRemoteManagedAgentHooksMock).toHaveBeenCalledWith(sftp, '/home/orca', {
+      grokHomeDir: '/home/orca/.grok'
+    })
   })
 
   it('does not run POSIX managed hook installers on Windows remotes', async () => {

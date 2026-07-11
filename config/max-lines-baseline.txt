@@ -59,6 +59,7 @@ inline src/main/daemon/pty-subprocess.test.ts
 inline src/main/daemon/pty-subprocess.ts
 inline src/main/daemon/session.ts
 inline src/main/daemon/shell-ready.ts
+inline src/main/forge/issues.test.ts
 inline src/main/git/remove-worktree.test.ts
 inline src/main/git/repo.ts
 inline src/main/git/runner.ts
@@ -74,7 +75,6 @@ inline src/main/github/pr-refresh-coordinator.ts
 inline src/main/github/project-view.ts
 inline src/main/github/project-view/mutations.ts
 inline src/main/github/work-item-details.ts
-inline src/main/forge/issues.test.ts
 inline src/main/gitlab/client-mr.test.ts
 inline src/main/gitlab/client.ts
 inline src/main/gitlab/issues.ts
@@ -302,9 +302,9 @@ inline src/renderer/src/store/slices/browser.ts
 inline src/renderer/src/store/slices/diffComments.ts
 inline src/renderer/src/store/slices/editor.test.ts
 inline src/renderer/src/store/slices/editor.ts
+inline src/renderer/src/store/slices/forge.ts
 inline src/renderer/src/store/slices/github.test.ts
 inline src/renderer/src/store/slices/github.ts
-inline src/renderer/src/store/slices/forge.ts
 inline src/renderer/src/store/slices/hosted-review.ts
 inline src/renderer/src/store/slices/jira.ts
 inline src/renderer/src/store/slices/linear.test.ts

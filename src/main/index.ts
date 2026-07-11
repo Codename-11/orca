@@ -188,8 +188,8 @@ import {
   type SyntheticAgentTitleProfile
 } from '../shared/synthetic-agent-title'
 import type { AgentStatusState } from '../shared/agent-status-types'
-import type { TerminalSideEffectBatch } from '../shared/terminal-side-effect-facts'
 import { resolveTuiAgentPermissionMode } from '../shared/tui-agent-permissions'
+import type { TerminalSideEffectBatch } from '../shared/terminal-side-effect-facts'
 import { KeybindingService } from './keybindings/keybinding-service'
 import { applyElectronProxySettings } from './network/proxy-settings'
 import { preserveAgentAuthBeforeRestart } from './agent-auth-restart-preservation'
@@ -1840,6 +1840,11 @@ app.whenReady().then(async () => {
     // Why: hook-reported agent status is the same source the desktop sidebar
     // reads. worktree.ps pulls it at query time so mobile shows the same agents.
     getAgentStatusSnapshot: () => agentHookServer.getStatusSnapshot(),
+    // Why: source codex-home here (runs in BOTH window and serve modes) so the
+    // aiVault.listSessions RPC includes managed-Codex sessions on remote/SSH
+    // hosts; the window-only registerCoreHandlers path never runs under serve.
+    getAdditionalAiVaultCodexHomePaths: () =>
+      codexRuntimeHome ? [codexRuntimeHome.getHostRuntimeHomePath()] : [],
     buildAgentHookPtyEnv: () =>
       isAgentStatusHooksEnabled(store?.getSettings()) ? agentHookServer.buildPtyEnv() : {}
   })

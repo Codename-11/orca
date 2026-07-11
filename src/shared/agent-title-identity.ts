@@ -78,6 +78,9 @@ export function getAgentLabel(title: string): string | null {
   if (titleHasAgentName(title, 'grok')) {
     return 'Grok'
   }
+  if (titleHasAgentName(title, 'devin')) {
+    return 'Devin'
+  }
   if (titleHasAgentName(title, 'antigravity') || AGY_AGENT_NAME_RE.test(title)) {
     return 'Antigravity'
   }
@@ -99,9 +102,6 @@ export function getAgentLabel(title: string): string | null {
   }
   if (HERMES_AGENT_NAME_RE.test(title)) {
     return 'Hermes'
-  }
-  if (titleHasAgentName(title, 'devin')) {
-    return 'Devin'
   }
   if (isClaudeAgent(title)) {
     return 'Claude Code'

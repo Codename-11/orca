@@ -72,6 +72,7 @@ import {
 } from './terminal/split-group-mount'
 import { buildDuplicatedBrowserTabOptions } from '@/lib/duplicate-browser-tab-options'
 import { focusTerminalTabSurface } from '@/lib/focus-terminal-tab-surface'
+import { setForegroundTerminalTabIds } from '@/lib/foreground-terminal-tabs'
 import {
   getTerminalWorktreeColdParkRecheckDelayMs,
   selectColdParkedTerminalWorktrees,
@@ -84,7 +85,6 @@ import {
   shouldDeferParkedPtyExitTabClose,
   syncParkedTerminalTabWatchers
 } from './terminal-pane/terminal-parked-tab-watchers'
-import { setForegroundTerminalTabIds } from '@/lib/foreground-terminal-tabs'
 import { appendUniqueOpenFileIds } from './terminal/unsaved-close-queue'
 import { setWindowCloseRequestHandler } from './window-close-request-coordinator'
 import CodexRestartChip from './CodexRestartChip'
@@ -2165,8 +2165,8 @@ function Terminal(): React.JSX.Element | null {
                         const isActivityPortalTab = activityTerminalPortal !== null
                         const isActiveTerminalTab =
                           isVisible && tab.id === activeTabId && activeTabType === 'terminal'
-                        // Why: parking unmounts the renderer transport while a
-                        // byte watcher preserves side effects until reveal.
+                        // Why: parking unmounts the view while preserving the PTY;
+                        // an Activity portal remains mounted as a visible consumer.
                         if (shouldColdParkTerminalPanes && !isActivityPortalTab) {
                           return null
                         }

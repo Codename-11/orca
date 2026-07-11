@@ -63,6 +63,7 @@ type SnapshotFrameOptions = {
 
 type SerializedSnapshot = {
   data: string
+  scrollbackAnsi?: string
   cols: number
   rows: number
   seq?: number
@@ -350,26 +351,6 @@ function appendPendingMultiplexOutput(
   stream.pendingOutputOverflowed ||= trimmed.overflowed
 }
 
-function appendAckPendingOutput(
-  stream: TerminalMultiplexStream,
-  chunk: TerminalOutputFrameChunk
-): void {
-  stream.ackPendingOutput.push(chunk)
-  stream.ackPendingOutputBytes += chunk.bytes.byteLength
-  let omittedChunkCount = 0
-  while (
-    stream.ackPendingOutputBytes > TERMINAL_MULTIPLEX_PENDING_MAX_BYTES &&
-    omittedChunkCount < stream.ackPendingOutput.length
-  ) {
-    stream.ackPendingOutputBytes -= stream.ackPendingOutput[omittedChunkCount]!.bytes.byteLength
-    omittedChunkCount += 1
-  }
-  if (omittedChunkCount > 0) {
-    stream.ackPendingOutput.splice(0, omittedChunkCount)
-    stream.ackPendingOutputOverflowed = true
-  }
-}
-
 function getOutputAfterSnapshotSeq(
   chunk: TerminalOutputChunk,
   snapshotSeq: number | undefined
@@ -391,6 +372,26 @@ function getOutputAfterSnapshotSeq(
   return chunk.data.slice(snapshotSeq - chunkStartSeq)
 }
 
+function appendAckPendingOutput(
+  stream: TerminalMultiplexStream,
+  chunk: TerminalOutputFrameChunk
+): void {
+  stream.ackPendingOutput.push(chunk)
+  stream.ackPendingOutputBytes += chunk.bytes.byteLength
+  let omittedChunkCount = 0
+  while (
+    stream.ackPendingOutputBytes > TERMINAL_MULTIPLEX_PENDING_MAX_BYTES &&
+    omittedChunkCount < stream.ackPendingOutput.length
+  ) {
+    stream.ackPendingOutputBytes -= stream.ackPendingOutput[omittedChunkCount]!.bytes.byteLength
+    omittedChunkCount += 1
+  }
+  if (omittedChunkCount > 0) {
+    stream.ackPendingOutput.splice(0, omittedChunkCount)
+    stream.ackPendingOutputOverflowed = true
+  }
+}
+
 function trimPendingOutputToBudget(
   pendingOutput: TerminalOutputChunk[],
   pendingOutputBytes: number
@@ -408,6 +409,13 @@ function trimPendingOutputToBudget(
     pendingOutput.splice(0, omittedChunkCount)
   }
   return { bytes: pendingOutputBytes, overflowed: omittedChunkCount > 0 }
+}
+
+function measureTerminalStreamByteLength(
+  data: string,
+  options: { stopAfterBytes?: number } = {}
+): { byteLength: number; exceededLimit: boolean } {
+  return measureClipboardTextByteLength(data, options)
 }
 
 function trimPendingOutputCoveredBySnapshot(
@@ -434,20 +442,17 @@ function trimPendingOutputCoveredBySnapshot(
     if (snapshotSeq >= chunkSeq) {
       continue
     }
-    const data =
-      snapshotSeq > startSeq ? chunk.data.slice(Math.max(0, snapshotSeq - startSeq)) : chunk.data
-    const dataBytes = data === chunk.data ? chunk.bytes : terminalStreamByteLength(data)
-    chunks.push({ data, bytes: dataBytes, meta: data === chunk.data ? chunk.meta : undefined })
-    bytes += dataBytes
+    if (snapshotSeq <= startSeq) {
+      chunks.push(chunk)
+      bytes += chunk.bytes
+      continue
+    }
+    const data = chunk.data.slice(snapshotSeq - startSeq)
+    const slicedBytes = terminalStreamByteLength(data)
+    chunks.push({ data, bytes: slicedBytes, meta: undefined })
+    bytes += slicedBytes
   }
   return { chunks, bytes }
-}
-
-function measureTerminalStreamByteLength(
-  data: string,
-  options: { stopAfterBytes?: number } = {}
-): { byteLength: number; exceededLimit: boolean } {
-  return measureClipboardTextByteLength(data, options)
 }
 
 function terminalStreamByteLength(data: string): number {
@@ -498,13 +503,12 @@ async function serializeBudgetedRequestedSnapshot(
     if (!serialized) {
       return null
     }
-    const overByteBudget = terminalStreamByteLengthExceeds(
-      serialized.data,
-      REQUESTED_SNAPSHOT_BYTE_BUDGET
-    )
+    const data = (serialized.scrollbackAnsi ?? '') + serialized.data
+    const overByteBudget = terminalStreamByteLengthExceeds(data, REQUESTED_SNAPSHOT_BYTE_BUDGET)
     if (!overByteBudget || rows === 0) {
       return {
         ...serialized,
+        data,
         scrollbackRows: rows,
         truncatedByByteBudget: rows < requestedRows || overByteBudget
       }
@@ -553,7 +557,14 @@ async function serializeBudgetedMobileSnapshot(
 ): Promise<SerializedSnapshot> {
   if (!isMobile) {
     const serialized = await runtime.serializeTerminalBuffer(ptyId, { scrollbackRows: 0 })
-    return serialized ? { ...serialized, scrollbackRows: 0, truncatedByByteBudget: false } : null
+    return serialized
+      ? {
+          ...serialized,
+          data: (serialized.scrollbackAnsi ?? '') + serialized.data,
+          scrollbackRows: 0,
+          truncatedByByteBudget: false
+        }
+      : null
   }
   const candidates = [MOBILE_SUBSCRIBE_SCROLLBACK_ROWS, 500, 250, 100, 25, 0]
   for (const rows of candidates) {
@@ -561,13 +572,12 @@ async function serializeBudgetedMobileSnapshot(
     if (!serialized) {
       return null
     }
-    const overByteBudget = terminalStreamByteLengthExceeds(
-      serialized.data,
-      MOBILE_SNAPSHOT_BYTE_BUDGET
-    )
+    const data = (serialized.scrollbackAnsi ?? '') + serialized.data
+    const overByteBudget = terminalStreamByteLengthExceeds(data, MOBILE_SNAPSHOT_BYTE_BUDGET)
     if (!overByteBudget || rows === 0) {
       return {
         ...serialized,
+        data,
         scrollbackRows: rows,
         truncatedByByteBudget: rows < MOBILE_SUBSCRIBE_SCROLLBACK_ROWS || overByteBudget
       }
@@ -1154,7 +1164,10 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
     name: 'terminal.resizeForClient',
     params: TerminalResizeForClient,
     handler: async (params, { runtime }) => {
-      const leaf = runtime.resolveLeafForHandle(params.terminal)
+      // Why: guarded resolution — a stale handle (pane's PTY replaced under it)
+      // must fail with terminal_handle_stale instead of resizing the wrong PTY
+      // (#7718). Clients recover by re-deriving the handle.
+      const leaf = runtime.resolveLiveLeafForHandle(params.terminal)
       if (!leaf?.ptyId) {
         throw new Error('no_connected_pty')
       }
@@ -1208,7 +1221,10 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
     name: 'terminal.setDisplayMode',
     params: TerminalSetDisplayMode,
     handler: async (params, { runtime }) => {
-      const leaf = runtime.resolveLeafForHandle(params.terminal)
+      // Why: guarded resolution — a stale handle must fail with
+      // terminal_handle_stale instead of mutating the wrong PTY's display
+      // mode/viewport (#7718). Clients recover by re-deriving the handle.
+      const leaf = runtime.resolveLiveLeafForHandle(params.terminal)
       if (!leaf?.ptyId) {
         throw new Error('no_connected_pty')
       }
@@ -1230,7 +1246,10 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
     name: 'terminal.restoreFit',
     params: TerminalHandle,
     handler: async (params, { runtime }) => {
-      const leaf = runtime.resolveLeafForHandle(params.terminal)
+      // Why: guarded resolution — a stale handle must fail with
+      // terminal_handle_stale instead of reclaiming the wrong PTY back to
+      // desktop dims (#7718). Clients recover by re-deriving the handle.
+      const leaf = runtime.resolveLiveLeafForHandle(params.terminal)
       if (!leaf?.ptyId) {
         throw new Error('no_connected_pty')
       }
@@ -1251,7 +1270,10 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
     name: 'terminal.updateViewport',
     params: TerminalUpdateViewport,
     handler: async (params, { runtime }) => {
-      const leaf = runtime.resolveLeafForHandle(params.terminal)
+      // Why: guarded resolution — a stale handle must fail with
+      // terminal_handle_stale instead of writing viewport state to the wrong
+      // PTY (#7718). Clients recover by re-deriving the handle.
+      const leaf = runtime.resolveLiveLeafForHandle(params.terminal)
       if (!leaf?.ptyId) {
         throw new Error('no_connected_pty')
       }
@@ -1293,18 +1315,20 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
         opcode: TerminalStreamOpcode,
         payload: Uint8Array<ArrayBufferLike> = new Uint8Array(),
         seq?: number
-      ): void => {
+      ): boolean => {
         if (closed) {
-          return
+          return false
         }
-        sendBinary(
-          encodeTerminalStreamFrame({
-            opcode,
-            streamId,
-            seq: typeof seq === 'number' ? seq : cursor++,
-            payload
-          })
+        // Why: Output `seq` is a UTF-16 high-water the client uses for frame-drop
+        // gap detection, so a seq-less Output chunk must carry the sentinel 0
+        // (== "no seq") rather than the cursor value that orders control frames;
+        // a cursor value would poison the client's expected-seq tracker.
+        const resolvedSeq =
+          typeof seq === 'number' ? seq : opcode === TerminalStreamOpcode.Output ? 0 : cursor++
+        const sent = sendBinary(
+          encodeTerminalStreamFrame({ opcode, streamId, seq: resolvedSeq, payload })
         )
+        return sent !== false
       }
       const sendStreamError = (streamId: number, message: string): void => {
         sendFrame(streamId, TerminalStreamOpcode.Error, encodeTerminalStreamText(message))
@@ -2251,10 +2275,27 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
           unsubscribeStreamData()
         }
 
-        const read = await runtime.readTerminal(params.terminal)
-        const serialized = await serializeBudgetedMobileSnapshot(runtime, ptyId, isMobile)
+        let read = await runtime.readTerminal(params.terminal)
+        let serialized = await serializeBudgetedMobileSnapshot(runtime, ptyId, isMobile)
         if (closed) {
           return
+        }
+        let initialOutputOverflowed = false
+        if (pendingOutputOverflowed) {
+          pendingOutput.splice(0)
+          pendingOutputBytes = 0
+          pendingOutputOverflowed = false
+          read = await runtime.readTerminal(params.terminal)
+          serialized = await serializeBudgetedMobileSnapshot(runtime, ptyId, isMobile)
+          if (closed) {
+            return
+          }
+          if (pendingOutputOverflowed) {
+            initialOutputOverflowed = true
+            pendingOutput.splice(0)
+            pendingOutputBytes = 0
+            pendingOutputOverflowed = false
+          }
         }
         const size = runtime.getTerminalSize(ptyId)
         const displayMode = runtime.getMobileDisplayMode(ptyId)
@@ -2272,7 +2313,9 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
           type: 'subscribed',
           streamId,
           lines: read.tail,
-          truncated: serialized ? read.truncated : isTerminalReadPayloadIncomplete(read),
+          truncated:
+            initialOutputOverflowed ||
+            (serialized ? read.truncated : isTerminalReadPayloadIncomplete(read)),
           cols: serialized?.cols ?? size?.cols,
           rows: serialized?.rows ?? size?.rows,
           displayMode,
@@ -2285,7 +2328,9 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
           displayMode,
           seq: snapshotFrameSeq,
           cwd: serialized?.cwd,
-          truncated: serialized ? read.truncated : isTerminalReadPayloadIncomplete(read),
+          truncated:
+            initialOutputOverflowed ||
+            (serialized ? read.truncated : isTerminalReadPayloadIncomplete(read)),
           truncatedByByteBudget: serialized?.truncatedByByteBudget,
           oscLinks: serialized?.oscLinks,
           data: serialized?.data ?? ''
@@ -2352,10 +2397,13 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
           pendingOutputBytes = trimmed.bytes
         }
         buffering = false
-        for (const item of pendingOutput.splice(0)) {
-          const uncoveredData = getOutputAfterSnapshotSeq(item, snapshotOutputSeq)
-          if (uncoveredData) {
-            outputBatcher.push(uncoveredData, item.meta)
+        const bufferedOutput = pendingOutput.splice(0)
+        if (!initialOutputOverflowed) {
+          for (const item of bufferedOutput) {
+            const uncoveredData = getOutputAfterSnapshotSeq(item, snapshotOutputSeq)
+            if (uncoveredData) {
+              outputBatcher.push(uncoveredData, item.meta)
+            }
           }
         }
         pendingOutputBytes = 0

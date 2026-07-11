@@ -6,7 +6,6 @@ import {
   isLocalNativeWindowsConpty,
   isLocalNativeWindowsPty,
   resolveWindowsShellOverride
-
 } from './windows-pty-compatibility'
 
 function writeTerminal(terminal: Terminal, data: string): Promise<void> {

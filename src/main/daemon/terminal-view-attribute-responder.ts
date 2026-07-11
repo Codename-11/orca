@@ -110,7 +110,7 @@ export function installTerminalViewAttributeResponder(
     while (slots.length > 1) {
       const idx = slots.shift() as string
       const spec = slots.shift() as string
-      if (!/^\d+$/.exec(idx)) {
+      if (!/^\d+$/.test(idx)) {
         continue
       }
       const index = Number.parseInt(idx, 10)
@@ -143,7 +143,7 @@ export function installTerminalViewAttributeResponder(
       return true
     }
     for (const slot of data.split(';')) {
-      if (/^\d+$/.exec(slot)) {
+      if (/^\d+$/.test(slot)) {
         ansiOverrides.delete(Number.parseInt(slot, 10))
       }
     }

@@ -20,8 +20,11 @@ vi.mock('@/store', () => ({
 }))
 
 vi.mock('@/components/terminal-pane/pty-dispatcher', () => ({
-  subscribeToPtyData: mockSubscribeToPtyData,
   subscribeToPtyExit: mockSubscribeToPtyExit
+}))
+
+vi.mock('@/components/terminal-pane/pty-data-sidecar-subscriptions', () => ({
+  subscribeToPtyData: mockSubscribeToPtyData
 }))
 
 vi.mock('@/runtime/runtime-rpc-client', () => ({
