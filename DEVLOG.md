@@ -17,6 +17,7 @@ Conflict notes:
 - Restored upstream terminal subscribe overflow recovery while preserving Axiom sequence handling and extracted eager-buffer/sidecar architecture.
 - Kept Axiom mobile identity while accepting upstream mobile version `0.0.26`, and retained fork version `1.4.135-axiom.1` while accepting upstream scripts and xterm patches.
 - Retained the pre-existing `src/main/runtime/orca-runtime.ts` max-lines baseline entry; no new max-lines bypass or threshold was added.
+- CI-only follow-up: aligned the merged active-foreground scheduler expectation with upstream's eight-write high-priority drain budget; the separate background-only two-terminal-per-tick guard remains intact.
 - Reviewed the sole staged deletion, `mobile/mock-source-control-hub.html`, against `config/axiom-merge-remediation-policy.json`; it is not protected. No protected Axiom files were removed.
 
 Verification:
@@ -27,6 +28,7 @@ Verification:
 - Required remediation `oxlint` → 0 warnings / 0 errors.
 - Required remediation `oxfmt --check` → passed.
 - Focused daemon/runtime/PTY/terminal suite → 10 files / 1,541 tests passed.
+- CI-only scheduler follow-up → 1 file / 58 tests passed.
 - `pnpm run check:max-lines-ratchet` → passed with 357 grandfathered suppressions and no new bypasses.
 - Conflict-marker scan → no markers; unmerged and unstaged path counts both zero.
 - `git diff --check` → passed.
