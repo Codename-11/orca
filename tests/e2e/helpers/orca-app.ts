@@ -27,11 +27,8 @@ import { TEST_REPO_PATH_FILE } from '../global-setup'
 import { cleanupE2EDaemons, closeElectronAppForE2E } from './electron-process-shutdown'
 import { getOrcaElectronLaunchArgs } from './electron-launch-args'
 import { getE2ECompletedOnboardingProfile } from './e2e-completed-onboarding-profile'
-import {
-  createSeededTestRepo,
-  ensureSeededTestRepoSessionReady,
-  isValidGitRepo
-} from './e2e-seeded-repo'
+import { createSeededTestRepo, isValidGitRepo } from './seeded-test-repo'
+import { ensureSeededTestRepoSessionReady } from './e2e-seeded-repo'
 
 type OrcaTestFixtures = {
   electronApp: ElectronApplication
@@ -123,7 +120,6 @@ function forwardElectronProcessLogs(app: ElectronApplication, testInfo: TestInfo
     console.log(`${prefix} exit: code=${code ?? 'null'} signal=${signal ?? 'null'}`)
   })
 }
-
 
 /**
  * Extended Playwright test with Orca-specific fixtures.

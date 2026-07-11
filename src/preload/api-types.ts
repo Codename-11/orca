@@ -121,6 +121,7 @@ import type {
   JiraIssue,
   JiraIssueFilter,
   JiraIssueType,
+  JiraProjectStatusOrder,
   JiraIssueUpdate,
   JiraPriority,
   JiraProject,
@@ -223,7 +224,12 @@ import type {
   WorkspaceSessionState
 } from '../shared/types'
 import type { PtyModelRestoreNeededEvent } from '../shared/pty-model-restore-marker'
+import type {
+  PtyRendererDeliveryHealthReply,
+  PtyRendererDeliveryStateReport
+} from '../shared/pty-renderer-delivery-health'
 import type { TerminalViewAttributes } from '../shared/terminal-view-attributes'
+import type { PtyMainDeliveryDiagnostics } from '../shared/pty-delivery-diagnostics'
 import type {
   WarpThemeImportPreview,
   WarpThemeImportSource
@@ -1156,12 +1162,16 @@ export type PreloadApi = {
     >
     remove: (args: {
       worktreeId: string
+      hostId?: ExecutionHostId
       force?: boolean
       skipArchive?: boolean
     }) => Promise<RemoveWorktreeResult>
     // Forget a workspace from Orca only — no remote Git/filesystem work. Used
     // for workspaces pinned to a removed/disconnected SSH host.
-    forgetLocal: (args: { worktreeId: string }) => Promise<RemoveWorktreeResult>
+    forgetLocal: (args: {
+      worktreeId: string
+      hostId?: ExecutionHostId
+    }) => Promise<RemoveWorktreeResult>
     forceDeletePreservedBranch: (args: {
       worktreeId: string
       branchName: string
@@ -1227,11 +1237,11 @@ export type PreloadApi = {
       // single-source-of-truth collapse (see docs/preload-typecheck-hole.md §1).
       shellOverride?: string
       projectRuntime?: ProjectExecutionRuntimeResolution
+      terminalColorQueryReplies?: { foreground?: string; background?: string }
       // Why: hidden-at-spawn declaration — main marks the PTY hidden before
       // its first byte so the delivery gate + model responder own spawn-time
       // queries (terminal-query-authority.md §races).
       initiallyHidden?: boolean
-      terminalColorQueryReplies?: { foreground?: string; background?: string }
       // Why: closes the SIGKILL race documented in INVESTIGATION.md — main
       // sync-flushes the (worktreeId, tabId, leafId → ptyId) binding before
       // pty:spawn returns. Only the renderer's daemon-host path threads these.
@@ -1263,8 +1273,25 @@ export type PreloadApi = {
     clearBuffer: (id: string) => void
     kill: (id: string, opts?: { keepHistory?: boolean }) => Promise<void>
     ackColdRestore: (id: string) => void
-    ackData: (id: string, charCount: number) => void
+    ackData: (id: string, charCount: number, processedChars?: number) => void
+    onDeliveryResyncRequest: (callback: (payload: { requestId: number }) => void) => () => void
+    respondDeliveryResync: (payload: {
+      requestId: number
+      processedCharsByPty: Record<string, number>
+    }) => void
+    /** Renderer-initiated delivery health/heal lane over invoke — reaches main
+     *  even when every main→renderer push channel is dead (field wedge). */
+    reportRendererDeliveryState: (
+      report: PtyRendererDeliveryStateReport
+    ) => Promise<PtyRendererDeliveryHealthReply>
+    /** Live pty:data listener count on the preload emitter (sync) — heal-time
+     *  discriminator between a detached listener and a dead channel. */
+    getPtyDataListenerCount: () => number
+    /** One-shot signal that this page's pty:data dispatcher is registered, so
+     *  main can release sends held during the load/reload boot window. */
+    rendererDispatcherReady: () => void
     setActiveRendererPty: (id: string, active: boolean) => void
+    setRendererPtyVisible: (id: string, visible: boolean) => void
     /** Hidden-delivery gate (Phase 4): hidden=true lets main drop renderer
      *  byte delivery after model ingestion; reveal restores from snapshots. */
     setHiddenRendererPty: (id: string, hidden: boolean) => void
@@ -1274,7 +1301,6 @@ export type PreloadApi = {
     /** View-attribute bridge (Phase 5 slice 2): app-global composed terminal
      *  appearance push backing main's hidden-PTY OSC/DSR color replies. */
     publishTerminalViewAttributes: (attributes: TerminalViewAttributes) => void
-    setRendererPtyVisible: (id: string, visible: boolean) => void
     hasChildProcesses: (id: string) => Promise<boolean>
     getForegroundProcess: (id: string) => Promise<string | null>
     getCwd: (id: string) => Promise<string>
@@ -1296,6 +1322,10 @@ export type PreloadApi = {
       pendingDeliveryStartSeq?: number
       source?: 'headless' | 'renderer'
       alternateScreen?: boolean
+      /** Authoritative normal buffer paired with an alternate-screen frame. */
+      scrollbackAnsi?: string
+      /** Trailing incomplete escape the emulator ingested; the restorer must
+       *  write it after its post-replay resets, last before live chunks. */
       pendingEscapeTailAnsi?: string
     } | null>
     getRendererDeliveryDebugSnapshot: () => Promise<{
@@ -1313,10 +1343,17 @@ export type PreloadApi = {
       peakMaxRendererInFlightCharsByPty: number
       ackGatedFlushSkipCount: number
       hiddenDeliveryGatedPtyCount: number
+      hiddenDeliveryGatedVisiblePtyCount: number
+      hiddenDeliveryGatedActivePtyCount: number
       deliveryInterestPtyCount: number
       hiddenDeliveryDroppedChars: number
       hiddenDeliveryDroppedChunks: number
       pendingDroppedChars: number
+      diagnostics: PtyMainDeliveryDiagnostics
+      rendererLifecycleResetCount: number
+      lastLifecycleResetClearedChars: number
+      rendererPtyDispatcherReady: boolean
+      rendererDispatcherReadyForcedCount: number
     }>
     resetRendererDeliveryDebug: () => Promise<void>
     onData: (
@@ -1326,7 +1363,7 @@ export type PreloadApi = {
         seq?: number
         rawLength?: number
         background?: boolean
-        droppedBacklog?: boolean
+        droppedOutput?: boolean
       }) => void
     ) => () => void
     onReplay: (callback: (data: { id: string; data: string }) => void) => () => void
@@ -2015,6 +2052,10 @@ export type PreloadApi = {
       siteId?: string
     }) => Promise<JiraUser[]>
     listTransitions: (args: { key: string; siteId?: string }) => Promise<JiraTransition[]>
+    getProjectStatusOrder: (args: {
+      projectKey: string
+      siteId?: string
+    }) => Promise<JiraProjectStatusOrder>
   }
   starNag: {
     onShow: (
@@ -2220,7 +2261,7 @@ export type PreloadApi = {
   browser: BrowserApi
   emulator: EmulatorApi
   hooks: {
-    check: (args: { repoId: string }) => Promise<{
+    check: (args: { repoId: string; hostId?: ExecutionHostId }) => Promise<{
       status?: 'ok' | 'error'
       hasHooks: boolean
       hooks: OrcaHooks | null

@@ -42,7 +42,6 @@ export const STRONG_WORKING_KEYWORDS_RE = new RegExp(
 
 export const STRONG_WORKING_KEYWORDS_RE_GLOBAL = new RegExp(STRONG_WORKING_KEYWORDS_RE.source, 'gi')
 
-export const PI_IDLE_PREFIX = '\u03c0 - ' // π -
 export const CURSOR_NATIVE_TITLE_LOWER = 'cursor agent'
 
 // eslint-disable-next-line no-control-regex -- intentional unicode range
@@ -68,18 +67,6 @@ export function isGeminiTerminalTitle(title: string): boolean {
 
 export function isPiTerminalTitle(title: string): boolean {
   return isLegacyPiCompatibleTitle(title) && !containsBrailleSpinner(title)
-}
-
-// Why: Grok Build's working OSC titles use a fixed frame shape. Requiring
-// both delimiters avoids claiming another agent's spinner task ending in Grok.
-const GROK_ROTATING_FRAME_RE = /^[\u2800-\u28ff]+\s+-\s+[\s\S]+?\s-\s+grok\s*$/i
-const GROK_COLLAPSED_WORKING_TITLE_RE = /^[\u2800-\u28ff]+\s+grok\s*$/i
-
-export function isGrokRotatingWorkingTitle(title: string): boolean {
-  if (!containsBrailleSpinner(title)) {
-    return false
-  }
-  return GROK_ROTATING_FRAME_RE.test(title) || GROK_COLLAPSED_WORKING_TITLE_RE.test(title)
 }
 
 export function isPiAgentTitle(title: string): boolean {

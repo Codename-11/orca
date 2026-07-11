@@ -965,13 +965,6 @@ export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTra
       return ptyId
     },
 
-    resetCrossChunkParserState() {
-      // Why: only the OSC-9999 carry spans the dropped-byte gap a
-      // model-restore marker reports; title/bell trackers re-sync from the
-      // snapshot's side-effect replay and must not be reset here.
-      outputProcessor.resetAgentStatusCarry()
-    },
-
     getConnectionId() {
       return connectionId ?? null
     },
@@ -986,6 +979,13 @@ export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTra
         ...(cwd ? { cwd } : {}),
         ...(shellOverride ? { shellOverride } : {})
       }
+    },
+
+    resetCrossChunkParserState() {
+      // Why: only the OSC-9999 carry spans the dropped-byte gap a
+      // model-restore marker reports; title/bell trackers re-sync from the
+      // snapshot's side-effect replay and must not be reset here.
+      outputProcessor.resetAgentStatusCarry()
     },
 
     destroy() {

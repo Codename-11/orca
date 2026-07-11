@@ -11,10 +11,10 @@ import {
 } from '../activity/activity-terminal-portal'
 import TerminalPane from './TerminalPane'
 import { closeTerminalTab } from '../terminal/terminal-tab-actions'
-import { shouldDeferParkedPtyExitTabClose } from './terminal-parked-tab-watchers'
-import { useTerminalTabColdParking } from './use-terminal-tab-cold-parking'
 import { shouldMountBackgroundWorktreeTab } from '../terminal/background-terminal-worktree-mount'
 import { useNativeChatToggleShortcut } from '../native-chat/use-native-chat-toggle-shortcut'
+import { shouldDeferParkedPtyExitTabClose } from './terminal-parked-tab-watchers'
+import { useTerminalTabColdParking } from './use-terminal-tab-cold-parking'
 
 type TerminalOverlayAssignment = {
   unifiedTabId: string
@@ -391,8 +391,8 @@ const TerminalPaneOverlayLayer = memo(function TerminalPaneOverlayLayer({
             worktreeId,
             tabId: terminalTab.id
           })
-          // Why: parking is exactly the unmount path tab-group moves use — the
-          // watcher owns byte side effects until the pane remounts on reveal.
+          // Why: parking unmounts only the view; the parked watcher owns exit
+          // and side-effect handling until this tab is eligible to remount.
           if (parkedTerminalTabIds.has(terminalTab.id)) {
             return null
           }

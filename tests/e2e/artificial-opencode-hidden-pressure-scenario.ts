@@ -85,6 +85,9 @@ type HiddenPressureAckGate = {
 
 // Why: restore still has to finish promptly, but parallel Electron workers on
 // Linux CI can overshoot the 1s product target without a responsiveness regression.
+// Main relaxed this to 4s for drain-plus-poll overhead on loaded OSS runners;
+// this branch KEEPS the strict budget — the background keep-tail global budget
+// bounds the aggregate a reveal drains, so a slow restore here is a regression.
 const MAX_HIDDEN_RESTORE_LATENCY_MS = 1_500
 // Why: Phase-4 hidden-delivery gate contract — hidden PTY bytes are dropped in
 // main after model ingestion, so renderer-delivery pressure must stay FAR

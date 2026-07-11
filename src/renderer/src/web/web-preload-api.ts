@@ -51,6 +51,7 @@ import {
   DEFAULT_LOCAL_ORCA_PROFILE_ID
 } from '../../../shared/orca-profiles'
 import { legacyBaseRefSearchResult } from '../../../shared/base-ref-search-result'
+import { EMPTY_PTY_MAIN_DELIVERY_DIAGNOSTICS } from '../../../shared/pty-delivery-diagnostics'
 import { createE2EConfig } from '../../../shared/e2e-config'
 import { relativePathInsideRoot } from '../../../shared/cross-platform-path'
 import {
@@ -1404,11 +1405,12 @@ function createWorktreesApi(): NonNullable<Partial<PreloadApi>['worktrees']> {
         targetBranch,
         isCrossRepository
       }),
-    remove: async ({ worktreeId, force }) => {
+    remove: async ({ worktreeId, force, skipArchive }) => {
       invalidateRuntimeWorktreeCaches()
       return callRuntimeResult<RemoveWorktreeResult>('worktree.rm', {
         worktree: toRuntimeWorktreeSelector(worktreeId),
-        force
+        force,
+        runHooks: skipArchive !== true
       })
     },
     // Why: forget-locally clears a workspace pinned to a disconnected/removed
@@ -2590,6 +2592,7 @@ function createRateLimitsApi(): NonNullable<Partial<PreloadApi>['rateLimits']> {
     gemini: null,
     opencodeGo: null,
     kimi: null,
+    antigravity: null,
     minimax: null,
     grok: null,
     minimaxCookieConfigured: false,
@@ -2715,13 +2718,21 @@ function createPtyApi(): NonNullable<Partial<PreloadApi>['pty']> {
     kill: () => Promise.resolve(),
     ackColdRestore: () => {},
     ackData: () => {},
+    onDeliveryResyncRequest: () => noopUnsubscribe,
+    respondDeliveryResync: () => {},
+    // Why healthy stub: web terminals ride the remote-runtime transport, not
+    // main's delivery gate — a zero-in-flight reply keeps the watchdog idle.
+    reportRendererDeliveryState: () =>
+      Promise.resolve({ inFlightTotalChars: 0, inFlightPtyCount: 0, msSinceLastAck: null }),
+    getPtyDataListenerCount: () => 0,
+    rendererDispatcherReady: () => {},
     setActiveRendererPty: () => {},
+    setRendererPtyVisible: () => {},
     setHiddenRendererPty: () => {},
     setPtyDeliveryInterest: () => {},
     // Why no-op: remote-runtime PTYs are never hidden-gate markable, so the
     // web client has no main-side responder to feed.
     publishTerminalViewAttributes: () => {},
-    setRendererPtyVisible: () => {},
     hasChildProcesses: () => Promise.resolve(false),
     getForegroundProcess: () => Promise.resolve(null),
     getCwd: () => Promise.resolve('~'),
@@ -2749,10 +2760,17 @@ function createPtyApi(): NonNullable<Partial<PreloadApi>['pty']> {
         peakMaxRendererInFlightCharsByPty: 0,
         ackGatedFlushSkipCount: 0,
         hiddenDeliveryGatedPtyCount: 0,
+        hiddenDeliveryGatedVisiblePtyCount: 0,
+        hiddenDeliveryGatedActivePtyCount: 0,
         deliveryInterestPtyCount: 0,
         hiddenDeliveryDroppedChars: 0,
         hiddenDeliveryDroppedChunks: 0,
-        pendingDroppedChars: 0
+        pendingDroppedChars: 0,
+        diagnostics: EMPTY_PTY_MAIN_DELIVERY_DIAGNOSTICS,
+        rendererLifecycleResetCount: 0,
+        lastLifecycleResetClearedChars: 0,
+        rendererPtyDispatcherReady: false,
+        rendererDispatcherReadyForcedCount: 0
       }),
     resetRendererDeliveryDebug: () => Promise.resolve(),
     onData: () => noopUnsubscribe,

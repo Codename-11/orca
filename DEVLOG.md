@@ -6,6 +6,33 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-07-11 — Remediated upstream v1.4.135 release sync
+
+Resolved the Axiom upstream sync remediation branch for `v1.4.135` / `axiom-v1.4.135-axiom.1` through PR #98's bot branch, without pushing directly to `axiom/deploy`. Preserved fork semver (`1.4.135-axiom.1`), Axiom desktop/mobile identity and updater feed, side-by-side installer behavior, profile portability, Forge provider/task surfaces, hidden-renderer PTY delivery/query authority, cold parking, split dispatcher/sidecar routing, byte-ordered terminal side effects, the agent-detection compatibility barrel, and Windows ConPTY compatibility while accepting upstream terminal performance/reliability, producer flow control, snapshot fidelity, mobile agent history, browser/git/worktree, Jira, and release workflow changes.
+
+Conflict notes:
+
+- Kept Axiom's no-scheduled-upstream-release-cut policy while accepting upstream's `version_suffix` workflow input and suffixed RC identity handling.
+- Reconstructed the merged runtime import surface and removed conflict-created duplicate PTY/preload/runtime declarations while retaining both Axiom-only and upstream behavior.
+- Restored upstream terminal subscribe overflow recovery while preserving Axiom sequence handling and extracted eager-buffer/sidecar architecture.
+- Kept Axiom mobile identity while accepting upstream mobile version `0.0.26`, and retained fork version `1.4.135-axiom.1` while accepting upstream scripts and xterm patches.
+- Pruned the no-longer-needed `src/main/runtime/orca-runtime.ts` max-lines baseline entry; no new max-lines bypass or threshold was added.
+- Reviewed the sole staged deletion, `mobile/mock-source-control-hub.html`, against `config/axiom-merge-remediation-policy.json`; it is not protected. No protected Axiom files were removed.
+
+Verification:
+
+- `CI=true pnpm install --frozen-lockfile` → passed; Node engine warning only (`wanted node 24`, local `v25.6.0`).
+- `pnpm run typecheck` → passed.
+- Required fork-invariant Vitest command → 5 files / 50 tests passed.
+- Required remediation `oxlint` → 0 warnings / 0 errors.
+- Required remediation `oxfmt --check` → passed.
+- Focused daemon/runtime/PTY/terminal suite → 10 files / 1,541 tests passed.
+- `pnpm run check:max-lines-ratchet` → passed with 356 grandfathered suppressions and no new bypasses.
+- Conflict-marker scan → no markers; unmerged and unstaged path counts both zero.
+- `git diff --check` → passed.
+
+---
+
 ## 2026-07-10 — Remediated upstream v1.4.134 release sync
 
 Resolved the Axiom upstream sync remediation branch for `v1.4.134` / `axiom-v1.4.134-axiom.1` through the bot PR lane. Preserved the fork version (`1.4.134-axiom.1`), Axiom release/updater identity, side-by-side installer contract, profile portability, Forge provider surfaces, terminal view-attribute publication, and Windows ConPTY keyboard compatibility while accepting upstream's invalid terminal line-height normalization and the remaining v1.4.133-v1.4.134 changes.

@@ -62,7 +62,6 @@ export function buildWindowsPtyCompatibilityOptions(
   }
 }
 
-
 /** Mirror of main's effectiveShellOverride fold (pty.ts spawn handlers): a
  *  tab-level shell override wins, else the global Windows shell setting
  *  applies — so renderer and main classify a global-WSL default identically

@@ -1,4 +1,3 @@
-/* eslint-disable max-lines -- Why: OrcaRuntimeService still owns the mutable live graph, PTY handles, waiters, mobile floor/layout state, and managed-worktree reconciliation. Stateless browser and file command adapters live beside it; the remaining split points need state-owner extraction before enforcing max-lines. */
 /* eslint-disable unicorn/no-useless-spread -- Why: waiter sets and handle keys are cloned intentionally before mutation so resolution and rejection can safely remove entries while iterating. */
 /* eslint-disable no-control-regex -- Why: terminal normalization must strip ANSI and OSC control sequences from PTY output before returning bounded text to agents. */
 import {
@@ -139,6 +138,7 @@ import type {
   WorkspaceSessionState,
   DirEntry
 } from '../../shared/types'
+import { assertWorktreeUnlockedForRemoval } from '../../shared/worktree-removal'
 import {
   getRepoExecutionHostId,
   parseExecutionHostId,
@@ -258,6 +258,11 @@ import {
   RUNTIME_PROTOCOL_VERSION,
   type RuntimeCapability
 } from '../../shared/protocol-version'
+import {
+  configureAiVaultSessionSources,
+  listAiVaultSessions
+} from '../ai-vault/cached-session-list'
+import type { AiVaultListArgs, AiVaultListResult } from '../../shared/ai-vault-types'
 import type {
   WorkspacePortKillRequest,
   WorkspacePortKillResult,
@@ -464,8 +469,8 @@ import {
   toLocalWorktreeRuntimePath
 } from '../local-worktree-filesystem'
 import {
-  pruneStaleLocalWorktreeRegistrationAfterFilesystemRemoval,
-  recoverLocalWindowsLongPathWorktreeRemoval
+  removeStaleLocalWorktreeRegistrationAfterFilesystemRemoval,
+  recoverLocalWindowsWorktreeRemoval
 } from '../local-worktree-removal-recovery'
 import {
   connect as connectLinear,
@@ -545,6 +550,7 @@ import {
   createIssue as createJiraIssue,
   getIssue as getJiraIssue,
   getIssueComments as getJiraIssueComments,
+  getProjectStatusOrder as getJiraProjectStatusOrder,
   listAssignableUsers as listJiraAssignableUsers,
   listCreateFields as listJiraCreateFields,
   listIssueTypes as listJiraIssueTypes,
@@ -612,6 +618,7 @@ import {
 import { hasCommitObjectViaGitExec } from '../git/commit-object-ref'
 import { hasWorktreeBaseCommitRef } from '../git/worktree-base-ref-probe'
 import { resolveLocalGitUsername } from '../git/git-username'
+import { getSshGitCapabilityCache } from '../git/git-capability-state'
 import {
   listWorktrees,
   listWorktreesStrict,
@@ -693,7 +700,7 @@ import { prefetchWorktreeCreateBase } from '../worktree-create-base-prefetch'
 import { invalidateAuthorizedRootsCache } from '../ipc/filesystem-auth'
 import { prepareLocalWorktreeRootForRepo } from '../worktree-root-preparation'
 import { closeLocalWatcherForWorktreePath } from '../ipc/filesystem-watcher'
-import { HeadlessEmulator, type HeadlessEmulatorOptions } from '../daemon/headless-emulator'
+import { HeadlessEmulator } from '../daemon/headless-emulator'
 import {
   isNativeWindowsConptyPty,
   registerConptyDa1OverrideInstaller,
@@ -705,7 +712,16 @@ import {
 } from './terminal-view-attribute-store'
 import { killAllProcessesForWorktree } from './worktree-teardown'
 import { MOBILE_SUBSCRIBE_SCROLLBACK_ROWS } from './scrollback-limits'
-import type { IFilesystemProvider, IPtyProvider, PtyProcessInfo } from '../providers/types'
+import {
+  createMobileSessionTabsNotifyCoalescer,
+  type MobileSessionTabsNotifyCoalescer
+} from './mobile-session-tabs-notify-coalescer'
+import type {
+  IFilesystemProvider,
+  IPtyProvider,
+  PtyProcessInfo,
+  PtyTransientFact
+} from '../providers/types'
 import { getSshFilesystemProvider } from '../providers/ssh-filesystem-dispatch'
 import {
   assertFolderWorkspacePathUsable,
@@ -1229,6 +1245,9 @@ function getAgentLaunchPlatformForRepo(
   return isWindowsAbsolutePathLike(repo.path) ? 'win32' : 'linux'
 }
 
+// Why: long enough for a phone to reconnect and retry a create whose response
+// was lost, short enough that an intentional later re-resume forks fresh.
+const MOBILE_TERMINAL_CREATE_RESULT_TTL_MS = 60_000
 const FOREGROUND_AGENT_WRAPPER_RETRY_INTERVAL_MS = 150
 const FOREGROUND_AGENT_WRAPPER_RETRY_TIMEOUT_MS = 6_500
 const BRACKETED_PASTE_BEGIN = '\x1b[200~'
@@ -2111,6 +2130,13 @@ export class OrcaRuntimeService {
     { activate: boolean; selectIfNoActiveTab: boolean }
   >()
   private mobileSessionTabListeners = new Set<(snapshot: RuntimeMobileSessionTabsResult) => void>()
+  // Why: coalesces title/status-driven session.tabs emits so spinner churn
+  // doesn't fan out (and per-client JSON.stringify) a snapshot several times a
+  // second. Emit reads the latest snapshot, so only the freshest version ships.
+  private readonly mobileSessionTabsNotifyCoalescer: MobileSessionTabsNotifyCoalescer =
+    createMobileSessionTabsNotifyCoalescer((worktreeId) =>
+      this.notifyMobileSessionTabsChangedNow(worktreeId)
+    )
   private leaves = new Map<string, RuntimeLeafRecord>()
   // Why: PTY output is a per-keystroke hot path. Looking up affected leaves by
   // ptyId keeps active TUI redraws independent of the total open terminal count.
@@ -2183,6 +2209,23 @@ export class OrcaRuntimeService {
   // Why: OSC 9999 status can span PTY chunks. Keeping parser state in the
   // runtime lets hidden/model-owned terminals observe agent state without a
   // mounted xterm view.
+  // Why a throttle: the blocked-reason check builds and scans two full wait
+  // texts (<=256KB each, lowercased) — measured at ~85% of onPtyData's cost
+  // under a TUI flood (findings log 2026-07-03). PTY chunk boundaries are
+  // arbitrary, so running the identical computation over coalesced chunks at
+  // a bounded cadence (plus a trailing-edge timer so burst-final state is
+  // always evaluated) preserves semantics while removing it from the hot path.
+  private waitBlockedCheckStateByPtyId = new Map<
+    string,
+    {
+      lastAt: number
+      lastWaitState: TerminalTailWaitState | null
+      appended: string
+      keywordCarry: string
+      timer: ReturnType<typeof setTimeout> | null
+    }
+  >()
+
   private agentStatusOscProcessorsByPtyId = new Map<
     string,
     ReturnType<typeof createAgentStatusOscProcessor>
@@ -2450,6 +2493,11 @@ export class OrcaRuntimeService {
       // terminal output. worktree.ps reads this at query time so mobile shows the
       // same inline agent rows the desktop sidebar does — same source, 1:1.
       getAgentStatusSnapshot?: () => AgentStatusIpcPayload[]
+      // Why: codex-home paths for the Agent Session History scan must be sourced
+      // here, not via the window-only registerCoreHandlers path — that path never
+      // runs under `orca serve`, so remote/SSH hosts would silently drop
+      // managed-Codex sessions. The runtime ctor runs in BOTH window and serve.
+      getAdditionalAiVaultCodexHomePaths?: () => readonly string[]
       buildAgentHookPtyEnv?: () => Record<string, string>
     }
   ) {
@@ -2459,6 +2507,14 @@ export class OrcaRuntimeService {
       this.agentDetector = new AgentDetector(stats)
     }
     this.getAgentStatusSnapshotFn = deps?.getAgentStatusSnapshot ?? null
+    // Why: configure the shared AiVault scan cache from a serve-mode-reachable
+    // seam so the aiVault.listSessions RPC includes managed-Codex + WSL sessions
+    // even on headless `orca serve` hosts where registerCoreHandlers never runs.
+    if (deps?.getAdditionalAiVaultCodexHomePaths) {
+      configureAiVaultSessionSources({
+        getAdditionalCodexHomePaths: deps.getAdditionalAiVaultCodexHomePaths
+      })
+    }
     // Why: the daemon adapter is installed via `setLocalPtyProvider()` during
     // attachMainWindowServices, AFTER this service is constructed. Capturing
     // `getLocalPtyProvider()` at construction time would freeze a reference to
@@ -2566,23 +2622,25 @@ export class OrcaRuntimeService {
   }
 
   updateClientSettings(
-    updates: Pick<
-      Partial<GlobalSettings>,
-      | 'agentStatusHooksEnabled'
-      | 'defaultTuiAgent'
-      | 'disabledTuiAgents'
-      | 'agentDefaultArgs'
-      | 'agentDefaultEnv'
-      | 'defaultTaskSource'
-      | 'defaultTaskViewPreset'
-      | 'visibleTaskProviders'
-      | 'defaultRepoSelection'
-      | 'defaultLinearTeamSelection'
-      | 'githubProjects'
-      | 'experimentalNewWorktreeCardStyle'
-      | 'compactWorktreeCards'
-      | 'minimaxGroupId'
-      | 'minimaxUsageModels'
+    updates: Partial<
+      Pick<
+        GlobalSettings,
+        | 'agentStatusHooksEnabled'
+        | 'defaultTuiAgent'
+        | 'disabledTuiAgents'
+        | 'agentDefaultArgs'
+        | 'agentDefaultEnv'
+        | 'defaultTaskSource'
+        | 'defaultTaskViewPreset'
+        | 'visibleTaskProviders'
+        | 'defaultRepoSelection'
+        | 'defaultLinearTeamSelection'
+        | 'githubProjects'
+        | 'experimentalNewWorktreeCardStyle'
+        | 'compactWorktreeCards'
+        | 'minimaxGroupId'
+        | 'minimaxUsageModels'
+      >
     >
   ): Pick<
     GlobalSettings,
@@ -2863,9 +2921,17 @@ export class OrcaRuntimeService {
       // must not treat browser panes as supported just because runtime RPC is up.
       capabilities,
       hostPlatform: process.platform,
+      terminalWindowsShell: this.store?.getSettings?.().terminalWindowsShell ?? null,
       protocolVersion: RUNTIME_PROTOCOL_VERSION,
       minCompatibleMobileVersion: MIN_COMPATIBLE_RUNTIME_CLIENT_VERSION
     }
+  }
+
+  // Why: scans the transcript-owning host's disk (correct by construction over
+  // RPC — a remote/SSH host scans its own disk). Delegates to the one shared
+  // cache so the desktop panel and the mobile screen never double-scan.
+  listAiVaultSessions(args?: AiVaultListArgs): Promise<AiVaultListResult> {
+    return listAiVaultSessions(args)
   }
 
   setPtyController(controller: RuntimePtyController | null): void {
@@ -3028,26 +3094,47 @@ export class OrcaRuntimeService {
       }
     }
 
+    // Why: computed BEFORE preserving stale leaves so preservation can refuse a
+    // leaf whose PTY the incoming graph already rebound to a live leaf. Two
+    // leaves on one PTY resolve to the same handle (handles are ptyId-keyed) and
+    // crash paired clients with a duplicate React key.
+    const nextPtyIds = new Set(
+      [...nextLeaves.values()].map((leaf) => leaf.ptyId).filter((ptyId): ptyId is string => !!ptyId)
+    )
     for (const oldLeafKey of this.leaves.keys()) {
       if (!nextLeaves.has(oldLeafKey)) {
         const oldLeaf = this.leaves.get(oldLeafKey)
         if (
           preserveLivePtysDuringReload &&
           oldLeaf?.ptyId &&
-          this.handleByPtyId.has(oldLeaf.ptyId)
+          this.handleByPtyId.has(oldLeaf.ptyId) &&
+          !nextPtyIds.has(oldLeaf.ptyId)
         ) {
           // Why: a CLI-created agent keeps using its exported handle even if
           // the reloaded renderer has not rebound the pane yet.
           nextLeaves.set(oldLeafKey, oldLeaf)
+          nextPtyIds.add(oldLeaf.ptyId)
+        } else if (oldLeaf?.ptyId && nextPtyIds.has(oldLeaf.ptyId)) {
+          // Why: the incoming graph already rebound this PTY to a live leaf (e.g.
+          // a woken agent re-keyed to a new leaf during renderer reload). Keeping
+          // the old leaf too would put two leaves on ONE PTY, which emit the same
+          // terminal handle and crash paired clients. Drop the stale leaf; if its
+          // handle is the shared ptyId-keyed one it belongs to the live leaf now,
+          // so release only this dead leaf key's alias. A leaf-unique handle has
+          // no next owner — invalidate it so in-flight CLI waiters fail fast
+          // instead of hanging on a dead leaf.
+          const oldHandle = this.handleByLeafKey.get(oldLeafKey)
+          if (oldHandle !== undefined && oldHandle === this.handleByPtyId.get(oldLeaf.ptyId)) {
+            this.handleByLeafKey.delete(oldLeafKey)
+          } else {
+            this.invalidateLeafHandle(oldLeafKey)
+          }
         } else {
           this.invalidateLeafHandle(oldLeafKey)
         }
       }
     }
 
-    const nextPtyIds = new Set(
-      [...nextLeaves.values()].map((leaf) => leaf.ptyId).filter((ptyId): ptyId is string => !!ptyId)
-    )
     for (const [ptyId, leaf] of this.detachedPreAllocatedLeaves) {
       if (nextPtyIds.has(ptyId) || !this.handleByPtyId.has(ptyId)) {
         this.detachedPreAllocatedLeaves.delete(ptyId)
@@ -3617,7 +3704,10 @@ export class OrcaRuntimeService {
     this.notifyMobileSessionTabsChanged(worktreeId)
   }
 
-  private touchMobileSessionSnapshotsForPty(ptyId: string): void {
+  private touchMobileSessionSnapshotsForPty(
+    ptyId: string,
+    options: { immediate?: boolean } = {}
+  ): void {
     for (const [worktreeId, snapshot] of this.mobileSessionTabsByWorktree) {
       const hasPtyBackedTab = snapshot.tabs.some(
         (tab) =>
@@ -3631,7 +3721,15 @@ export class OrcaRuntimeService {
         ...snapshot,
         snapshotVersion: snapshot.snapshotVersion + 1
       })
-      this.notifyMobileSessionTabsChanged(worktreeId)
+      if (options.immediate) {
+        // Why: readiness/lifecycle changes are structural and must not wait
+        // behind the title/status coalescing window.
+        this.notifyMobileSessionTabsChanged(worktreeId)
+      } else {
+        // Why: title/status flips several times a second under spinner-in-title
+        // agents. Coalesce the emit instead of fanning out every version.
+        this.mobileSessionTabsNotifyCoalescer.schedule(worktreeId)
+      }
     }
   }
 
@@ -5293,6 +5391,9 @@ export class OrcaRuntimeService {
   ): () => void {
     this.mobileSessionTabListeners.add(listener)
     return () => {
+      // Why: flush pending coalesced notifies before dropping this listener so a
+      // subscriber closing mid-window still receives the latest settled state.
+      this.mobileSessionTabsNotifyCoalescer.flushAll()
       this.mobileSessionTabListeners.delete(listener)
     }
   }
@@ -5413,8 +5514,8 @@ export class OrcaRuntimeService {
    * Handles incoming data from a PTY process, running agent detection,
    * updating terminal tail buffers, and triggering foreground agent refreshes.
    */
-  onPtyData(ptyId: string, data: string, at: number): number {
-    const outputSequence = (this.ptyOutputSequenceById.get(ptyId) ?? 0) + data.length
+  onPtyData(ptyId: string, data: string, at: number, sequenceChars = data.length): number {
+    const outputSequence = (this.ptyOutputSequenceById.get(ptyId) ?? 0) + sequenceChars
     this.ptyOutputSequenceById.set(ptyId, outputSequence)
     const osc7Metadata = this.recordOsc7MetadataForPty(ptyId, data)
     const cwd = osc7Metadata.cwd
@@ -5443,6 +5544,11 @@ export class OrcaRuntimeService {
     // that the later seed-resolve would overwrite, dropping the live byte.
     // See docs/mobile-prefer-renderer-scrollback.md.
     this.maybeHydrateHeadlessFromRenderer(ptyId)
+    // Our structure wins: OSC title/agent-status extraction runs through the
+    // shared per-PTY title tracker below (getOrCreatePtyTitleTrackerEntry →
+    // applyTrackedPtyTitle) in byte order, superseding main's inline
+    // extractLastOscTitleForPty block (#7880/#7852 title/status semantics are
+    // preserved via the tracker + detectAgentStatusFromTitle path).
     this.trackHeadlessTerminalData(ptyId, data, outputSequence, forwardQueryReplies)
 
     const pty = this.getOrCreatePtyWorktreeRecord(ptyId)
@@ -5463,28 +5569,12 @@ export class OrcaRuntimeService {
       pty.lastOutputAt = at
       const normalized = normalizeTerminalChunk(data, pty.tailPendingAnsi)
       pty.tailPendingAnsi = normalized.pendingAnsi
-      // Why: the prior chunk's post-append tail is this chunk's pre-append tail,
-      // so its cached wait scan is exact — reuse it instead of rebuilding and
-      // rescanning the full tail. Only a tail-derived state is safe to reuse.
-      const previousWaitState =
-        pty.tailWaitState?.fromTail === true
-          ? pty.tailWaitState
-          : computeTerminalTailWaitState(pty.tailBuffer, pty.tailPartialLine, pty.preview)
       const nextTail = appendNormalizedToTailBuffer(
         pty.tailBuffer,
         pty.tailPartialLine,
         normalized.text,
         pty.tailRedrawCursor
       )
-      const nextWaitState = computeTerminalTailWaitState(
-        nextTail.lines,
-        nextTail.partialLine,
-        pty.preview
-      )
-      if (tailGainedNewerBlockedReason(previousWaitState, nextWaitState, normalized.text)) {
-        pty.waitBlockedAt = at
-      }
-      pty.tailWaitState = nextWaitState
       ptyTailAfter = nextTail
       pty.tailBuffer = nextTail.lines
       pty.tailPartialLine = nextTail.partialLine
@@ -5492,6 +5582,7 @@ export class OrcaRuntimeService {
       pty.tailTruncated = pty.tailTruncated || nextTail.truncated
       pty.tailLinesTotal += nextTail.newCompleteLines
       pty.preview = buildPreview(pty.tailBuffer, pty.tailPartialLine)
+      this.scheduleWaitBlockedCheck(ptyId, normalized.text, at)
     }
 
     for (const leaf of this.getLeavesForPty(ptyId)) {
@@ -5529,7 +5620,10 @@ export class OrcaRuntimeService {
         leaf.tailLinesTotal = pty.tailLinesTotal
         leaf.preview = pty.preview
         leaf.waitBlockedAt = pty.waitBlockedAt
-        // Why: the leaf mirrors the PTY tail here, so share the cached wait scan.
+        // Why undefined on this branch: the PTY record's wait scan is throttled
+        // (scheduleWaitBlockedCheck), so pty.tailWaitState is never populated;
+        // copying it here intentionally invalidates the leaf cache and the
+        // mismatch branch below recomputes an exact state on its next chunk.
         leaf.tailWaitState = pty.tailWaitState
       } else {
         const normalized = normalizeTerminalChunk(data, leaf.tailPendingAnsi)
@@ -5625,6 +5719,80 @@ export class OrcaRuntimeService {
     return outputSequence
   }
 
+  private scheduleWaitBlockedCheck(ptyId: string, appendedText: string, at: number): void {
+    let state = this.waitBlockedCheckStateByPtyId.get(ptyId)
+    if (!state) {
+      state = { lastAt: 0, lastWaitState: null, appended: '', keywordCarry: '', timer: null }
+      this.waitBlockedCheckStateByPtyId.set(ptyId, state)
+    }
+    const appendedLower = appendedText.toLowerCase()
+    const keywordHit = WAIT_BLOCKED_KEYWORD_PATTERN.test(`${state.keywordCarry}${appendedLower}`)
+    state.keywordCarry = appendedLower.slice(-WAIT_BLOCKED_KEYWORD_CARRY_CHARS)
+    // Why the cap keeps the tail: the accumulated text only anchors boundary-
+    // spanning prompt detection; anything past the tail cap has scrolled out
+    // of the retained tail the check reads anyway.
+    state.appended =
+      state.appended.length + appendedText.length > MAX_TAIL_CHARS
+        ? `${state.appended}${appendedText}`.slice(-MAX_TAIL_CHARS)
+        : `${state.appended}${appendedText}`
+    const elapsed = at - state.lastAt
+    if (keywordHit || elapsed >= WAIT_BLOCKED_CHECK_MIN_INTERVAL_MS || elapsed < 0) {
+      this.runWaitBlockedCheck(ptyId, state, at)
+      return
+    }
+    if (!state.timer) {
+      // Why trailing edge: the final chunks of a burst must still be
+      // evaluated or a prompt arriving right after a flood would go
+      // unstamped until the next output.
+      state.timer = setTimeout(() => {
+        state.timer = null
+        this.runWaitBlockedCheck(ptyId, state, Date.now())
+      }, WAIT_BLOCKED_CHECK_MIN_INTERVAL_MS - elapsed)
+    }
+  }
+
+  private runWaitBlockedCheck(
+    ptyId: string,
+    state: {
+      lastAt: number
+      lastWaitState: TerminalTailWaitState | null
+      appended: string
+      keywordCarry: string
+      timer: ReturnType<typeof setTimeout> | null
+    },
+    at: number
+  ): void {
+    const pty = this.ptysById.get(ptyId)
+    if (!pty) {
+      state.appended = ''
+      return
+    }
+    const nextWaitState = computeTerminalTailWaitState(
+      pty.tailBuffer,
+      pty.tailPartialLine,
+      pty.preview
+    )
+    const previousWaitState = state.lastWaitState ?? {
+      waitText: '',
+      signal: null,
+      fromTail: false
+    }
+    if (tailGainedNewerBlockedReason(previousWaitState, nextWaitState, state.appended)) {
+      pty.waitBlockedAt = at
+    }
+    state.lastAt = at
+    state.lastWaitState = nextWaitState
+    state.appended = ''
+  }
+
+  private clearWaitBlockedCheckState(ptyId: string): void {
+    const state = this.waitBlockedCheckStateByPtyId.get(ptyId)
+    if (state?.timer) {
+      clearTimeout(state.timer)
+    }
+    this.waitBlockedCheckStateByPtyId.delete(ptyId)
+  }
+
   private processAgentStatusOscForPty(ptyId: string, data: string): ProcessedAgentStatusChunk {
     let processor = this.agentStatusOscProcessorsByPtyId.get(ptyId)
     if (!processor) {
@@ -5672,6 +5840,71 @@ export class OrcaRuntimeService {
     if (entry.chunkTouchedSessionTabs) {
       this.touchMobileSessionSnapshotsForPty(ptyId)
     }
+  }
+
+  /** Scan-authority handoff for a backgrounded PTY (daemon keep-tail
+   *  thinning): while delegated, the daemon relays bell/133/pr-link/2031
+   *  facts itself and the delivered bytes may be gapped — feeding them to
+   *  main's transient scanners would mint phantom or duplicate facts. Title
+   *  processing stays main-side either way. */
+  setPtyTransientFactDelegation(ptyId: string, delegated: boolean, scanSeedAnsi?: string): void {
+    const entry = this.getOrCreatePtyTitleTrackerEntry(ptyId)
+    entry.tracker.setTransientFactScanningSuppressed(delegated)
+    if (!delegated && scanSeedAnsi) {
+      // Prime the freshly reset scanner carry with the emulator's dangling
+      // incomplete escape at the handoff position — a sequence split across
+      // the un-background toggle must not mint a phantom bell or lose its
+      // fact. titleScanData:'' keeps titles out (they were never suppressed).
+      entry.tracker.handleChunk(scanSeedAnsi, { titleScanData: '' })
+    }
+  }
+
+  /** A transient fact the daemon detected while it held scan authority —
+   *  emitted through the same fact channel as byte-scanned facts. Arrives
+   *  between chunks, so recordTerminalSideEffectFact emits it immediately. */
+  emitDaemonPtyTransientFact(ptyId: string, fact: PtyTransientFact): void {
+    switch (fact.kind) {
+      case 'bell':
+        this.recordTerminalSideEffectFact(ptyId, { kind: 'bell' })
+        return
+      case 'command-finished':
+        this.recordTerminalSideEffectFact(ptyId, {
+          kind: 'command-finished',
+          exitCode: fact.exitCode
+        })
+        return
+      case 'pr-link':
+        this.recordTerminalSideEffectFact(ptyId, { kind: 'pr-link', link: fact.link })
+        return
+      case '2031-subscribe':
+        this.recordTerminalSideEffectFact(ptyId, { kind: '2031-subscribe' })
+    }
+  }
+
+  /** The daemon keep-tail dropped this PTY's oldest undelivered output; the
+   *  next delivered chunk is discontinuous. Reset every cross-chunk parse
+   *  carry so a half-open escape from before the gap cannot corrupt what
+   *  follows, and drop the mobile headless mirror — it rebuilds from the
+   *  delivered tail / snapshot seeds instead of parsing a gapped stream. */
+  notePtyDataGap(ptyId: string, droppedChars = 0): void {
+    if (droppedChars > 0) {
+      // Why: the daemon snapshot's seq counts bytes its monitoring stream
+      // dropped. Advancing without parsing preserves that absolute domain so
+      // post-snapshot live chunks can be reconciled instead of duplicated.
+      const outputSequence = (this.ptyOutputSequenceById.get(ptyId) ?? 0) + droppedChars
+      this.ptyOutputSequenceById.set(ptyId, outputSequence)
+    }
+    const pty = this.getOrCreatePtyWorktreeRecord(ptyId)
+    if (pty) {
+      pty.tailPendingAnsi = ''
+    }
+    for (const leaf of this.getLeavesForPty(ptyId)) {
+      leaf.tailPendingAnsi = ''
+    }
+    this.oscTitleScanTailByPtyId.delete(ptyId)
+    this.osc7ScanTailByPtyId.delete(ptyId)
+    this.agentStatusOscProcessorsByPtyId.delete(ptyId)
+    this.disposeHeadlessTerminal(ptyId)
   }
 
   /** Record one derived side-effect fact: batched per chunk while applying
@@ -5767,8 +6000,9 @@ export class OrcaRuntimeService {
     }
   }
 
-  /** Last display-stable title from main's tracked PTY/leaf records. */
-  private getTrackedLastTitleForPty(ptyId: string): string | null {
+  /** Raw last title from main's tracked PTY/leaf records — the title surface
+   *  the tracker (live bytes + synthetic frames) keeps current. */
+  private getTrackedRawTitleForPty(ptyId: string): string | null {
     const recordTitle = this.ptysById.get(ptyId)?.lastOscTitle
     if (recordTitle) {
       return recordTitle
@@ -5786,7 +6020,7 @@ export class OrcaRuntimeService {
    *  snapshot titles must prefer main's tracker over snapshot lastTitle, or
    *  hook-driven spinner/idle titles vanish from mobile tabs. */
   private preferTrackedLastTitle<T extends { lastTitle?: string }>(ptyId: string, snapshot: T): T {
-    const tracked = this.getTrackedLastTitleForPty(ptyId)
+    const tracked = this.getTrackedRawTitleForPty(ptyId)
     if (!tracked) {
       return snapshot
     }
@@ -5920,13 +6154,13 @@ export class OrcaRuntimeService {
     return entry
   }
 
-  /** Apply one observed OSC title to the PTY and leaf records.
+  /** Apply one observed OSC title (raw form) to the PTY and leaf records.
    *  Returns true when the PTY record's title or status changed. */
-  private applyTrackedPtyTitle(
-    ptyId: string,
-    rawTitle: string,
-    normalizedTitle = normalizeTerminalTitle(rawTitle)
-  ): boolean {
+  private applyTrackedPtyTitle(ptyId: string, rawTitle: string, normalizedTitle: string): boolean {
+    // Why: status is detected from the RAW title (mirrors the renderer tracker),
+    // so working/idle transitions are unaffected by normalization; the records
+    // store the NORMALIZED title so rotating Grok/Pi/Gemini frames collapse to
+    // one stable stored label (#7880) instead of churning `ps`/mobile tabs.
     const agentStatus = detectAgentStatusFromTitle(rawTitle)
     let ptyRecordChanged = false
     const pty = this.ptysById.get(ptyId)
@@ -5934,8 +6168,6 @@ export class OrcaRuntimeService {
       const prevStatus = pty.lastAgentStatus
       const prevTitle = pty.lastOscTitle
       const observedAt = this.nextTitleObservationSequence()
-      // Why: store the stable display form so rotating Grok/Pi/Gemini frames
-      // do not republish identical mobile snapshots; facts retain rawTitle.
       pty.lastOscTitle = normalizedTitle
       pty.lastOscTitleAt = observedAt
       pty.lastAgentStatus = agentStatus
@@ -5948,17 +6180,21 @@ export class OrcaRuntimeService {
         ptyRecordChanged &&
         this.shouldDelayPtyBackedMobileSnapshotForForegroundAgent(pty, normalizedTitle)
       let foregroundRefresh: Promise<boolean> | undefined
-      // Why: gate on an actual status transition — braille spinner frames mutate
-      // titles every tick, so probing per-title-change would stream foreground
-      // queries during active work.
+      // Why: gate on an actual status transition — braille spinner frames
+      // mutate the title every tick, so probing per-title-change would stream
+      // a foreground query per frame during active work.
       if (prevStatus !== agentStatus) {
         foregroundRefresh = this.refreshPtyForegroundAgentFromController(ptyId, {
           afterTitleObservation: observedAt
         })
       } else if (shouldDelayMobileSnapshot) {
+        // Why: same-status compatible title changes can arrive before the
+        // foreground owner probe settles; publishing them would flicker.
         foregroundRefresh = this.getPendingForegroundAgentRefreshForTitle(ptyId, observedAt)
       }
       if (foregroundRefresh && shouldDelayMobileSnapshot) {
+        // Why: report "unchanged" so the per-chunk batch skips the mobile
+        // snapshot fan-out; the delayed publish fires when the probe settles.
         ptyRecordChanged = false
         this.delayPtyBackedMobileSnapshotForForegroundAgent(ptyId, observedAt, foregroundRefresh)
       }
@@ -6185,6 +6421,20 @@ export class OrcaRuntimeService {
     return addListenerToMap(this.dataListeners, ptyId, listener)
   }
 
+  /** Set by pty IPC: fires when a PTY gains/loses remote view subscribers so
+   *  the daemon background mark (keep-tail stream thinning) can resync — a
+   *  live mobile/web view consumes raw bytes and must never be thinned, even
+   *  while the desktop pane is hidden. */
+  onRemoteTerminalViewPresenceChanged: ((ptyId: string) => void) | null = null
+
+  private notifyRemoteTerminalViewPresenceChanged(ptyId: string): void {
+    try {
+      this.onRemoteTerminalViewPresenceChanged?.(ptyId)
+    } catch (err) {
+      console.error('[runtime] remote view presence listener threw', { ptyId, err })
+    }
+  }
+
   /** Registered by terminal-RPC subscribe/multiplex streams: while a remote
    *  view subscriber is attached its xterm answers queries with view
    *  authority and the model responder must stay silent. Returns an
@@ -6194,6 +6444,7 @@ export class OrcaRuntimeService {
       ptyId,
       (this.remoteTerminalViewSubscriberCounts.get(ptyId) ?? 0) + 1
     )
+    this.notifyRemoteTerminalViewPresenceChanged(ptyId)
     let released = false
     return () => {
       if (released) {
@@ -6206,6 +6457,7 @@ export class OrcaRuntimeService {
       } else {
         this.remoteTerminalViewSubscriberCounts.set(ptyId, next)
       }
+      this.notifyRemoteTerminalViewPresenceChanged(ptyId)
     }
   }
 
@@ -6255,6 +6507,7 @@ export class OrcaRuntimeService {
     source?: 'headless' | 'renderer'
     oscLinks?: TerminalOscLinkRange[]
     alternateScreen?: boolean
+    scrollbackAnsi?: string
     pendingEscapeTailAnsi?: string
   } | null> {
     return this.serializeTerminalBufferFromAvailableState(ptyId, opts)
@@ -6273,6 +6526,7 @@ export class OrcaRuntimeService {
     source?: 'headless' | 'renderer'
     oscLinks?: TerminalOscLinkRange[]
     alternateScreen?: boolean
+    scrollbackAnsi?: string
   } | null> {
     return this.serializeHeadlessTerminalBuffer(ptyId, { ...opts, includeEmpty: true })
   }
@@ -6290,6 +6544,7 @@ export class OrcaRuntimeService {
     source?: 'headless' | 'renderer'
     oscLinks?: TerminalOscLinkRange[]
     alternateScreen?: boolean
+    scrollbackAnsi?: string
     pendingEscapeTailAnsi?: string
   } | null> {
     const headlessSnapshot = await this.serializeHeadlessTerminalBuffer(ptyId, {
@@ -6449,7 +6704,7 @@ export class OrcaRuntimeService {
         // (they feed main's tracker only), so its serializer lastTitle can be
         // stale here. Prefer main's tracked title; the renderer's is only the
         // seed when main has observed none (fresh relaunch, cold tracker).
-        const seedTitle = this.getTrackedLastTitleForPty(ptyId) ?? rendered.lastTitle
+        const seedTitle = this.getTrackedRawTitleForPty(ptyId) ?? rendered.lastTitle
         if (seedTitle) {
           state.emulator.setLastTitle(seedTitle)
           this.applySeededAgentStatus(ptyId, seedTitle)
@@ -6540,9 +6795,13 @@ export class OrcaRuntimeService {
     dims: { cols: number; rows: number }
   ): RuntimeHeadlessTerminal {
     let state: RuntimeHeadlessTerminal | null = null
-    const emulator = this.createHeadlessEmulator(ptyId, {
+    const pathFlavor = this.pathFlavorForPty(this.ptysById.get(ptyId))
+    const emulator = new HeadlessEmulator({
       cols: dims.cols,
       rows: dims.rows,
+      pathFlavor,
+      remotePosixFileUriAuthority:
+        !!this.ptysById.get(ptyId)?.connectionId && pathFlavor !== 'win32',
       // Why: replies take the provider input path (same entry as pty:write —
       // daemon shell-ready gating and the SSH relay write apply unchanged),
       // NOT writePtyInput, so renderer interactive-output metering never
@@ -6611,19 +6870,6 @@ export class OrcaRuntimeService {
         // Best-effort mirror tracking; live PTY streaming must continue even
         // if xterm rejects a raced resize during teardown.
       })
-  }
-
-  private createHeadlessEmulator(
-    ptyId: string,
-    options: Omit<HeadlessEmulatorOptions, 'remotePosixFileUriAuthority'>
-  ): HeadlessEmulator {
-    const pathFlavor = this.pathFlavorForPty(this.ptysById.get(ptyId))
-    return new HeadlessEmulator({
-      ...options,
-      pathFlavor,
-      remotePosixFileUriAuthority:
-        !!this.ptysById.get(ptyId)?.connectionId && pathFlavor !== 'win32'
-    })
   }
 
   // Public: desktop-initiated clears (ipc/pty.ts) must also drop this mobile
@@ -6771,9 +7017,10 @@ export class OrcaRuntimeService {
     source?: 'headless'
     oscLinks?: TerminalOscLinkRange[]
     alternateScreen?: boolean
+    scrollbackAnsi?: string
     // Why: dangling mid-escape tail the restorer must write LAST, after any
     // reset, so the next live chunk completes it instead of rendering it
-    // literally (#7329).
+    // literally (Bug E / #7329).
     pendingEscapeTailAnsi?: string
   } | null> {
     const state = this.headlessTerminals.get(ptyId)
@@ -6781,16 +7028,10 @@ export class OrcaRuntimeService {
       return null
     }
     await state.writeChain
-    // Why: when an alternate-screen TUI (Claude Code, vim, etc.) is currently
-    // active, the visible content is the alt-screen snapshot — replaying any
-    // normal-buffer scrollback before it can duplicate shell prompts and
-    // flatten SGR attributes when the mobile xterm replays the data. Force
-    // scrollbackRows=0 in that case. When the buffer is in normal mode the
-    // caller can request scrollback so the user can scroll up to see prior
-    // agent output.
-    const requested = opts.scrollbackRows ?? 0
+    // Why: normal history is separated from an active alternate frame, so the
+    // caller's scrollback policy can be honored without painting it into alt.
     const isAlternateScreen = state.emulator.isAlternateScreen
-    const scrollbackRows = isAlternateScreen ? 0 : requested
+    const scrollbackRows = opts.scrollbackRows ?? 0
     const snapshot = state.emulator.getSnapshot({ scrollbackRows })
     const data = snapshot.rehydrateSequences + snapshot.snapshotAnsi
     return data.length > 0 || opts.includeEmpty === true
@@ -6803,13 +7044,18 @@ export class OrcaRuntimeService {
           seq: state.outputSequence,
           source: 'headless' as const,
           oscLinks: snapshot.oscLinks,
+          scrollbackAnsi: snapshot.scrollbackAnsi,
           ...(snapshot.pendingEscapeTailAnsi
             ? { pendingEscapeTailAnsi: snapshot.pendingEscapeTailAnsi }
             : {}),
           // Why: lets the renderer skip the destructive scrollback clear when
           // restoring an alt-screen snapshot — clearing wipes xterm's own
           // history that the TUI relies on for scroll-up after a tab return.
-          alternateScreen: isAlternateScreen
+          alternateScreen: isAlternateScreen,
+          // Why NOT folded into data: the renderer writes its post-replay
+          // reset after data, and any ESC after a dangling partial aborts it.
+          // The restorer writes this last (Bug E fix).
+          pendingEscapeTailAnsi: snapshot.pendingEscapeTailAnsi
         })
       : null
   }
@@ -7625,6 +7871,7 @@ export class OrcaRuntimeService {
           ? { cols: subscriber.previousCols, rows: subscriber.previousRows }
           : null
       inner.delete(clientId)
+      this.notifyRemoteTerminalViewPresenceChanged(ptyId)
       if (inner.size > 0) {
         ptysWithSurvivingPeers.push(ptyId)
       } else {
@@ -7714,6 +7961,7 @@ export class OrcaRuntimeService {
     this.resizeListeners.delete(ptyId)
     this.lastRendererSizes.delete(ptyId)
     this.recentPtyOutputById.delete(ptyId)
+    this.clearWaitBlockedCheckState(ptyId)
     this.recentPtyPathCandidatesById.delete(ptyId)
     this.ptyOutputSequenceById.delete(ptyId)
     this.agentStatusOscProcessorsByPtyId.delete(ptyId)
@@ -7772,7 +8020,7 @@ export class OrcaRuntimeService {
       pty.lastExitCode = exitCode
       this.resolvePtyExitWaiters(pty, ptyId)
       this.pruneDisconnectedPtyTranscript(pty)
-      this.touchMobileSessionSnapshotsForPty(ptyId)
+      this.touchMobileSessionSnapshotsForPty(ptyId, { immediate: true })
     }
 
     for (const leaf of this.getLeavesForPty(ptyId)) {
@@ -8442,6 +8690,20 @@ export class OrcaRuntimeService {
     clientId: string,
     viewport?: { cols: number; rows: number }
   ): Promise<boolean> {
+    try {
+      return await this.handleMobileSubscribeInternal(ptyId, clientId, viewport)
+    } finally {
+      // Every subscribe path mutates mobileSubscribers — resync the daemon
+      // background mark once, whatever branch returned.
+      this.notifyRemoteTerminalViewPresenceChanged(ptyId)
+    }
+  }
+
+  private async handleMobileSubscribeInternal(
+    ptyId: string,
+    clientId: string,
+    viewport?: { cols: number; rows: number }
+  ): Promise<boolean> {
     const mode = this.getMobileDisplayMode(ptyId)
 
     // Cancel pending restore timer for this ptyId — any new subscriber
@@ -8613,6 +8875,7 @@ export class OrcaRuntimeService {
     const wasResizedToPhone = subscriber.wasResizedToPhone
 
     inner.delete(clientId)
+    this.notifyRemoteTerminalViewPresenceChanged(ptyId)
 
     if (inner.size > 0) {
       // Why: if the leaving client was the only one with a non-null restore
@@ -10190,24 +10453,40 @@ export class OrcaRuntimeService {
       if (!linkedPR && meta?.linkedPR != null) {
         linkedPR = { number: meta.linkedPR, state: 'unknown' }
       }
+      const terminalPlatform = repo ? this.getAgentLaunchPlatformForRepo(repo) : process.platform
+      // Why: use the instance-validated lineage from attachLineageToResolvedWorktrees,
+      // not the raw store entry — shipped mobile clients trust parentWorktreeId as-is,
+      // so a stale same-path entry would nest replacement checkouts under old parents.
+      const lineage = worktree.lineage
       summaries.set(worktree.id, {
         // Why: mobile mirrors desktop workspace grouping/order from persisted
         // metadata, while older runtimes may not have hydrated every field yet.
         workspaceKind: 'git',
         worktreeId: worktree.id,
         repoId: worktree.repoId,
+        ...((worktree.hostId ?? meta?.hostId) ? { hostId: worktree.hostId ?? meta?.hostId } : {}),
+        terminalPlatform,
         repo: repo?.displayName ?? worktree.repoId,
         path: worktree.path,
         branch: worktree.branch,
         isArchived: worktree.isArchived,
         isMainWorktree: worktree.isMainWorktree,
         hasHostSidebarActivity: false,
+        ...(worktree.instanceId !== undefined ? { worktreeInstanceId: worktree.instanceId } : {}),
+        ...(lineage?.worktreeInstanceId !== undefined
+          ? { lineageWorktreeInstanceId: lineage.worktreeInstanceId }
+          : {}),
+        ...(lineage?.parentWorktreeInstanceId !== undefined
+          ? { parentWorktreeInstanceId: lineage.parentWorktreeInstanceId }
+          : {}),
         parentWorktreeId: worktree.parentWorktreeId,
         childWorktreeIds: worktree.childWorktreeIds,
         displayName: worktree.displayName,
         workspaceStatus: meta?.workspaceStatus ?? DEFAULT_WORKSPACE_STATUS_ID,
         sortOrder: meta?.sortOrder ?? 0,
         ...(meta?.manualOrder !== undefined ? { manualOrder: meta.manualOrder } : {}),
+        lastActivityAt: worktree.lastActivityAt,
+        ...(worktree.createdAt !== undefined ? { createdAt: worktree.createdAt } : {}),
         linkedIssue: worktree.linkedIssue,
         linkedPR,
         linkedLinearIssue: meta?.linkedLinearIssue ?? null,
@@ -10247,12 +10526,15 @@ export class OrcaRuntimeService {
         isArchived: worktree.isArchived,
         isMainWorktree: worktree.isMainWorktree,
         hasHostSidebarActivity: false,
+        ...(worktree.instanceId !== undefined ? { worktreeInstanceId: worktree.instanceId } : {}),
         parentWorktreeId: null,
         childWorktreeIds: [],
         displayName: worktree.displayName,
         workspaceStatus: worktree.workspaceStatus ?? DEFAULT_WORKSPACE_STATUS_ID,
         sortOrder: worktree.sortOrder ?? 0,
         ...(worktree.manualOrder !== undefined ? { manualOrder: worktree.manualOrder } : {}),
+        lastActivityAt: worktree.lastActivityAt,
+        ...(worktree.createdAt !== undefined ? { createdAt: worktree.createdAt } : {}),
         linkedIssue: worktree.linkedIssue ?? null,
         linkedPR: null,
         linkedLinearIssue: worktree.linkedLinearIssue ?? null,
@@ -11529,32 +11811,33 @@ export class OrcaRuntimeService {
         .split('\n')
         .map((line) => line.trim())
         .filter(Boolean)
+      const capabilities = getSshGitCapabilityCache(provider)
       const runSearch = async (patternGroup?: 'segmented' | 'branchRoot'): Promise<string> => {
-        try {
-          return (
-            await provider.exec(
-              buildSearchBaseRefsArgv(normalizedQuery, limit, {
-                remoteNames: remotes,
-                patternGroup
-              }),
-              repo.path
-            )
-          ).stdout
-        } catch (err) {
-          if (!isForEachRefExcludeUnsupportedError(err)) {
-            throw err
-          }
-          return (
-            await provider.exec(
-              buildSearchBaseRefsArgv(normalizedQuery, limit, {
-                excludeRemoteHead: false,
-                remoteNames: remotes,
-                patternGroup
-              }),
-              repo.path
-            )
-          ).stdout
-        }
+        return capabilities.runWithFallback(
+          'for-each-ref-exclude',
+          async () =>
+            (
+              await provider.exec(
+                buildSearchBaseRefsArgv(normalizedQuery, limit, {
+                  remoteNames: remotes,
+                  patternGroup
+                }),
+                repo.path
+              )
+            ).stdout,
+          async () =>
+            (
+              await provider.exec(
+                buildSearchBaseRefsArgv(normalizedQuery, limit, {
+                  excludeRemoteHead: false,
+                  remoteNames: remotes,
+                  patternGroup
+                }),
+                repo.path
+              )
+            ).stdout,
+          isForEachRefExcludeUnsupportedError
+        )
       }
       const searchTokens = normalizedQuery.split('/').filter((token) => token.length > 0)
       if (searchTokens.length > 1) {
@@ -16273,8 +16556,16 @@ export class OrcaRuntimeService {
       const canonicalWorktreePath = registeredWorktree.path
       const deleteBranch = removedMeta?.preserveBranchOnDelete !== true
 
+      // Why: a Git lock must block before archive hooks or linked-path cleanup
+      // mutate the workspace; dirty-file force is a separate permission.
+      try {
+        assertWorktreeUnlockedForRemoval(registeredWorktree)
+      } catch (error) {
+        throw new Error(formatWorktreeRemovalError(error, canonicalWorktreePath, force))
+      }
+
       // Why: a prior forced Windows recovery can delete the directory but leave
-      // Git's stale registration; retry by pruning instead of removing a missing path.
+      // Git's stale registration; recover and verify it before clearing metadata.
       if (
         !repo.connectionId &&
         force === true &&
@@ -16283,7 +16574,7 @@ export class OrcaRuntimeService {
         removedMeta &&
         (await isRuntimeWorktreePathMissing(repo, canonicalWorktreePath, localWorktreeGitOptions))
       ) {
-        const removalResult = await pruneStaleLocalWorktreeRegistrationAfterFilesystemRemoval({
+        const removalResult = await removeStaleLocalWorktreeRegistrationAfterFilesystemRemoval({
           canonicalWorktreePath,
           repoPath: repo.path,
           localWorktreeGitOptions,
@@ -16311,9 +16602,10 @@ export class OrcaRuntimeService {
         return removalResult ?? {}
       }
       if (repo.connectionId) {
-        const rawRemovalResult = await (deleteBranch
-          ? provider!.removeWorktree(canonicalWorktreePath, force)
-          : provider!.removeWorktree(canonicalWorktreePath, force, { deleteBranch }))
+        const remoteRemoveOptions = !deleteBranch ? { deleteBranch } : {}
+        const rawRemovalResult = await (Object.keys(remoteRemoveOptions).length > 0
+          ? provider!.removeWorktree(canonicalWorktreePath, force, remoteRemoveOptions)
+          : provider!.removeWorktree(canonicalWorktreePath, force))
         const removalResult = this.preserveBranchHeadFallback(
           rawRemovalResult,
           registeredWorktree.head
@@ -16356,6 +16648,27 @@ export class OrcaRuntimeService {
         // Runtime RPC calls have no renderer trust prompt, so hooks require explicit CLI opt-in.
         warning = `orca.yaml archive hook skipped for ${canonicalWorktreePath}; pass --run-hooks to run it.`
         console.warn(`[hooks] ${warning}`)
+      }
+
+      const refreshedWorktrees = hasLocalWorktreeGitOptions
+        ? await listWorktreesStrict(repo.path, localWorktreeGitOptions)
+        : await listWorktreesStrict(repo.path)
+      const refreshedRegisteredWorktree = findRegisteredDeletableWorktree(
+        repo.path,
+        canonicalWorktreePath,
+        refreshedWorktrees
+      )
+      if (!refreshedRegisteredWorktree) {
+        throw new Error(
+          `Worktree registration changed during deletion: ${canonicalWorktreePath}. Retry deletion.`
+        )
+      }
+      try {
+        // Why: an archive hook can race another Git client that locks the row;
+        // recheck before linked-path, watcher, or terminal teardown side effects.
+        assertWorktreeUnlockedForRemoval(refreshedRegisteredWorktree)
+      } catch (error) {
+        throw new Error(formatWorktreeRemovalError(error, canonicalWorktreePath, force))
       }
 
       let shouldTearDownPtys = true
@@ -16412,23 +16725,23 @@ export class OrcaRuntimeService {
           ...(!deleteBranch ? { deleteBranch } : {}),
           // Why: removal already validated the Git row under the selected
           // project runtime; keep branch cleanup on that same canonical row.
-          knownRemovedWorktree: registeredWorktree,
+          knownRemovedWorktree: refreshedRegisteredWorktree,
           ...localWorktreeGitOptions
         }
         removalResult = this.preserveBranchHeadFallback(
           await removeWorktree(repo.path, canonicalWorktreePath, force, removeOptions),
-          registeredWorktree.head
+          refreshedRegisteredWorktree.head
         )
       } catch (error) {
-        // Why: Git for Windows can fail long-path directory deletion after
-        // Orca has already validated the target and explicit force delete.
-        const recoveredRemovalResult = await recoverLocalWindowsLongPathWorktreeRemoval({
+        // Why: Git for Windows can deregister a clean worktree before its
+        // recursive filesystem deletion fails transiently.
+        const recoveredRemovalResult = await recoverLocalWindowsWorktreeRemoval({
           error,
           force,
           canonicalWorktreePath,
           repoPath: repo.path,
           localWorktreeGitOptions,
-          registeredWorktree,
+          registeredWorktree: refreshedRegisteredWorktree,
           deleteBranch,
           closeWatcher: (worktreePath) =>
             closeLocalWatcherForWorktreePath(worktreePath).catch((err) => {
@@ -16497,7 +16810,7 @@ export class OrcaRuntimeService {
       this.rememberPreservedBranchCleanupTarget(
         removalTarget.id,
         removalResult,
-        registeredWorktree.head,
+        refreshedRegisteredWorktree.head,
         removedPushTarget
       )
       this.clearOptimisticReconcileToken(removalTarget.id)
@@ -16943,21 +17256,23 @@ export class OrcaRuntimeService {
     const mutationKey = `${worktreeSelector}\0${mutationId}`
     // Why: a retried create (double-tap, reconnect replay) with the same
     // idempotency key must return the in-flight operation instead of spawning a
-    // duplicate terminal. Settled entries are dropped so a later retry — after a
-    // failure or after the result is consumed — can start a fresh create.
+    // duplicate terminal. Successes are kept briefly so a retry whose response
+    // was lost in transit reuses the created terminal; failures are dropped
+    // immediately so a retry can start a fresh create.
     const inflight = this.mobileTerminalCreateByMutationId.get(mutationKey)
     if (inflight) {
       return inflight
     }
     const run = this.runCreateMobileSessionTerminal(worktreeSelector, opts)
     this.mobileTerminalCreateByMutationId.set(mutationKey, run)
-    void run
-      .catch(() => {})
-      .finally(() => {
-        if (this.mobileTerminalCreateByMutationId.get(mutationKey) === run) {
-          this.mobileTerminalCreateByMutationId.delete(mutationKey)
-        }
-      })
+    const drop = (): void => {
+      if (this.mobileTerminalCreateByMutationId.get(mutationKey) === run) {
+        this.mobileTerminalCreateByMutationId.delete(mutationKey)
+      }
+    }
+    void run.then(() => {
+      setTimeout(drop, MOBILE_TERMINAL_CREATE_RESULT_TTL_MS).unref?.()
+    }, drop)
     return run
   }
 
@@ -19296,6 +19611,7 @@ export class OrcaRuntimeService {
     serveSimStateWatcher.unbindPty(ptyId)
     this.ptysById.delete(ptyId)
     this.recentPtyOutputById.delete(ptyId)
+    this.clearWaitBlockedCheckState(ptyId)
     this.recentPtyPathCandidatesById.delete(ptyId)
     this.ptyOutputSequenceById.delete(ptyId)
     this.agentStatusOscProcessorsByPtyId.delete(ptyId)
@@ -19418,6 +19734,9 @@ export class OrcaRuntimeService {
           nextWorktrees.add(worktreeId)
         } else {
           this.mobileSessionTabsByWorktree.delete(worktreeId)
+          // Why: drop any pending coalesced notify so a stale snapshot can't
+          // land after the removed frame.
+          this.mobileSessionTabsNotifyCoalescer.cancel(worktreeId)
           this.notifyMobileSessionTabsRemoved(worktreeId)
         }
       }
@@ -19592,6 +19911,14 @@ export class OrcaRuntimeService {
       this.notifyMobileSessionTabSnapshots()
       return
     }
+    // Why: structural changes (tab add/remove/activate) must propagate promptly,
+    // so cancel any pending coalesced title/status notify — this immediate emit
+    // already reflects the latest snapshot and supersedes it.
+    this.mobileSessionTabsNotifyCoalescer.cancel(worktreeId)
+    this.notifyMobileSessionTabsChangedNow(worktreeId)
+  }
+
+  private notifyMobileSessionTabsChangedNow(worktreeId: string): void {
     if (this.mobileSessionTabListeners.size === 0) {
       return
     }
@@ -19733,6 +20060,15 @@ export class OrcaRuntimeService {
   ): RuntimeMobileSessionTabsResult {
     const tabs: RuntimeMobileSessionClientTab[] = []
     const liveBrowserTabsByPageId = this.getLiveBrowserTabsByPageId(snapshot.worktree)
+    // Why: a live PTY backs exactly one terminal surface, so it must map to a
+    // single emitted tab. After agent sleep + mobile wake, a stale
+    // headless-hydrated leaf can survive beside the renderer's live leaf and both
+    // resolve to the freshly-woken agent PTY (same issuePtyHandle handle) — which
+    // renders two panes with the same React key and crashes the client. Claim
+    // each live PTY once. Split siblings never collide because distinct leaves own
+    // distinct PTYs; renderer tabs precede preserved headless tabs, so the live
+    // one wins.
+    const claimedLivePtyIds = new Set<string>()
     for (const tab of snapshot.tabs) {
       if (tab.type === 'browser') {
         const liveTab = tab.browserPageId
@@ -19769,6 +20105,19 @@ export class OrcaRuntimeService {
             allowWorktreeOnlyMatch: !snapshot.publicationEpoch.startsWith('headless')
           })
       const livePty = pty?.connected ? pty : null
+      // Why: enforce the one-live-PTY-per-tab invariant. A later tab resolving to
+      // a PTY an earlier tab already claimed is a duplicate surface (e.g. a stale
+      // headless-hydrated leaf re-bound to a woken agent PTY) — drop it so the
+      // client never sees two tabs sharing a terminal handle. Handles derive purely
+      // from the PTY id (issuePtyHandle), so the id is a faithful proxy for the
+      // emitted handle. Pending tabs (no live PTY) are left untouched.
+      const resolvedLivePtyId = liveLeafPtyId ?? livePty?.ptyId ?? null
+      if (resolvedLivePtyId !== null) {
+        if (claimedLivePtyIds.has(resolvedLivePtyId)) {
+          continue
+        }
+        claimedLivePtyIds.add(resolvedLivePtyId)
+      }
       const legacyPaneId = /^pane:(\d+)$/.exec(tab.leafId)?.[1] ?? null
       const paneKey = isTerminalLeafId(tab.leafId)
         ? makePaneKey(tab.parentTabId, tab.leafId)
@@ -23249,6 +23598,13 @@ export class OrcaRuntimeService {
     return listJiraTransitions(key, siteId)
   }
 
+  jiraGetProjectStatusOrder(
+    projectKey: string,
+    siteId?: string
+  ): ReturnType<typeof getJiraProjectStatusOrder> {
+    return getJiraProjectStatusOrder(projectKey, siteId)
+  }
+
   // ── Browser automation ──
 
   private readonly browserCommands = new RuntimeBrowserCommands({
@@ -23752,6 +24108,14 @@ export class OrcaRuntimeService {
   }
 }
 
+const WAIT_BLOCKED_CHECK_MIN_INTERVAL_MS = 50
+// Why: chunks that can complete an actionable prompt bypass the throttle so
+// blocked stamps stay per-chunk-immediate; the pattern heads mirror
+// findTerminalWaitBlockedSignal. Scanned over the new chunk plus a short
+// carry only — never the accumulated window.
+const WAIT_BLOCKED_KEYWORD_PATTERN =
+  /press enter|press t to trust|do you trust|trust this|trusted workspace|update available|choose working directory|codex just got an upgrade|hooks need review/
+const WAIT_BLOCKED_KEYWORD_CARRY_CHARS = 31
 const MAX_TAIL_LINES = 2000
 const MAX_TAIL_CHARS = 256 * 1024
 const MAX_TAIL_PARTIAL_CHARS = 4000
@@ -24315,7 +24679,104 @@ function trimTerminalLineRight(line: string): string {
   return end === line.length ? line : line.slice(0, end)
 }
 
+// Why a window: the unwindowed implementation below materializes a row object
+// per retained tail line and finalize re-allocates + regex-trims every row —
+// O(tail) per chunk (~0.9ms at the 2,000-line cap), measured at ~93% of the
+// main-process event loop under an agent-TUI flood (findings log 2026-07-03).
+// A redraw can only touch rows the cursor can reach, so run the algorithm on
+// a suffix window sized by the chunk's maximum upward cursor excursion and
+// share the untouched prefix by reference. Equality with the unwindowed
+// implementation is fuzz-verified in
+// retained-tail-redraw-window.equivalence.test.ts.
+const REDRAW_WINDOW_SAFETY_ROWS = 8
+
+function maxUpwardCursorReach(
+  normalizedChunk: string,
+  previousRedrawCursor: RetainedTailRedrawCursor | null
+): number {
+  let reach = previousRedrawCursor ? previousRedrawCursor.rowFromEnd : 0
+  const cursorUpPattern = /\x1b\[(\d*)(?:;[\d;]*)?A/g
+  let match: RegExpExecArray | null
+  while ((match = cursorUpPattern.exec(normalizedChunk)) !== null) {
+    reach += match[1] ? Number.parseInt(match[1], 10) : 1
+  }
+  return reach
+}
+
 function appendNormalizedToMultilineTailBuffer(
+  previousLines: string[],
+  boundedPreviousPartialLine: string,
+  normalizedChunk: string,
+  previousPartialWasCapped: boolean,
+  previousRedrawCursor: RetainedTailRedrawCursor | null
+): {
+  lines: string[]
+  partialLine: string
+  redrawCursor: RetainedTailRedrawCursor | null
+  truncated: boolean
+  newCompleteLines: number
+} {
+  const windowRows =
+    maxUpwardCursorReach(normalizedChunk, previousRedrawCursor) + REDRAW_WINDOW_SAFETY_ROWS
+  if (windowRows >= previousLines.length) {
+    return appendNormalizedToMultilineTailBufferUnwindowed(
+      previousLines,
+      boundedPreviousPartialLine,
+      normalizedChunk,
+      previousPartialWasCapped,
+      previousRedrawCursor
+    )
+  }
+  const prefixLength = previousLines.length - windowRows
+  const suffix = previousLines.slice(prefixLength)
+  const windowed = appendNormalizedToMultilineTailBufferUnwindowed(
+    suffix,
+    boundedPreviousPartialLine,
+    normalizedChunk,
+    previousPartialWasCapped,
+    previousRedrawCursor
+  )
+  let lines = previousLines.slice(0, prefixLength)
+  // Why: the unwindowed finalize trims trailing spaces/tabs on every row; the
+  // shared prefix must match without paying a regex per untouched row.
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!
+    const lastChar = line.charCodeAt(line.length - 1)
+    if (lastChar === 32 || lastChar === 9) {
+      lines[index] = line.replace(/[ \t]+$/g, '')
+    }
+  }
+  for (const line of windowed.lines) {
+    lines.push(line)
+  }
+  let truncated = windowed.truncated
+  if (lines.length > MAX_TAIL_LINES) {
+    lines = lines.slice(lines.length - MAX_TAIL_LINES)
+    truncated = true
+  }
+  let totalChars = windowed.partialLine.length
+  for (const line of lines) {
+    totalChars += line.length
+  }
+  let dropCount = 0
+  while (dropCount < lines.length && totalChars > MAX_TAIL_CHARS) {
+    totalChars -= lines[dropCount]!.length
+    dropCount += 1
+  }
+  if (dropCount > 0) {
+    lines = lines.slice(dropCount)
+    truncated = true
+  }
+  return {
+    lines,
+    partialLine: windowed.partialLine,
+    redrawCursor: windowed.redrawCursor,
+    truncated,
+    newCompleteLines: windowed.newCompleteLines
+  }
+}
+
+export function appendNormalizedToMultilineTailBufferUnwindowed(
   previousLines: string[],
   boundedPreviousPartialLine: string,
   normalizedChunk: string,

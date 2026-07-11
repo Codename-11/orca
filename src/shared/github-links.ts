@@ -1,3 +1,6 @@
+// Why shared: main's terminal side-effect tracker emits pr-link facts
+// (terminal-side-effect-authority.md, slice 3) and needs the same GitHub URL
+// parsing core the renderer link picker uses.
 const GH_ITEM_PATH_RE = /^\/([^/]+)\/([^/]+)\/(issues|pull)\/(\d+)(?:\/.*)?$/i
 
 export type RepoSlug = {
@@ -5,9 +8,10 @@ export type RepoSlug = {
   repo: string
 }
 
-export type GitHubLinkQuery = {
-  query: string
-  directNumber: number | null
+export type GitHubIssueOrPRLink = {
+  slug: RepoSlug
+  number: number
+  type: 'issue' | 'pr'
 }
 
 export function buildGitHubRepoUrl(slug: RepoSlug | null | undefined): string | null {
@@ -21,9 +25,9 @@ function matchGitHubItemPath(url: URL): RegExpExecArray | null {
   return GH_ITEM_PATH_RE.exec(url.pathname.replace(/\/+$/, ''))
 }
 
-function parsePositiveIssueOrPrNumber(value: string): number | null {
-  const number = Number.parseInt(value, 10)
-  return Number.isSafeInteger(number) && number > 0 ? number : null
+function parseGitHubItemNumber(value: string): number | null {
+  const parsed = Number.parseInt(value, 10)
+  return parsed > 0 ? parsed : null
 }
 
 /**
@@ -38,7 +42,7 @@ export function parseGitHubIssueOrPRNumber(input: string): number | null {
 
   const numeric = trimmed.startsWith('#') ? trimmed.slice(1) : trimmed
   if (/^\d+$/.test(numeric)) {
-    return parsePositiveIssueOrPrNumber(numeric)
+    return parseGitHubItemNumber(numeric)
   }
 
   let url: URL
@@ -57,18 +61,14 @@ export function parseGitHubIssueOrPRNumber(input: string): number | null {
     return null
   }
 
-  return parsePositiveIssueOrPrNumber(match[4])
+  return parseGitHubItemNumber(match[4])
 }
 
 /**
  * Parses an owner/repo slug plus issue/PR number from a GitHub URL. Returns
  * null for anything that isn't a recognizable GitHub-shaped issue or pull URL.
  */
-export function parseGitHubIssueOrPRLink(input: string): {
-  slug: RepoSlug
-  number: number
-  type: 'issue' | 'pr'
-} | null {
+export function parseGitHubIssueOrPRLink(input: string): GitHubIssueOrPRLink | null {
   const trimmed = input.trim()
   if (!trimmed) {
     return null
@@ -89,8 +89,7 @@ export function parseGitHubIssueOrPRLink(input: string): {
   if (!match) {
     return null
   }
-
-  const number = parsePositiveIssueOrPrNumber(match[4])
+  const number = parseGitHubItemNumber(match[4])
   if (number === null) {
     return null
   }
@@ -99,34 +98,5 @@ export function parseGitHubIssueOrPRLink(input: string): {
     slug: { owner: match[1], repo: match[2] },
     type: match[3].toLowerCase() === 'pull' ? 'pr' : 'issue',
     number
-  }
-}
-
-/**
- * Normalizes link-picker input so both raw issue/PR numbers and full GitHub
- * URLs resolve to a usable query + direct-number lookup.
- */
-export function normalizeGitHubLinkQuery(raw: string): GitHubLinkQuery {
-  const trimmed = raw.trim()
-  if (!trimmed) {
-    return { query: '', directNumber: null }
-  }
-
-  const direct = parseGitHubIssueOrPRNumber(trimmed)
-  if (direct !== null && !trimmed.startsWith('http')) {
-    return { query: trimmed, directNumber: direct }
-  }
-
-  const link = parseGitHubIssueOrPRLink(trimmed)
-  if (!link) {
-    return { query: trimmed, directNumber: null }
-  }
-
-  // Why: any GitHub-shaped issue/pull URL is accepted by number regardless of
-  // slug, since fork checkouts can legitimately target upstream issues whose
-  // slug differs from the origin remote.
-  return {
-    query: trimmed,
-    directNumber: link.number
   }
 }

@@ -1,4 +1,4 @@
-import { acquirePtyDeliveryInterest } from './pty-delivery-interest'
+import { TERMINAL_SCROLLBACK_SESSION_BUFFER_BYTE_LIMIT } from '../../../../shared/terminal-scrollback-limits'
 import {
   ensurePtyDispatcher,
   ptyDataHandlers,
@@ -27,18 +27,13 @@ export function getEagerPtyBufferHandle(ptyId: string): EagerPtyHandle | undefin
 // Why: 512 KB matches the scrollback buffer cap used by TerminalPane's
 // serialization. Prevents unbounded memory growth if a restored shell
 // runs a long-lived command (e.g. tail -f) in a worktree the user never opens.
-const EAGER_BUFFER_MAX_BYTES = 512 * 1024
+const EAGER_BUFFER_MAX_BYTES = TERMINAL_SCROLLBACK_SESSION_BUFFER_BYTE_LIMIT
 
 export function registerEagerPtyBuffer(
   ptyId: string,
   onExit: (ptyId: string, code: number) => void
 ): EagerPtyHandle {
   ensurePtyDispatcher()
-  // Why: an eager buffer means a pane mount is (potentially) pending — the
-  // hidden-delivery gate must keep bytes flowing until the pane attaches and
-  // takes over, so the buffer holds delivery interest for its lifetime.
-  const releaseDeliveryInterest = acquirePtyDeliveryInterest(ptyId)
-
   // Why: a head index instead of Array.shift() — shift() is O(n), making
   // pre-attach buffering quadratic under many small chunks. Compaction is deferred.
   const chunks: EagerBufferChunk[] = []
@@ -66,14 +61,15 @@ export function registerEagerPtyBuffer(
   const exitHandler = (code: number): void => {
     // Shell died before TerminalPane attached — clean up and notify the store
     // so the tab's ptyId is cleared and connectPanePty falls through to connect().
-    releaseDeliveryInterest()
     // Why: a transport may have replaced the eager handler during a remount;
     // deleting by id would detach the live successor and freeze the pane.
     if (ptyDataHandlers.get(ptyId) === dataHandler) {
       ptyDataHandlers.delete(ptyId)
       ptyReplayHandlers.delete(ptyId)
     }
-    ptyExitHandlers.delete(ptyId)
+    if (ptyExitHandlers.get(ptyId) === exitHandler) {
+      ptyExitHandlers.delete(ptyId)
+    }
     eagerPtyHandles.delete(ptyId)
     onExit(ptyId, code)
   }
@@ -95,7 +91,6 @@ export function registerEagerPtyBuffer(
     dispose() {
       // Why: dispose runs at pane attach (mount completed) — the pane's own
       // visibility sync now owns the hidden-delivery decision for this PTY.
-      releaseDeliveryInterest()
       // Only remove if the current handler is still the temp one (compare by
       // reference). After attach() replaces the handler this becomes a no-op.
       if (ptyDataHandlers.get(ptyId) === dataHandler) {
