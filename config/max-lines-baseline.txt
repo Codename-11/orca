@@ -141,6 +141,7 @@ inline src/main/runtime/orca-runtime-files.test.ts
 inline src/main/runtime/orca-runtime-files.ts
 inline src/main/runtime/orca-runtime-git.ts
 inline src/main/runtime/orca-runtime.test.ts
+inline src/main/runtime/orca-runtime.ts
 inline src/main/runtime/orchestration/coordinator.ts
 inline src/main/runtime/orchestration/db.ts
 inline src/main/runtime/rpc/methods/files.ts
