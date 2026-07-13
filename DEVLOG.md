@@ -6,6 +6,19 @@ merges into `axiom/deploy`.
 
 ---
 
+## 2026-07-13 — Allowed unsigned Axiom Windows in-app updates after bootstrap
+
+Made the Windows updater publisher requirement explicitly configurable through `ORCA_WINDOWS_PUBLISHER_NAME`. Builds that do not set it retain the upstream `SignPath Foundation` default, an explicitly empty value omits `win.signtoolOptions` for unsigned fork releases, and nonempty publisher overrides remain supported. The Axiom release workflow now opts out explicitly while retaining `latest.yml` SHA512 payload-integrity verification.
+
+Documented the one-time transition limitation: an already-installed build that requires `SignPath Foundation` cannot in-app install the first unsigned fixed release. Users must manually install that release, or the transition artifact must be Authenticode-signed by the expected publisher; subsequent unsigned Axiom releases can update in-app.
+
+Verification:
+
+- `pnpm exec vitest run --config config/vitest.config.ts config/scripts/electron-builder-config.test.mjs config/scripts/axiom-upstream-sync-release.test.mjs` → 2 files / 49 tests passed.
+- `node --check config/electron-builder.config.cjs && node --check config/scripts/electron-builder-config.test.mjs && node --check config/scripts/axiom-upstream-sync-release.test.mjs` → passed.
+
+---
+
 ## 2026-07-11 — Remediated upstream v1.4.135 release sync
 
 Resolved the Axiom upstream sync remediation branch for `v1.4.135` / `axiom-v1.4.135-axiom.1` through PR #98's bot branch, without pushing directly to `axiom/deploy`. Preserved fork semver (`1.4.135-axiom.1`), Axiom desktop/mobile identity and updater feed, side-by-side installer behavior, profile portability, Forge provider/task surfaces, hidden-renderer PTY delivery/query authority, cold parking, split dispatcher/sidecar routing, byte-ordered terminal side effects, the agent-detection compatibility barrel, and Windows ConPTY compatibility while accepting upstream terminal performance/reliability, producer flow control, snapshot fidelity, mobile agent history, browser/git/worktree, Jira, and release workflow changes.

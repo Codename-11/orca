@@ -72,6 +72,10 @@ env:
   ORCA_WINDOWS_EXECUTABLE_NAME: Axiom Orca
   ORCA_NSIS_GUID: b6c06723-a52f-5004-ad9f-f39666f5e928
   ORCA_ARTIFACT_BASENAME: axiom-orca
+  # electron-updater still enforces latest.yml SHA512 feed integrity. Axiom's
+  # Windows artifacts are currently unsigned Authenticode builds, so do not
+  # require the upstream SignPath publisher during installer verification.
+  ORCA_WINDOWS_PUBLISHER_NAME: ''
   # Axiom currently publishes Windows desktop builds from this fork. Mobile
   # remains on Orca's upstream-style Mobile Release workflow and only runs on
   # `mobile-v*` tags, manual dispatch, or the explicit build_mobile input below.
@@ -199,6 +203,7 @@ jobs:
             -u ORCA_PACKAGE_NAME \
             -u ORCA_APP_NAME \
             -u ORCA_WINDOWS_EXECUTABLE_NAME \
+            -u ORCA_WINDOWS_PUBLISHER_NAME \
             -u ORCA_NSIS_GUID \
             -u ORCA_ARTIFACT_BASENAME \
             -u ORCA_PUBLISH_REPOSITORY \
@@ -212,6 +217,7 @@ jobs:
             src/main/updater-nudge.test.ts \
             src/main/updater-changelog.test.ts \
             src/main/app-build-identity.test.ts \
+            config/scripts/electron-builder-config.test.mjs \
             config/scripts/axiom-upstream-sync-release.test.mjs \
             config/scripts/generate-mobile-update-manifest.test.mjs
 

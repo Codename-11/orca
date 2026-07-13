@@ -98,6 +98,9 @@ describe('Axiom upstream sync release workflow', () => {
     expect(workflow).toContain('ORCA_PRODUCT_NAME: Axiom Orca')
     expect(workflow).toContain('ORCA_PACKAGE_NAME: axiom-orca')
     expect(workflow).toContain('ORCA_NSIS_GUID: b6c06723-a52f-5004-ad9f-f39666f5e928')
+    expect(workflow).toContain("ORCA_WINDOWS_PUBLISHER_NAME: ''")
+    expect(workflow).toContain('latest.yml SHA512 feed integrity')
+    expect(workflow).toContain('unsigned Authenticode builds')
     expect(workflow).toContain('ORCA_UPDATE_OWNER: ${{ github.repository_owner }}')
     expect(workflow).toContain('ORCA_UPDATE_REPO: ${{ github.event.repository.name }}')
   })
@@ -230,6 +233,8 @@ describe('Axiom upstream sync release workflow', () => {
     expect(workflow).toContain('env \\\n            -u GITHUB_REPOSITORY')
     expect(workflow).toContain('-u ORCA_UPDATE_OWNER')
     expect(workflow).toContain('-u ORCA_PUBLISH_REPOSITORY')
+    expect(workflow).toContain('-u ORCA_WINDOWS_PUBLISHER_NAME')
+    expect(workflow).toContain('config/scripts/electron-builder-config.test.mjs')
     expect(workflow).toContain('config/scripts/axiom-upstream-sync-release.test.mjs')
   })
 

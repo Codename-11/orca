@@ -20,9 +20,13 @@ const {
 function loadElectronBuilderConfig(env = {}) {
   const configPath = require.resolve('../electron-builder.config.cjs')
   const previousEnv = {}
-  for (const key of Object.keys(env)) {
+  for (const [key, value] of Object.entries(env)) {
     previousEnv[key] = process.env[key]
-    process.env[key] = env[key]
+    if (value === undefined) {
+      delete process.env[key]
+    } else {
+      process.env[key] = value
+    }
   }
   delete require.cache[configPath]
   try {
@@ -150,6 +154,26 @@ describe('electron-builder config', () => {
 
     expect(config.beforeBuild).toBeUndefined()
     expect(config.npmRebuild).toBe(false)
+  })
+
+  it('requires the SignPath publisher for Windows updates by default', () => {
+    const config = loadElectronBuilderConfig({ ORCA_WINDOWS_PUBLISHER_NAME: undefined })
+
+    expect(config.win.signtoolOptions).toEqual({ publisherName: 'SignPath Foundation' })
+  })
+
+  it('omits Windows publisher validation when explicitly opted out', () => {
+    const config = loadElectronBuilderConfig({ ORCA_WINDOWS_PUBLISHER_NAME: '' })
+
+    expect(config.win.signtoolOptions).toBeUndefined()
+  })
+
+  it('supports a nonempty Windows publisher override', () => {
+    const config = loadElectronBuilderConfig({
+      ORCA_WINDOWS_PUBLISHER_NAME: '  Axiom Labs, LLC  '
+    })
+
+    expect(config.win.signtoolOptions).toEqual({ publisherName: 'Axiom Labs, LLC' })
   })
 
   it('verifies packaged main runtime deps from Windows-style asar entries', async () => {

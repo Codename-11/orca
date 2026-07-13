@@ -44,6 +44,9 @@ const packageName = envString('ORCA_PACKAGE_NAME', 'orca')
 const windowsExecutableName = envString('ORCA_WINDOWS_EXECUTABLE_NAME', productName)
 const artifactBaseName = envString('ORCA_ARTIFACT_BASENAME', 'orca')
 const nsisGuid = optionalEnvString('ORCA_NSIS_GUID')
+const windowsPublisherName = Object.hasOwn(process.env, 'ORCA_WINDOWS_PUBLISHER_NAME')
+  ? process.env.ORCA_WINDOWS_PUBLISHER_NAME.trim()
+  : 'SignPath Foundation'
 const electronBuilderArchMacro = '${arch}'
 const electronBuilderExtMacro = '${ext}'
 const electronBuilderVersionMacro = '${version}'
@@ -235,11 +238,9 @@ module.exports = {
   },
   win: {
     executableName: windowsExecutableName,
-    // Why: Windows installers are signed after electron-builder packaging by
-    // SignPath, so the packager cannot infer the updater publisherName.
-    signtoolOptions: {
-      publisherName: 'SignPath Foundation'
-    },
+    // Why: signed releases need an explicit updater publisher, while unsigned
+    // fork builds must omit the check instead of inheriting SignPath.
+    ...(windowsPublisherName ? { signtoolOptions: { publisherName: windowsPublisherName } } : {}),
     extraResources: [
       ...commonExtraResources,
       winSpeechNativeResource,
