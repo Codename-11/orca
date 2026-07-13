@@ -41,6 +41,20 @@ builds default to `stablyai/orca`, while Axiom builds can route to the fork via
 `ORCA_UPDATE_DOWNLOAD_BASE_URL`, `ORCA_UPDATE_CHANGELOG_URL`, and
 `ORCA_UPDATE_NUDGE_URL`.
 
+Axiom's Windows workflow sets `ORCA_WINDOWS_PUBLISHER_NAME` to an explicit empty
+value because its current installers are unsigned Authenticode builds. This
+omits electron-builder's `win.signtoolOptions.publisherName` while retaining
+electron-updater's `latest.yml` SHA512 payload-integrity verification. If Axiom
+later signs Windows artifacts, set the variable to the actual nonempty publisher
+name; builds that do not define it retain the upstream `SignPath Foundation`
+default.
+
+This has a one-time bootstrap limitation: already-installed builds carrying the
+`SignPath Foundation` requirement cannot in-app install an unsigned transition
+build. Users must manually install the first fixed release, or the transition
+release must be Authenticode-signed by the expected publisher. After the fixed
+release is installed, in-app updates to later unsigned Axiom releases work.
+
 Source/dev runtimes use the normal CLI surface, `orca update`, rather than the
 packaged Electron updater. That command defaults Axiom fork checkouts to
 `origin/axiom/deploy`, manages clean local runtime worktrees, repoints the
@@ -113,6 +127,7 @@ Run these from the release branch before cutting or rebuilding a fork release:
 
 ```bash
 pnpm exec vitest run --config config/vitest.config.ts \
+  config/scripts/electron-builder-config.test.mjs \
   src/main/axiom-release-hardening.test.ts \
   src/main/updater-endpoints.test.ts \
   src/main/updater-prerelease-feed.test.ts \

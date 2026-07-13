@@ -55,6 +55,19 @@ Core rules:
 - Axiom app versions use fork suffixes, for example `1.4.10-axiom.1`.
 - Build identity is injected through env/config, not hardcoded runtime
   assumptions.
+- Axiom's Windows release workflow explicitly opts out of the upstream SignPath
+  publisher check while its installers are unsigned. `latest.yml` SHA512 hashes
+  still protect update payload integrity.
+
+### One-time unsigned Windows updater bootstrap
+
+Already-installed builds whose updater metadata requires `SignPath Foundation`
+cannot in-app install an unsigned transition build. Users must manually download
+and install the first release containing the publisher opt-out, unless that
+transition release is Authenticode-signed by the expected publisher. Once a user
+is running the fixed release, later unsigned Axiom releases can install through
+the in-app updater because SHA512 feed verification remains active without the
+stale publisher requirement.
 
 ## Axiom Patch Releases
 
