@@ -1,0 +1,299 @@
+## Axiom Orca upstream sync remediation
+
+- Original Actions run: https://github.com/Codename-11/orca/actions/runs/29428702205
+- Upstream ref/tag: v1.4.142
+- Intended Axiom version/tag: 1.4.142-axiom.1 / axiom-v1.4.142-axiom.1
+- Target branch: `axiom/deploy`
+- Bot branch: `bot/upstream-sync-axiom-v1.4.142-axiom.1`
+- Classification: `auto_remediate` — Fork identity/update-feed files need policy-guided agent remediation: mobile/app.json
+
+## Conflicted files
+- `mobile/app.json`
+- `mobile/app/h/[hostId]/tasks.tsx`
+- `mobile/app/index.tsx`
+- `mobile/app/settings.tsx`
+- `mobile/pnpm-lock.yaml`
+- `mobile/src/tasks/workspace-create-params.ts`
+- `package.json`
+- `resources/win32/bin/orca.cmd`
+- `skills/orca-cli/SKILL.md`
+- `src/cli/args.ts`
+- `src/main/cli/wsl-cli-installer.ts`
+- `src/main/index.ts`
+- `src/main/runtime/orca-runtime.ts`
+- `src/main/runtime/rpc/methods/client-ui.test.ts`
+- `src/main/runtime/rpc/methods/terminal.ts`
+- `src/renderer/src/components/Terminal.tsx`
+- `src/renderer/src/components/terminal-pane/pty-dispatcher.ts`
+- `src/renderer/src/components/terminal-pane/terminal-url-link-hit-testing.ts`
+- `src/renderer/src/lib/launch-agent-background-session.ts`
+- `tests/e2e/helpers/orca-app.ts`
+
+## Captured git status
+```
+M  .gitattributes
+M  .github/ISSUE_TEMPLATE/bug_report.yml
+M  .github/ISSUE_TEMPLATE/feature_request.yml
+M  .github/workflows/computer-e2e.yml
+M  .github/workflows/e2e.yml
+M  .github/workflows/golden-e2e-experiment.yml
+M  .github/workflows/mobile.yml
+M  .github/workflows/pr.yml
+M  .github/workflows/release-cut.yml
+M  .github/workflows/release-mac-build.yml
+M  .github/workflows/win-update-survival-e2e.yml
+M  .gitignore
+M  .npmrc
+M  AGENTS.md
+M  README.md
+M  config/electron-builder.config.cjs
+M  config/patches/@xterm__addon-webgl@0.20.0-beta.286.patch
+M  config/reliability-gates.jsonc
+M  config/scripts/audit-localization-coverage.mjs
+M  config/scripts/build-native-for-platform.mjs
+M  config/scripts/build-relay.mjs
+A  config/scripts/build-windows-cli-launcher.mjs
+A  config/scripts/build-windows-cli-launcher.test.mjs
+M  config/scripts/check-terminal-perf-report-budgets.mjs
+M  config/scripts/check-terminal-perf-report-budgets.test.mjs
+M  config/scripts/computer-use-skill-guidance.test.mjs
+M  config/scripts/electron-builder-config.test.mjs
+M  config/scripts/electron-builder-native-rebuild.cjs
+M  config/scripts/electron-builder-native-rebuild.test.mjs
+A  config/scripts/generate-bundled-skill-guides.mjs
+A  config/scripts/generate-bundled-skill-guides.test.mjs
+M  config/scripts/localize-renderer-strings.mjs
+M  config/scripts/orca-cli-skill-guidance.test.mjs
+M  config/scripts/orchestration-skill-guidance.test.mjs
+M  config/scripts/package-electron-runtime-contract.test.mjs
+A  config/scripts/relay-watcher-fault-harness.mjs
+A  config/scripts/run-ssh-docker-watcher-isolation-e2e.mjs
+A  config/scripts/runtime-file-watcher-fault-harness.mjs
+M  config/scripts/smoke-packaged-cli.mjs
+M  config/scripts/styled-scrollbars/styled-scrollbar-jsx-check.mjs
+A  config/scripts/verify-agent-hook-stdin-lifecycle.mjs
+M  config/scripts/verify-localization-catalog.mjs
+M  config/tsconfig.cli.json
+M  config/tsconfig.tc.web.json
+M  docs/assets/readme-downloads.svg
+A  docs/claude-scoped-oauth-usage-limits.md
+M  docs/readme/README.es.md
+M  docs/readme/README.ja.md
+M  docs/readme/README.ko.md
+M  docs/readme/README.pt.md
+M  docs/readme/README.zh-CN.md
+A  docs/reference/agent-hook-stdin-lifecycle.md
+A  docs/reference/plans/2026-07-10-ssh-repo-host-reconciliation.md
+A  docs/reference/terminal-cold-park-reveal-cost.md
+M  docs/reference/terminal-hidden-view-parking.md
+M  docs/reference/terminal-query-authority.md
+A  docs/reference/terminal-session-lifecycle.md
+M  electron.vite.config.ts
+UU mobile/app.json
+M  mobile/app/_layout.tsx
+M  mobile/app/connection-log.tsx
+M  mobile/app/h/[hostId]/accounts.tsx
+M  mobile/app/h/[hostId]/index.tsx
+M  mobile/app/h/[hostId]/session/[worktreeId].tsx
+M  mobile/app/h/[hostId]/session/mobile-session-route-types.ts
+UU mobile/app/h/[hostId]/tasks.tsx
+UU mobile/app/index.tsx
+M  mobile/app/pair-confirm.tsx
+M  mobile/app/pair-scan.tsx
+UU mobile/app/settings.tsx
+M  mobile/package.json
+UU mobile/pnpm-lock.yaml
+A  mobile/pnpm-workspace.yaml
+M  mobile/scripts/start-emulator.mjs
+A  mobile/src/cache/worktree-cache.test.ts
+M  mobile/src/components/AccountUsage.tsx
+M  mobile/src/components/ActionSheetModal.tsx
+M  mobile/src/components/BottomDrawer.tsx
+M  mobile/src/components/MobileAgentIcon.tsx
+A  mobile/src/components/MobileHostCard.tsx
+M  mobile/src/components/MobilePRSidebar.tsx
+A  mobile/src/components/MobileSearchField.tsx
+M  mobile/src/components/NewWorktreeModal.tsx
+M  mobile/src/components/NewWorktreeModalController.tsx
+A  mobile/src/components/SetupHookTrustDrawer.tsx
+A  mobile/src/components/SmartSourceModeIcon.tsx
+A  mobile/src/components/SmartWorkspaceAdvancedFields.tsx
+A  mobile/src/components/SmartWorkspaceSourceDrawer.tsx
+A  mobile/src/components/SmartWorkspaceSourceField.tsx
+A  mobile/src/components/SmartWorkspaceSourceRow.tsx
+M  mobile/src/components/account-usage-state.test.ts
+M  mobile/src/components/account-usage-state.ts
+A  mobile/src/components/bottom-drawer-modal-host.tsx
+A  mobile/src/components/mobile-agent-icon-assets.test.ts
+A  mobile/src/components/mobile-agent-icon-assets.ts
+A  mobile/src/components/pr-sidebar/PRCommentsSection.test.ts
+M  mobile/src/components/pr-sidebar/PRCommentsSection.tsx
+M  mobile/src/components/pr-sidebar/pr-comment-audience.ts
+M  mobile/src/components/pr-sidebar/pr-comment-presentation.test.ts
+M  mobile/src/dictation/mobile-dictation-setup.test.ts
+M  mobile/src/dictation/mobile-dictation-setup.ts
+A  mobile/src/files/MobileFileMarkdownPreview.test.ts
+M  mobile/src/files/MobileFileMarkdownPreview.tsx
+A  mobile/src/hooks/mobile-dictation-audio-chunk.ts
+A  mobile/src/hooks/mobile-dictation-desktop-start.test.ts
+A  mobile/src/hooks/mobile-dictation-desktop-start.ts
+A  mobile/src/hooks/mobile-dictation-foreground-keep-awake.ts
+A  mobile/src/hooks/mobile-dictation-keep-awake.test.ts
+A  mobile/src/hooks/mobile-dictation-keep-awake.ts
+A  mobile/src/hooks/mobile-dictation-session-state.ts
+M  mobile/src/hooks/use-mobile-dictation-source.test.ts
+M  mobile/src/hooks/use-mobile-dictation.ts
+M  mobile/src/notifications/mobile-notifications.test.ts
+M  mobile/src/notifications/mobile-notifications.ts
+A  mobile/src/notifications/notification-reconnect-catchup.ts
+M  mobile/src/session/TerminalPaneView.tsx
+M  mobile/src/session/ai-vault-resume-launch.test.ts
+M  mobile/src/session/mobile-session-route-helpers.ts
+M  mobile/src/session/mobile-terminal-records.test.ts
+M  mobile/src/session/mobile-terminal-records.ts
+A  mobile/src/session/use-live-worktree-name.test.ts
+M  mobile/src/session/use-live-worktree-name.ts
+M  mobile/src/session/use-mobile-terminal-paste.ts
+A  mobile/src/session/use-pr-bot-author-overrides.ts
+M  mobile/src/source-control/MobileSourceControlBranchCard.tsx
+M  mobile/src/source-control/MobileSourceControlContent.tsx
+M  mobile/src/source-control/mobile-pr-create.test.ts
+M  mobile/src/source-control/mobile-pr-create.ts
+M  mobile/src/source-control/mobile-source-control-styles.ts
+M  mobile/src/source-control/use-mobile-source-control-loaders.ts
+M  mobile/src/source-control/use-mobile-source-control-state.ts
+A  mobile/src/tasks/blank-workspace-create.test.ts
+A  mobile/src/tasks/blank-workspace-create.ts
+A  mobile/src/tasks/composer-linked-work-item.test.ts
+A  mobile/src/tasks/composer-linked-work-item.ts
+A  mobile/src/tasks/composer-source-base-resolve.ts
+A  mobile/src/tasks/mobile-composer-source-types.ts
+A  mobile/src/tasks/mobile-smart-source-modes.test.ts
+A  mobile/src/tasks/mobile-smart-source-modes.ts
+A  mobile/src/tasks/mobile-tasks-capability.ts
+M  mobile/src/tasks/setup-hook-trust.test.ts
+M  mobile/src/tasks/setup-hook-trust.ts
+A  mobile/src/tasks/smart-source-fan-out.test.ts
+A  mobile/src/tasks/smart-source-fan-out.ts
+A  mobile/src/tasks/smart-source-paste-intent.test.ts
+A  mobile/src/tasks/smart-source-paste-intent.ts
+A  mobile/src/tasks/smart-source-search-requests.test.ts
+A  mobile/src/tasks/smart-source-search-requests.ts
+A  mobile/src/tasks/source-workspace-create.test.ts
+A  mobile/src/tasks/source-workspace-create.ts
+A  mobile/src/tasks/use-mobile-composer-source.ts
+A  mobile/src/tasks/use-smart-workspace-source.ts
+A  mobile/src/tasks/work-item-lookup-text.test.ts
+A  mobile/src/tasks/work-item-lookup-text.ts
+M  mobile/src/tasks/workspace-create-params.test.ts
+UU mobile/src/tasks/workspace-create-params.ts
+A  mobile/src/tasks/worktree-create-retry.ts
+M  mobile/src/terminal/TerminalWebView.tsx
+A  mobile/src/terminal/mobile-terminal-query-reply.test.ts
+A  mobile/src/terminal/mobile-terminal-query-reply.ts
+M  mobile/src/terminal/terminal-foreground-recovery.test.ts
+M  mobile/src/terminal/terminal-foreground-recovery.ts
+M  mobile/src/terminal/terminal-viewport-refit-state.ts
+M  mobile/src/terminal/terminal-viewport-refit.test.ts
+M  mobile/src/terminal/terminal-viewport-refit.ts
+M  mobile/src/terminal/terminal-webview-contract.ts
+M  mobile/src/terminal/terminal-webview-engine-error.test.ts
+M  mobile/src/terminal/terminal-webview-engine.test.ts
+M  mobile/src/terminal/terminal-webview-html.ts
+M  mobile/src/terminal/terminal-webview-messages.ts
+A  mobile/src/terminal/terminal-webview-query-reply-injected.ts
+A  mobile/src/terminal/terminal-webview-query-reply-routing.test.ts
+A  mobile/src/terminal/terminal-webview-query-reply-routing.ts
+A  mobile/src/terminal/terminal-webview-query-reply.test.ts
+M  mobile/src/terminal/terminal-webview-text-zoom.test.ts
+A  mobile/src/terminal/terminal-webview-theme-injected.ts
+A  mobile/src/terminal/terminal-webview-webgl-recovery-injected.ts
+A  mobile/src/transport/client-context-connection-metrics.ts
+M  mobile/src/transport/client-context.test.ts
+M  mobile/src/transport/client-context.tsx
+A  mobile/src/transport/host-client-open-registry.ts
+A  mobile/src/transport/host-credential-cleanup.test.ts
+A  mobile/src/transport/host-credential-cleanup.ts
+A  mobile/src/transport/host-logical-client.ts
+A  mobile/src/transport/host-removal-lifecycle.test.ts
+A  mobile/src/transport/host-removal-lifecycle.ts
+A  mobile/src/transport/host-store.test.ts
+M  mobile/src/transport/host-store.ts
+A  mobile/src/transport/mobile-connection-path-label.test.ts
+A  mobile/src/transport/mobile-connection-path-label.ts
+A  mobile/src/transport/mobile-direct-endpoint-probe.ts
+A  mobile/src/transport/mobile-e2ee-legacy-fixtures.test.ts
+A  mobile/src/transport/mobile-e2ee-v2-client-session.test.ts
+A  mobile/src/transport/mobile-e2ee-v2-client-session.ts
+A  mobile/src/transport/mobile-e2ee-v2-key-schedule.test.ts
+A  mobile/src/transport/mobile-e2ee-v2-key-schedule.ts
+A  mobile/src/transport/mobile-e2ee-v2-physical-channel.test.ts
+A  mobile/src/transport/mobile-e2ee-v2-physical-channel.ts
+A  mobile/src/transport/mobile-endpoint-hysteresis.test.ts
+A  mobile/src/transport/mobile-endpoint-hysteresis.ts
+A  mobile/src/transport/mobile-endpoint-lifecycle.ts
+A  mobile/src/transport/mobile-endpoint-supervisor-support.ts
+A  mobile/src/transport/mobile-endpoint-supervisor.test.ts
+A  mobile/src/transport/mobile-endpoint-supervisor.ts
+A  mobile/src/transport/mobile-relay-credential-bundle.test.ts
+A  mobile/src/transport/mobile-relay-credential-bundle.ts
+A  mobile/src/transport/mobile-relay-credential-hash.test.ts
+A  mobile/src/transport/mobile-relay-credential-hash.ts
+A  mobile/src/transport/mobile-relay-credential-rotation.test.ts
+A  mobile/src/transport/mobile-relay-credential-rotation.ts
+A  mobile/src/transport/mobile-relay-direct-upgrade-controller.test.ts
+A  mobile/src/transport/mobile-relay-direct-upgrade-controller.ts
+A  mobile/src/transport/mobile-relay-direct-upgrade-journal.ts
+A  mobile/src/transport/mobile-relay-direct-upgrade.test.ts
+A  mobile/src/transport/mobile-relay-direct-upgrade.ts
+A  mobile/src/transport/mobile-relay-e2ee-link.ts
+A  mobile/src/transport/mobile-relay-host-overlay-store.test.ts
+A  mobile/src/transport/mobile-relay-host-overlay-store.ts
+A  mobile/src/transport/mobile-relay-host-overlay.ts
+A  mobile/src/transport/mobile-relay-invite-director.test.ts
+A  mobile/src/transport/mobile-relay-invite-director.ts
+A  mobile/src/transport/mobile-relay-orphan-cleanup.test.ts
+A  mobile/src/transport/mobile-relay-orphan-cleanup.ts
+A  mobile/src/transport/mobile-relay-pairing-journal-store.test.ts
+A  mobile/src/transport/mobile-relay-pairing-journal-store.ts
+A  mobile/src/transport/mobile-relay-pairing-journal.ts
+A  mobile/src/transport/mobile-relay-pairing-offer.test.ts
+A  mobile/src/transport/mobile-relay-pairing-recovery.test.ts
+A  mobile/src/transport/mobile-relay-pairing-recovery.ts
+A  mobile/src/transport/mobile-relay-physical-client.test.ts
+A  mobile/src/transport/mobile-relay-physical-client.ts
+A  mobile/src/transport/mobile-relay-resume-director.test.ts
+A  mobile/src/transport/mobile-relay-resume-director.ts
+A  mobile/src/transport/mobile-relay-rpc-session.test.ts
+A  mobile/src/transport/mobile-relay-rpc-session.ts
+A  mobile/src/transport/mobile-relay-rpc-streams.ts
+A  mobile/src/transport/pairing-candidate-race.ts
+A  mobile/src/transport/pairing-relay-candidate.test.ts
+A  mobile/src/transport/pairing-relay-candidate.ts
+A  mobile/src/transport/pairing-relay-served-recovery.test.ts
+A  mobile/src/transport/pre-profile-pairing-coordinator.test.ts
+A  mobile/src/transport/pre-profile-pairing-coordinator.ts
+A  mobile/src/transport/protocol-compat.test.ts
+A  mobile/src/transport/rpc-client-runtime-events.test.ts
+M  mobile/src/transport/rpc-client.ts
+M  mobile/src/transport/rpc-response-shape.test.ts
+A  mobile/src/transport/stable-logical-rpc-client.test.ts
+A  mobile/src/transport/stable-logical-rpc-client.ts
+M  mobile/src/transport/types.ts
+A  mobile/src/transport/use-worktree-resync.ts
+... omitted 1553 additional status records to keep remediation payloads within GitHub limits.
+```
+
+## Axiom safety notes
+- Bot branch PR only; do not push conflict remediation directly to `axiom/deploy`.
+- Preserve side-by-side identity, updater feed, fork semver, profile portability, and Forge provider/task-registry additions.
+- Protected-file deletion or fork identity/update-feed changes require explicit review before merge.
+
+## Verification checklist
+- [ ] `pnpm install --frozen-lockfile`
+- [ ] `pnpm run typecheck`
+- [ ] `pnpm exec vitest run --config config/vitest.config.ts src/shared/task-providers.test.ts src/main/axiom-release-hardening.test.ts src/main/updater-endpoints.test.ts src/main/app-build-identity.test.ts config/scripts/axiom-upstream-sync-release.test.mjs`
+- [ ] `pnpm exec oxlint config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml`
+- [ ] `pnpm exec oxfmt --check config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml config/axiom-merge-remediation-policy.json`
+- [ ] `git diff --check`
+
