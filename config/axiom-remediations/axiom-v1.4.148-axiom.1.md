@@ -1,0 +1,301 @@
+## Axiom Orca upstream sync remediation
+
+- Original Actions run: https://github.com/Codename-11/orca/actions/runs/29856095018
+- Upstream ref/tag: v1.4.148
+- Intended Axiom version/tag: 1.4.148-axiom.1 / axiom-v1.4.148-axiom.1
+- Target branch: `axiom/deploy`
+- Bot branch: `bot/upstream-sync-axiom-v1.4.148-axiom.1`
+- Classification: `auto_remediate` — Fork identity/update-feed files need policy-guided agent remediation: mobile/app.json
+
+## Conflicted files
+- `docs/reference/README.md`
+- `mobile/app.json`
+- `mobile/app/h/[hostId]/tasks.tsx`
+- `mobile/app/index.tsx`
+- `mobile/app/settings.tsx`
+- `mobile/pnpm-lock.yaml`
+- `mobile/src/tasks/workspace-create-params.ts`
+- `package.json`
+- `resources/win32/bin/orca.cmd`
+- `skills/orca-cli/SKILL.md`
+- `src/cli/args.ts`
+- `src/main/cli/wsl-cli-installer.ts`
+- `src/main/index.ts`
+- `src/main/runtime/orca-runtime.ts`
+- `src/main/runtime/rpc/methods/client-ui.test.ts`
+- `src/main/runtime/rpc/methods/terminal.ts`
+- `src/renderer/src/components/Terminal.tsx`
+- `src/renderer/src/components/UpdateCard.tsx`
+- `src/renderer/src/components/terminal-pane/pty-dispatcher.ts`
+- `src/renderer/src/components/terminal-pane/terminal-url-link-hit-testing.ts`
+- `src/renderer/src/lib/launch-agent-background-session.ts`
+- `tests/e2e/helpers/orca-app.ts`
+
+## Captured git status
+```
+M  .gitattributes
+M  .github/ISSUE_TEMPLATE/bug_report.yml
+M  .github/ISSUE_TEMPLATE/feature_request.yml
+M  .github/workflows/computer-e2e.yml
+M  .github/workflows/e2e.yml
+M  .github/workflows/golden-e2e-experiment.yml
+M  .github/workflows/mobile.yml
+M  .github/workflows/pr.yml
+M  .github/workflows/release-cut.yml
+M  .github/workflows/release-mac-build.yml
+A  .github/workflows/skill-update-roundtrip.yml
+A  .github/workflows/win-crash-survival-e2e.yml
+M  .github/workflows/win-update-survival-e2e.yml
+A  .github/workflows/windows-terminal-restart-e2e.yml
+M  .gitignore
+M  .npmrc
+M  AGENTS.md
+M  README.md
+M  config/electron-builder.config.cjs
+M  config/max-lines-baseline.txt
+M  config/packaged-runtime-node-modules.cjs
+M  config/patches/@xterm__addon-webgl@0.20.0-beta.286.patch
+A  config/patches/@xterm__xterm@6.1.0-beta.287.patch
+M  config/reliability-gates.jsonc
+M  config/scripts/audit-localization-coverage.mjs
+M  config/scripts/build-native-for-platform.mjs
+M  config/scripts/build-relay.mjs
+A  config/scripts/build-windows-cli-launcher.mjs
+A  config/scripts/build-windows-cli-launcher.test.mjs
+M  config/scripts/check-terminal-perf-report-budgets.mjs
+M  config/scripts/check-terminal-perf-report-budgets.test.mjs
+M  config/scripts/computer-use-skill-guidance.test.mjs
+M  config/scripts/daemon-boot-smoke.mjs
+M  config/scripts/electron-builder-config.test.mjs
+M  config/scripts/electron-builder-native-rebuild.cjs
+M  config/scripts/electron-builder-native-rebuild.test.mjs
+M  config/scripts/ensure-native-runtime.mjs
+M  config/scripts/ensure-native-runtime.test.mjs
+A  config/scripts/generate-bundled-skill-guides.mjs
+A  config/scripts/generate-bundled-skill-guides.test.mjs
+A  config/scripts/generate-skill-bundle-manifest.mjs
+A  config/scripts/generate-skill-bundle-manifest.test.mjs
+M  config/scripts/locale-zh-value-overrides.mjs
+M  config/scripts/localize-renderer-strings.mjs
+M  config/scripts/orca-cli-skill-guidance.test.mjs
+M  config/scripts/orchestration-skill-guidance.test.mjs
+M  config/scripts/package-electron-runtime-contract.test.mjs
+M  config/scripts/rebuild-native-deps.mjs
+M  config/scripts/rebuild-native-deps.test.mjs
+A  config/scripts/relay-watcher-fault-harness.mjs
+A  config/scripts/run-ssh-docker-watcher-isolation-e2e.mjs
+A  config/scripts/runtime-file-watcher-fault-harness.mjs
+A  config/scripts/runtime-file-watcher-resource-probe.mjs
+D  config/scripts/serve-sim-seen-keys-leak-benchmark.mjs
+M  config/scripts/smoke-packaged-cli.mjs
+M  config/scripts/styled-scrollbars/styled-scrollbar-jsx-check.mjs
+A  config/scripts/verify-agent-hook-stdin-lifecycle.mjs
+M  config/scripts/verify-localization-catalog.mjs
+A  config/scripts/verify-skill-update-roundtrip.mjs
+A  config/scripts/win-crash-survival-e2e.test.mjs
+M  config/scripts/windows-daemon-workspace-close-repro.mjs
+M  config/tsconfig.cli.json
+M  config/tsconfig.tc.web.json
+M  docs/assets/readme-downloads.svg
+M  docs/assets/star-history.png
+D  docs/assets/wechat-qr-backup.jpg
+A  docs/assets/wechat-qr.jpg
+D  docs/assets/wechat-qr.png
+A  docs/bug-reproductions/8979-screenshots/after-fable-visible.png
+A  docs/bug-reproductions/8979-screenshots/before-fable-hidden.png
+A  docs/claude-scoped-oauth-usage-limits.md
+M  docs/readme/README.es.md
+A  docs/readme/README.fr.md
+M  docs/readme/README.ja.md
+M  docs/readme/README.ko.md
+M  docs/readme/README.pt.md
+M  docs/readme/README.zh-CN.md
+D  docs/reference/2026-06-27-orca-mobile-manual-network-address-design.md
+UD docs/reference/README.md
+D  docs/reference/agent-session-resume-cli-evidence.md
+D  docs/reference/direct-url-or-file-entry.md
+D  docs/reference/feature-discovery-interaction-tracking.md
+D  docs/reference/feature-education-retention-analytics.md
+D  docs/reference/feature-education-state.md
+M  docs/reference/git-compatibility.md
+D  docs/reference/keyboard-layout-shortcut-dispatch.md
+D  docs/reference/new-user-parallel-work-telemetry.md
+D  docs/reference/opencode-commit-message-stdin.md
+D  docs/reference/plans/2026-06-27-orca-mobile-manual-network-address.md
+A  docs/reference/plans/2026-07-18-daemon-lifecycle-retirement.md
+A  docs/reference/plans/2026-07-19-windows-conpty-startup-query-and-focus-authority.md
+D  docs/reference/project-ordering-mode.md
+D  docs/reference/reliability-gates-implementation-plan.md
+D  docs/reference/reliability-pain-points-2026-06-30.md
+D  docs/reference/ssh-typing-latency-under-relay-load.md
+D  docs/reference/telemetry-availability.md
+D  docs/reference/terminal-hidden-view-parking.md
+D  docs/reference/terminal-model-view-contract.md
+D  docs/reference/terminal-query-authority.md
+D  docs/reference/terminal-side-effect-authority.md
+D  docs/reference/terminal-switch-typing-lag-investigation.md
+A  docs/wsl-osc7-sleep-wake-cwd.md
+M  electron.vite.config.ts
+UU mobile/app.json
+M  mobile/app/_layout.tsx
+M  mobile/app/connection-log.tsx
+M  mobile/app/h/[hostId]/accounts.tsx
+A  mobile/app/h/[hostId]/edit.tsx
+M  mobile/app/h/[hostId]/index.tsx
+A  mobile/app/h/[hostId]/session/QuickCommandsTabButton.tsx
+M  mobile/app/h/[hostId]/session/[worktreeId].tsx
+M  mobile/app/h/[hostId]/session/mobile-session-frame-styles.ts
+M  mobile/app/h/[hostId]/session/mobile-session-route-types.ts
+UU mobile/app/h/[hostId]/tasks.tsx
+M  mobile/app/h/_layout.tsx
+UU mobile/app/index.tsx
+A  mobile/app/native-chat-settings.tsx
+A  mobile/app/notification-opt-in.tsx
+M  mobile/app/notifications.tsx
+M  mobile/app/pair-confirm.tsx
+M  mobile/app/pair-scan.tsx
+UU mobile/app/settings.tsx
+M  mobile/package.json
+UU mobile/pnpm-lock.yaml
+A  mobile/pnpm-workspace.yaml
+M  mobile/scripts/mock-server-rpc-handlers.ts
+M  mobile/scripts/start-emulator.mjs
+A  mobile/src/cache/worktree-cache.test.ts
+M  mobile/src/components/AccountUsage.tsx
+M  mobile/src/components/ActionSheetModal.tsx
+M  mobile/src/components/BottomDrawer.tsx
+M  mobile/src/components/MobileAgentIcon.tsx
+A  mobile/src/components/MobileHostCard.tsx
+M  mobile/src/components/MobileMarkdown.tsx
+M  mobile/src/components/MobilePRSidebar.tsx
+A  mobile/src/components/MobileSearchField.tsx
+M  mobile/src/components/NewWorktreeModal.tsx
+M  mobile/src/components/NewWorktreeModalController.tsx
+A  mobile/src/components/SetupHookTrustDrawer.tsx
+A  mobile/src/components/SmartSourceModeIcon.tsx
+A  mobile/src/components/SmartWorkspaceAdvancedFields.tsx
+A  mobile/src/components/SmartWorkspaceSourceDrawer.tsx
+A  mobile/src/components/SmartWorkspaceSourceField.tsx
+A  mobile/src/components/SmartWorkspaceSourceRow.tsx
+M  mobile/src/components/account-usage-state.test.ts
+M  mobile/src/components/account-usage-state.ts
+A  mobile/src/components/bottom-drawer-modal-host.tsx
+A  mobile/src/components/markdown-file-path-detection.test.ts
+A  mobile/src/components/markdown-file-path-detection.ts
+A  mobile/src/components/mobile-agent-icon-assets.test.ts
+A  mobile/src/components/mobile-agent-icon-assets.ts
+A  mobile/src/components/mobile-markdown-styles.ts
+A  mobile/src/components/pr-sidebar/PRCommentsSection.test.ts
+M  mobile/src/components/pr-sidebar/PRCommentsSection.tsx
+M  mobile/src/components/pr-sidebar/pr-comment-audience.ts
+M  mobile/src/components/pr-sidebar/pr-comment-presentation.test.ts
+M  mobile/src/dictation/mobile-dictation-setup.test.ts
+M  mobile/src/dictation/mobile-dictation-setup.ts
+A  mobile/src/files/MobileFileMarkdownPreview.test.ts
+M  mobile/src/files/MobileFileMarkdownPreview.tsx
+A  mobile/src/files/mobile-diff-image-preview.test.ts
+A  mobile/src/files/mobile-diff-image-preview.ts
+A  mobile/src/files/mobile-file-tab-doc.test.ts
+A  mobile/src/files/mobile-file-tab-doc.ts
+A  mobile/src/hooks/mobile-dictation-audio-chunk.ts
+A  mobile/src/hooks/mobile-dictation-desktop-start.test.ts
+A  mobile/src/hooks/mobile-dictation-desktop-start.ts
+A  mobile/src/hooks/mobile-dictation-foreground-keep-awake.ts
+A  mobile/src/hooks/mobile-dictation-keep-awake.test.ts
+A  mobile/src/hooks/mobile-dictation-keep-awake.ts
+A  mobile/src/hooks/mobile-dictation-session-state.ts
+M  mobile/src/hooks/use-mobile-dictation-source.test.ts
+M  mobile/src/hooks/use-mobile-dictation.ts
+A  mobile/src/host-edit-route-accessibility.test.ts
+A  mobile/src/host-edit-save-flow.test.ts
+M  mobile/src/notifications/mobile-notifications.test.ts
+M  mobile/src/notifications/mobile-notifications.ts
+A  mobile/src/notifications/notification-opt-in-gate.test.ts
+A  mobile/src/notifications/notification-opt-in-gate.ts
+A  mobile/src/notifications/notification-reconnect-catchup.ts
+A  mobile/src/session/MobileAgentWorkingIndicator.tsx
+A  mobile/src/session/MobileBrowserTabActionSheet.tsx
+A  mobile/src/session/MobileNativeChatAsk.tsx
+A  mobile/src/session/MobileNativeChatComposer.test.ts
+A  mobile/src/session/MobileNativeChatComposer.tsx
+A  mobile/src/session/MobileNativeChatMessage.tsx
+A  mobile/src/session/MobileNativeChatOverlay.tsx
+A  mobile/src/session/MobileNativeChatPermission.test.ts
+A  mobile/src/session/MobileNativeChatPermission.tsx
+A  mobile/src/session/MobileNativeChatQuestion.tsx
+A  mobile/src/session/MobileNativeChatView.tsx
+A  mobile/src/session/QuickCommandEditorForm.tsx
+A  mobile/src/session/QuickCommandsList.test.ts
+A  mobile/src/session/QuickCommandsList.tsx
+A  mobile/src/session/QuickCommandsSheet.test.ts
+A  mobile/src/session/QuickCommandsSheet.tsx
+M  mobile/src/session/TerminalPaneView.tsx
+M  mobile/src/session/ai-vault-resume-launch.test.ts
+M  mobile/src/session/mobile-image-attachment.test.ts
+M  mobile/src/session/mobile-image-attachment.ts
+A  mobile/src/session/mobile-native-chat-answer-stepping.test.ts
+A  mobile/src/session/mobile-native-chat-answer-stepping.ts
+A  mobile/src/session/mobile-native-chat-ask.test.ts
+A  mobile/src/session/mobile-native-chat-ask.ts
+A  mobile/src/session/mobile-native-chat-autocomplete.test.ts
+A  mobile/src/session/mobile-native-chat-autocomplete.ts
+A  mobile/src/session/mobile-native-chat-blocks.test.ts
+A  mobile/src/session/mobile-native-chat-blocks.ts
+A  mobile/src/session/mobile-native-chat-diff.test.ts
+A  mobile/src/session/mobile-native-chat-diff.ts
+A  mobile/src/session/mobile-native-chat-eligibility.test.ts
+A  mobile/src/session/mobile-native-chat-eligibility.ts
+A  mobile/src/session/mobile-native-chat-merge.test.ts
+A  mobile/src/session/mobile-native-chat-merge.ts
+A  mobile/src/session/mobile-native-chat-merger-oracle.test.ts
+A  mobile/src/session/mobile-native-chat-message-styles.ts
+A  mobile/src/session/mobile-native-chat-message-text.test.ts
+A  mobile/src/session/mobile-native-chat-message-text.ts
+A  mobile/src/session/mobile-native-chat-noise.test.ts
+A  mobile/src/session/mobile-native-chat-noise.ts
+A  mobile/src/session/mobile-native-chat-open-file.test.ts
+A  mobile/src/session/mobile-native-chat-open-file.ts
+A  mobile/src/session/mobile-native-chat-permission-send.test.ts
+A  mobile/src/session/mobile-native-chat-permission-send.ts
+A  mobile/src/session/mobile-native-chat-permission.test.ts
+A  mobile/src/session/mobile-native-chat-permission.ts
+A  mobile/src/session/mobile-native-chat-question.test.ts
+A  mobile/src/session/mobile-native-chat-question.ts
+A  mobile/src/session/mobile-native-chat-render-data.test.ts
+A  mobile/src/session/mobile-native-chat-render-data.ts
+A  mobile/src/session/mobile-native-chat-send.test.ts
+A  mobile/src/session/mobile-native-chat-send.ts
+A  mobile/src/session/mobile-native-chat-stream-frame.test.ts
+A  mobile/src/session/mobile-native-chat-stream-frame.ts
+A  mobile/src/session/mobile-native-chat-terminal-stream.test.ts
+A  mobile/src/session/mobile-native-chat-terminal-stream.ts
+A  mobile/src/session/mobile-native-chat-toggle-action.ts
+A  mobile/src/session/mobile-native-chat-tool-summary.test.ts
+A  mobile/src/session/mobile-native-chat-tool-summary.ts
+A  mobile/src/session/mobile-native-chat-view-styles.ts
+M  mobile/src/session/mobile-session-route-helpers.ts
+M  mobile/src/session/mobile-session-startup-source.test.ts
+A  mobile/src/session/mobile-session-tab-activation.test.ts
+A  mobile/src/session/mobile-session-tab-activation.ts
+A  mobile/src/session/mobile-terminal-action-sheet-actions.ts
+A  mobile/src/session/mobile-terminal-diagnostics.test.ts
+A  mobile/src/session/mobile-terminal-diagnostics.ts
+M  mobile/src/session/mobile-terminal-records.test.ts
+M  mobile/src/session/mobile-terminal-records.ts
+A  mobile/src/session/mobile-terminal-stream-subscribe.test.ts
+... omitted 2876 additional status records to keep remediation payloads within GitHub limits.
+```
+
+## Axiom safety notes
+- Bot branch PR only; do not push conflict remediation directly to `axiom/deploy`.
+- Preserve side-by-side identity, updater feed, fork semver, profile portability, and Forge provider/task-registry additions.
+- Protected-file deletion or fork identity/update-feed changes require explicit review before merge.
+
+## Verification checklist
+- [ ] `pnpm install --frozen-lockfile`
+- [ ] `pnpm run typecheck`
+- [ ] `pnpm exec vitest run --config config/vitest.config.ts src/shared/task-providers.test.ts src/main/axiom-release-hardening.test.ts src/main/updater-endpoints.test.ts src/main/app-build-identity.test.ts config/scripts/axiom-upstream-sync-release.test.mjs`
+- [ ] `pnpm exec oxlint config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml`
+- [ ] `pnpm exec oxfmt --check config/scripts/axiom-request-merge-remediation.mjs config/scripts/axiom-report-sync-failure.mjs .github/workflows/axiom-upstream-sync-release.yml .github/workflows/axiom-upstream-main-sync.yml config/axiom-merge-remediation-policy.json`
+- [ ] `git diff --check`
+
